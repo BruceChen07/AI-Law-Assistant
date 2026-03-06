@@ -1,0 +1,14 @@
+2026-03-06 20:17:33,802 | INFO | service_start db=..\data\app.db embedding_ready=False
+2026-03-06 20:17:33,860 | INFO | service_start db=..\data\app.db embedding_ready=False
+2026-03-06 20:18:04,902 | INFO | import_queued job_id=ea65eda7-3ea2-4a0d-8e91-b6c991d29261 filename=中华人民共和国增值税法.docx
+2026-03-06 20:18:04,903 | INFO | http POST /regulations/import status=200 cost_ms=8
+2026-03-06 20:18:04,905 | INFO | import_start job_id=ea65eda7-3ea2-4a0d-8e91-b6c991d29261 file=..\data\files\ea65eda7-3ea2-4a0d-8e91-b6c991d29261.docx
+2026-03-06 20:18:04,929 | INFO | import_done job_id=ea65eda7-3ea2-4a0d-8e91-b6c991d29261 version_id=0d1928b5-2349-46f5-b8bf-47a551ea19a0 article_count=39
+2026-03-06 20:18:06,937 | INFO | http GET /regulations/import/ea65eda7-3ea2-4a0d-8e91-b6c991d29261 status=200 cost_ms=1
+2026-03-06 20:18:27,963 | INFO | http OPTIONS /regulations/search status=200 cost_ms=0
+2026-03-06 20:18:27,966 | INFO | search_start query=哪些项目可以免征增值税 top_k=10 semantic=True
+2026-03-06 20:18:27,969 | INFO | search_done query=哪些项目可以免征增值税 results=0
+2026-03-06 20:18:27,969 | INFO | http POST /regulations/search status=200 cost_ms=3
+2026-03-06 20:18:32,066 | INFO | search_start query=哪些项目可以免征增值税 top_k=10 semantic=True
+2026-03-06 20:18:32,067 | INFO | search_done query=哪些项目可以免征增值税 results=0
+2026-03-06 20:18:32,068 | INFO | http POST /regulations/search status=200 cost_ms=2
