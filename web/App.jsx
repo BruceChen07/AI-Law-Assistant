@@ -25,7 +25,7 @@ export default function App() {
 
   const i18n = {
     zh: {
-      appTitle: "法规助手 POC",
+      appTitle: "法规助手",
       uiLanguage: "界面语言",
       importTitle: "法规导入",
       searchTitle: "检索",
@@ -40,7 +40,7 @@ export default function App() {
       noAnswer: "未提取到直接答案，请优化关键词。"
     },
     en: {
-      appTitle: "Law Assistant POC",
+      appTitle: "Law Assistant",
       uiLanguage: "UI Language",
       importTitle: "Regulation Import",
       searchTitle: "Search",
@@ -115,13 +115,13 @@ export default function App() {
         <h2>{t.importTitle}</h2>
         <form onSubmit={onUpload} className="grid">
           <input placeholder={uiLang === "zh" ? "标题" : "Title"} value={upload.title} onChange={e => setUpload({ ...upload, title: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "文号" : "Doc No"} value={upload.doc_no} onChange={e => setUpload({ ...upload, doc_no: e.target.value })} />
+          <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={upload.doc_no} onChange={e => setUpload({ ...upload, doc_no: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "发布机构" : "Issuer"} value={upload.issuer} onChange={e => setUpload({ ...upload, issuer: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "类型" : "Type"} value={upload.reg_type} onChange={e => setUpload({ ...upload, reg_type: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "生效日期 yyyy-mm-dd" : "Effective Date yyyy-mm-dd"} value={upload.effective_date} onChange={e => setUpload({ ...upload, effective_date: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={upload.expiry_date} onChange={e => setUpload({ ...upload, expiry_date: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={upload.region} onChange={e => setUpload({ ...upload, region: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "行业" : "Industry"} value={upload.industry} onChange={e => setUpload({ ...upload, industry: e.target.value })} />
+          <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={upload.industry} onChange={e => setUpload({ ...upload, industry: e.target.value })} />
           <input type="file" onChange={e => setFile(e.target.files?.[0] || null)} />
           <button type="submit">{t.uploadBtn}</button>
         </form>
@@ -137,7 +137,7 @@ export default function App() {
           <input placeholder={uiLang === "zh" ? "问题" : "Query"} value={query.query} onChange={e => setQuery({ ...query, query: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "日期 yyyy-mm-dd" : "Date yyyy-mm-dd"} value={query.date} onChange={e => setQuery({ ...query, date: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={query.region} onChange={e => setQuery({ ...query, region: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "行业" : "Industry"} value={query.industry} onChange={e => setQuery({ ...query, industry: e.target.value })} />
+          <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={query.industry} onChange={e => setQuery({ ...query, industry: e.target.value })} />
           <label><input type="checkbox" checked={query.use_semantic} onChange={e => setQuery({ ...query, use_semantic: e.target.checked })} /> {t.semantic}</label>
           <input placeholder="Semantic Weight (0-1)" value={query.semantic_weight} onChange={e => setQuery({ ...query, semantic_weight: parseFloat(e.target.value||"0") })} />
           <input placeholder="BM25 Weight (0-1)" value={query.bm25_weight} onChange={e => setQuery({ ...query, bm25_weight: parseFloat(e.target.value||"0") })} />

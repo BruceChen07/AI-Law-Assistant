@@ -12,3 +12,125 @@
 2026-03-06 20:18:32,066 | INFO | search_start query=哪些项目可以免征增值税 top_k=10 semantic=True
 2026-03-06 20:18:32,067 | INFO | search_done query=哪些项目可以免征增值税 results=0
 2026-03-06 20:18:32,068 | INFO | http POST /regulations/search status=200 cost_ms=2
+2026-03-07 19:23:31,403 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 19:23:31,404 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 19:23:31,404 | INFO | service_start db=..\data\app.db embedding_ready=False langs=[]
+2026-03-07 19:24:55,302 | INFO | http GET / status=404 cost_ms=1
+2026-03-07 19:24:55,530 | INFO | http GET /favicon.ico status=404 cost_ms=0
+2026-03-07 19:36:16,223 | INFO | http GET / status=404 cost_ms=1
+2026-03-07 19:36:16,527 | INFO | http GET /favicon.ico status=404 cost_ms=0
+2026-03-07 19:36:22,658 | INFO | http GET /health status=200 cost_ms=5
+2026-03-07 19:36:40,104 | INFO | http GET /docs status=200 cost_ms=0
+2026-03-07 19:36:44,188 | INFO | http GET /openapi.json status=200 cost_ms=37
+2026-03-07 19:42:53,047 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 19:42:53,048 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 19:42:53,048 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 19:42:53,099 | INFO | http GET /health status=200 cost_ms=1
+2026-03-07 19:42:53,106 | INFO | http GET /regulations status=200 cost_ms=2
+2026-03-07 19:42:53,112 | INFO | http POST /regulations/search status=200 cost_ms=1
+2026-03-07 19:42:53,116 | INFO | http GET /embeddings/info status=200 cost_ms=1
+2026-03-07 19:43:31,330 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 19:43:31,331 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 19:43:31,331 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 19:43:50,589 | INFO | http GET /health status=200 cost_ms=1
+2026-03-07 19:44:03,259 | INFO | http GET /docs status=200 cost_ms=0
+2026-03-07 19:44:07,522 | INFO | http GET /openapi.json status=200 cost_ms=13
+2026-03-07 19:44:07,528 | INFO | http GET /@vite/client status=404 cost_ms=0
+2026-03-07 20:00:54,881 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 20:00:54,881 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 20:00:54,882 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 20:01:40,852 | INFO | http GET /docs status=200 cost_ms=0
+2026-03-07 20:01:41,029 | INFO | http GET /openapi.json status=200 cost_ms=0
+2026-03-07 20:01:41,152 | INFO | http GET /@vite/client status=404 cost_ms=0
+2026-03-07 20:01:50,787 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 20:01:50,787 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 20:01:50,787 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 20:03:08,837 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 20:03:08,838 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 20:03:08,838 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 20:03:29,031 | INFO | http GET /health status=200 cost_ms=2
+2026-03-07 20:03:44,488 | INFO | http GET /docs status=200 cost_ms=0
+2026-03-07 20:03:44,624 | INFO | http GET /openapi.json status=200 cost_ms=21
+2026-03-07 20:03:44,625 | INFO | http GET /@vite/client status=404 cost_ms=0
+2026-03-07 20:08:45,529 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 20:08:45,529 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 20:08:45,530 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 20:19:23,094 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 20:19:23,094 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 20:19:23,094 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 20:19:51,275 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-07 20:19:51,276 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-07 20:19:51,276 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-07 20:19:51,386 | INFO | http GET /health status=200 cost_ms=2
+2026-03-07 20:19:51,400 | INFO | http GET /regulations status=200 cost_ms=4
+2026-03-07 20:19:51,413 | INFO | http POST /regulations/search status=200 cost_ms=2
+2026-03-07 20:19:51,424 | INFO | http GET /embeddings/info status=200 cost_ms=3
+2026-03-10 13:54:06,014 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 13:54:06,014 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 13:54:06,015 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 13:54:35,112 | INFO | http GET / status=404 cost_ms=0
+2026-03-10 13:54:35,253 | INFO | http GET /favicon.ico status=404 cost_ms=0
+2026-03-10 13:56:49,555 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 13:56:49,555 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 13:56:49,556 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 13:56:49,602 | INFO | http GET /health status=200 cost_ms=1
+2026-03-10 13:56:49,610 | INFO | http GET /regulations status=200 cost_ms=2
+2026-03-10 13:56:49,615 | INFO | http POST /regulations/search status=200 cost_ms=1
+2026-03-10 13:56:49,620 | INFO | http GET /embeddings/info status=200 cost_ms=1
+2026-03-10 13:57:07,886 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 13:57:07,887 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 13:57:07,887 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 13:57:26,483 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 13:57:26,484 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 13:57:26,484 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 13:57:26,527 | INFO | http GET / status=307 cost_ms=0
+2026-03-10 13:58:48,468 | INFO | http GET / status=404 cost_ms=0
+2026-03-10 13:58:56,087 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 13:58:56,087 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 13:58:56,087 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 13:58:57,231 | INFO | http GET / status=307 cost_ms=1
+2026-03-10 13:58:57,236 | INFO | http GET /docs status=200 cost_ms=0
+2026-03-10 13:59:00,578 | INFO | http GET /openapi.json status=200 cost_ms=20
+2026-03-10 14:00:51,518 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 14:00:51,518 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:00:51,518 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 14:00:51,563 | INFO | http GET /health status=200 cost_ms=1
+2026-03-10 14:00:51,569 | INFO | http GET /regulations status=200 cost_ms=1
+2026-03-10 14:00:51,573 | INFO | http POST /regulations/search status=200 cost_ms=0
+2026-03-10 14:00:51,578 | INFO | http GET /embeddings/info status=200 cost_ms=1
+2026-03-10 14:01:14,791 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 14:01:14,791 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:01:14,791 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 14:01:14,831 | INFO | http GET / status=200 cost_ms=0
+2026-03-10 14:03:09,466 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 14:03:09,467 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:03:09,467 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 14:03:14,722 | INFO | http GET / status=200 cost_ms=2
+2026-03-10 14:05:29,287 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 14:05:29,287 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:05:29,288 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 14:13:31,358 | WARNING | embedding_model_missing lang=zh path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-zh-v1.5.onnx
+2026-03-10 14:13:31,359 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:13:31,359 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=False langs=[]
+2026-03-10 14:14:52,475 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:14:52,475 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-10 14:17:32,821 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:17:32,822 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-10 14:46:10,669 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 14:46:10,670 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-10 14:47:13,296 | INFO | http GET / status=200 cost_ms=3
+2026-03-10 14:47:13,457 | INFO | http GET /favicon.ico status=404 cost_ms=0
+2026-03-10 14:48:19,727 | INFO | http POST /regulations/import status=200 cost_ms=11
+2026-03-10 14:48:19,728 | INFO | import_start job_id=e268c8f0-f5d6-45ba-812d-babfcf7b30ce file=D:\Workspace\AI-Law-Assistant\data\files\e268c8f0-f5d6-45ba-812d-babfcf7b30ce.docx
+2026-03-10 14:48:21,194 | INFO | http GET /regulations/import/e268c8f0-f5d6-45ba-812d-babfcf7b30ce status=200 cost_ms=4
+2026-03-10 14:48:30,558 | INFO | import_embedding_lang job_id=e268c8f0-f5d6-45ba-812d-babfcf7b30ce language=zh
+2026-03-10 14:48:30,562 | INFO | import_done job_id=e268c8f0-f5d6-45ba-812d-babfcf7b30ce version_id=74afb3bc-5a3c-4af2-bcfb-753aa5d2cf3b article_count=39
+2026-03-10 14:48:39,295 | INFO | http GET /regulations/import/e268c8f0-f5d6-45ba-812d-babfcf7b30ce status=200 cost_ms=1
+2026-03-10 14:49:41,259 | INFO | http OPTIONS /regulations/search status=200 cost_ms=0
+2026-03-10 14:49:41,262 | INFO | search_start query=境内单位和个人跨境销售国务院规定范围内的服务、无形资产税率是多少 lang=zh active_lang=zh top_k=10 semantic=True model_id=BAAI/bge-small-zh-v1.5
+2026-03-10 14:49:41,265 | INFO | bm25_candidates query=境内单位和个人跨境销售国务院规定范围内的服务、无形资产税率是多少 count=0
+2026-03-10 14:49:41,440 | INFO | semantic_candidates query=境内单位和个人跨境销售国务院规定范围内的服务、无形资产税率是多少 count=39
+2026-03-10 14:49:41,441 | INFO | search_done query=境内单位和个人跨境销售国务院规定范围内的服务、无形资产税率是多少 results=10
+2026-03-10 14:49:41,443 | INFO | http POST /regulations/search status=200 cost_ms=181
+2026-03-10 15:47:23,486 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 15:47:23,487 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
