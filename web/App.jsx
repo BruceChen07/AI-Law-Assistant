@@ -16,6 +16,7 @@ export default function App() {
     language: "zh"
   })
   const [file, setFile] = useState(null)
+  const [fileError, setFileError] = useState("")
   const [jobId, setJobId] = useState("")
   const [jobStatus, setJobStatus] = useState("")
   const [query, setQuery] = useState({ query: "", language: "zh", top_k: 10, date: "", region: "", industry: "", use_semantic: true, semantic_weight: 0.6, bm25_weight: 0.4, candidate_size: 200 })
@@ -37,7 +38,8 @@ export default function App() {
       result: "检索结果",
       topAnswer: "最佳答案",
       noMatch: "未匹配到条款，请尝试更宽泛关键词或取消筛选。",
-      noAnswer: "未提取到直接答案，请优化关键词。"
+      noAnswer: "未提取到直接答案，请优化关键词。",
+      invalidFileType: "文档格式不对，请上传 docx 或 pdf 文档。"
     },
     en: {
       appTitle: "Law Assistant",
@@ -52,7 +54,8 @@ export default function App() {
       result: "Search Result",
       topAnswer: "Top Answer",
       noMatch: "No matched articles. Try broader keywords or disable filters.",
-      noAnswer: "No direct answer extracted, please refine keywords."
+      noAnswer: "No direct answer extracted, please refine keywords.",
+      invalidFileType: "Invalid file type. Please upload docx or pdf documents."
     }
   }
   const t = i18n[uiLang]
@@ -60,6 +63,12 @@ export default function App() {
   const onUpload = async (e) => {
     e.preventDefault()
     if (!file) return
+    const ext = file.name.toLowerCase().split('.').pop()
+    if (!['docx', 'pdf'].includes(ext)) {
+      setFileError(t.invalidFileType)
+      return
+    }
+    setFileError("")
     const form = new FormData()
     Object.entries(upload).forEach(([k, v]) => form.append(k, v))
     form.append("file", file)
@@ -122,7 +131,12 @@ export default function App() {
           <input placeholder={uiLang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={upload.expiry_date} onChange={e => setUpload({ ...upload, expiry_date: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={upload.region} onChange={e => setUpload({ ...upload, region: e.target.value })} />
           <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={upload.industry} onChange={e => setUpload({ ...upload, industry: e.target.value })} />
-          <input type="file" onChange={e => setFile(e.target.files?.[0] || null)} />
+          <input type="file" accept=".docx,.pdf" onChange={e => {
+            const f = e.target.files?.[0] || null
+            setFile(f)
+            setFileError("")
+          }} />
+          {fileError && <span style={{color: 'red'}}>{fileError}</span>}
           <button type="submit">{t.uploadBtn}</button>
         </form>
         <div className="row">

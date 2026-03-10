@@ -31,6 +31,8 @@ def build_router(cfg, embedder):
         job_id = str(uuid.uuid4())
         insert_job(cfg, job_id)
         ext = os.path.splitext(file.filename)[1].lower()
+        if ext not in [".docx", ".pdf"]:
+            raise HTTPException(status_code=400, detail="unsupported file type, only docx and pdf are allowed")
         save_path = os.path.join(cfg["files_dir"], f"{job_id}{ext}")
         with open(save_path, "wb") as f:
             f.write(await file.read())
