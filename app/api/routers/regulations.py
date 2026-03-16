@@ -40,7 +40,7 @@ def build_router(cfg, embedder):
             f.write(await file.read())
         # record document for admin dashboard
         doc_id = str(uuid.uuid4())
-        insert_document(
+        doc_id = insert_document(
             cfg,
             doc_id=doc_id,
             filename=os.path.basename(save_path),

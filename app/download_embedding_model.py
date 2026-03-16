@@ -77,8 +77,8 @@ def main():
         cfg.setdefault("default_language", "zh")
         profiles = cfg.setdefault("embedding_profiles", {})
         profile = profiles.setdefault(args.language, {})
-        profile["embedding_model"] = os.path.relpath(str(onnx_dst), app_dir).replace("/", "\\")
-        profile["embedding_tokenizer_dir"] = os.path.relpath(str(target_dir), app_dir).replace("/", "\\")
+        profile["embedding_model"] = os.path.relpath(str(onnx_dst), app_dir)
+        profile["embedding_tokenizer_dir"] = os.path.relpath(str(target_dir), app_dir)
         profile["embedding_model_id"] = args.model_id
         profile["embedding_source"] = "modelscope"
         profile.setdefault("embedding_max_seq_len", 512)

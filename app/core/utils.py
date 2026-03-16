@@ -10,6 +10,8 @@ APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 def resolve_path(p: str, base_dir: str = APP_ROOT) -> str:
     if not p:
         return ""
+    # Normalize path separators
+    p = p.replace("\\", os.sep).replace("/", os.sep)
     if os.path.isabs(p):
         return p
     return os.path.abspath(os.path.join(base_dir, p))

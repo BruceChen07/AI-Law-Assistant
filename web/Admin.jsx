@@ -161,7 +161,13 @@ export default function Admin({ onBack, lang }) {
   }
   
   const formatDate = (dateStr) => {
-    return new Date(dateStr).toLocaleString()
+    if (!dateStr) return "-"
+    // Backend returns UTC time without 'Z'. Append 'Z' to treat as UTC.
+    let utcStr = dateStr
+    if (!utcStr.endsWith("Z") && !utcStr.includes("+")) {
+      utcStr += "Z"
+    }
+    return new Date(utcStr).toLocaleString()
   }
   
   if (!admin) {

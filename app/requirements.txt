@@ -12,3 +12,5 @@ bcrypt==4.0.1
 passlib==1.7.4
 python-multipart==0.0.6
 email-validator==2.1.0.post1
+torch==2.5.1
+onnx==1.17.0

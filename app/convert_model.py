@@ -18,18 +18,26 @@ def main():
     # Output directory
     # Use absolute path to avoid confusion
     base_dir = Path(os.getcwd())
+    # Fixed path structure: models/embedding/zh
     output_dir = base_dir / "models" / "embedding" / "zh"
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     # Copy tokenizer files
     print(f"Copying files from {cache_dir} to {output_dir}")
-    for file in Path(cache_dir).glob("*"):
-        if file.is_file() and (file.name.startswith("tokenizer") or file.name.endswith(".txt") or file.name.endswith(".json")):
+    src_path = Path(cache_dir)
+    # Copy all necessary config/tokenizer files
+    allow_list = [
+        "config.json", "tokenizer.json", "tokenizer_config.json", 
+        "vocab.txt", "special_tokens_map.json", "modules.json"
+    ]
+    
+    for item in src_path.iterdir():
+        if item.name in allow_list or item.name.endswith(".txt"):
             try:
-                shutil.copy2(file, output_dir / file.name)
+                shutil.copy2(item, output_dir / item.name)
             except Exception as e:
-                print(f"Failed to copy {file.name}: {e}")
-    print("Copied tokenizer files")
+                print(f"Warning: Failed to copy {item.name}: {e}")
 
     # Convert to ONNX
     print("Loading model for conversion...")
@@ -37,9 +45,25 @@ def main():
     model = AutoModel.from_pretrained(cache_dir)
     model.eval()
 
-    dummy_input = tokenizer("预热文本", return_tensors="pt")
+    # Create dummy input
+    dummy_input = tokenizer("预热文本", return_tensors="pt", padding=True, truncation=True, max_length=512)
+    
     input_names = ["input_ids", "attention_mask", "token_type_ids"]
     output_names = ["last_hidden_state", "pooler_output"]
+    
+    # Check if model expects token_type_ids
+    model_inputs = (dummy_input["input_ids"], dummy_input["attention_mask"])
+    dynamic_axes = {
+        "input_ids": {0: "batch_size", 1: "sequence_length"},
+        "attention_mask": {0: "batch_size", 1: "sequence_length"}
+    }
+    
+    if "token_type_ids" in dummy_input:
+        model_inputs = (dummy_input["input_ids"], dummy_input["attention_mask"], dummy_input["token_type_ids"])
+        dynamic_axes["token_type_ids"] = {0: "batch_size", 1: "sequence_length"}
+    else:
+        # Remove token_type_ids from input_names if not present
+        input_names = ["input_ids", "attention_mask"]
 
     onnx_path = output_dir / "model.onnx"
     print(f"Exporting ONNX to {onnx_path}...")
@@ -47,20 +71,19 @@ def main():
     try:
         torch.onnx.export(
             model,
-            (dummy_input["input_ids"], dummy_input["attention_mask"], dummy_input["token_type_ids"]),
+            model_inputs,
             str(onnx_path),
             input_names=input_names,
             output_names=output_names,
-            dynamic_axes={
-                "input_ids": {0: "batch_size", 1: "sequence_length"},
-                "attention_mask": {0: "batch_size", 1: "sequence_length"},
-                "token_type_ids": {0: "batch_size", 1: "sequence_length"}
-            },
-            opset_version=14
+            dynamic_axes=dynamic_axes,
+            opset_version=14,
+            do_constant_folding=True
         )
         print("ONNX export complete.")
     except Exception as e:
         print(f"Export failed: {e}")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     main()

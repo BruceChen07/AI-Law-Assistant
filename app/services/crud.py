@@ -82,24 +82,42 @@ def insert_document(cfg, doc_id, filename, original_filename, file_path, file_si
                     title=None, category=None, status="active"):
     conn = get_conn(cfg)
     cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO documents (id, filename, original_filename, file_path, file_size, mime_type, user_id, title, category, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            doc_id,
-            filename,
-            original_filename,
-            file_path,
-            int(file_size),
-            mime_type,
-            user_id,
-            title,
-            category,
-            status,
-            datetime.utcnow().isoformat(),
-        ),
-    )
+    
+    # Check if document with same original_filename already exists
+    cur.execute("SELECT id FROM documents WHERE original_filename = ? AND status = 'active'", (original_filename,))
+    row = cur.fetchone()
+    
+    if row:
+        # Update existing document
+        existing_id = row[0]
+        cur.execute("""
+            UPDATE documents 
+            SET filename=?, file_path=?, file_size=?, mime_type=?, user_id=?, 
+                title=?, category=?, created_at=?
+            WHERE id=?
+        """, (filename, file_path, int(file_size), mime_type, user_id, 
+              title, category, datetime.utcnow().isoformat(), existing_id))
+        doc_id = existing_id
+    else:
+        cur.execute(
+            """
+            INSERT INTO documents (id, filename, original_filename, file_path, file_size, mime_type, user_id, title, category, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                doc_id,
+                filename,
+                original_filename,
+                file_path,
+                int(file_size),
+                mime_type,
+                user_id,
+                title,
+                category,
+                status,
+                datetime.utcnow().isoformat(),
+            ),
+        )
     conn.commit()
     conn.close()
+    return doc_id
