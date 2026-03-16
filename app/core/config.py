@@ -19,6 +19,7 @@ def _normalize_paths(cfg: dict, base_dir: str):
         "files_dir",
         "static_dir",
         "log_dir",
+        "log_base_dir",
         "embedding_model",
         "embedding_tokenizer_dir",
         "reranker_model_path",

@@ -27,9 +27,12 @@
         }
     },
     "log_level": "INFO",
-    "log_dir": "../data/logs",
-    "log_max_bytes": 5242880,
-    "log_backup_count": 3,
+    "log_base_dir": "/Users/bruce/workspace/AI-Law-Assistant/log",
+    "log_dir": "/Users/bruce/workspace/AI-Law-Assistant/log",
+    "log_max_bytes": 10485760,
+    "log_backup_count": 7,
+    "log_when": "midnight",
+    "log_interval": 1,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

@@ -44,6 +44,8 @@ web/.vite/
 data/files/
 data/logs/
 data/app.db
+log/
+app/..\\data\\*
 models/embedding/
 *.onnx
 !models/embedding/zh/model.onnx
