@@ -1,4 +1,5 @@
 import logging
+import hashlib
 import numpy as np
 from fastapi import HTTPException
 from app.core.database import get_conn
@@ -8,7 +9,7 @@ from app.api.schemas import SearchQuery
 logger = logging.getLogger("law_assistant")
 
 
-def search_regulations(cfg, q: SearchQuery, embedder):
+def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     if not q.query.strip():
         return []
     default_lang = embedder.get_registry_status()["default_language"]
@@ -28,7 +29,11 @@ def search_regulations(cfg, q: SearchQuery, embedder):
     tokens = tokenize_query(q.query)
     conn = get_conn(cfg)
     cur = conn.cursor()
-    candidate_n = max(q.top_k, q.candidate_size)
+    candidate_min = 10
+    candidate_max = 200
+    candidate_size = q.candidate_size or candidate_min
+    candidate_size = max(candidate_min, min(candidate_size, candidate_max))
+    candidate_n = max(q.top_k, candidate_size)
 
     bm_sql = """
     SELECT
@@ -148,7 +153,33 @@ def search_regulations(cfg, q: SearchQuery, embedder):
         else:
             r["final_score"] = r["bm25_score"]
     rows.sort(key=lambda x: x.get("final_score", 0), reverse=True)
-    rows = rows[:q.top_k]
+
+    rerank_enabled = q.rerank_enabled if q.rerank_enabled is not None else cfg.get("reranker_enabled", True)
+    if q.rerank_mode == "off":
+        rerank_enabled = False
+    elif q.rerank_mode == "on":
+        rerank_enabled = True
+    elif q.rerank_mode == "ab":
+        h = hashlib.md5(q.query.encode("utf-8")).hexdigest()
+        rerank_enabled = int(h, 16) % 2 == 0
+
+    rerank_top_n = q.rerank_top_n or candidate_size
+    rerank_top_n = max(1, min(rerank_top_n, candidate_n))
+    rerank_fallback = cfg.get("rerank_fallback", True)
+    rerank_threshold = cfg.get("rerank_score_threshold", 0.0) or 0.0
+
+    if rerank_enabled and reranker:
+        candidates = rows[:max(1, min(rerank_top_n, len(rows)))]
+        try:
+            rows = reranker.rerank(q.query, candidates, top_k=q.top_k, lang=lang)
+            if rerank_threshold > 0:
+                rows = [r for r in rows if r.get("rerank_score", 0.0) >= rerank_threshold]
+        except Exception:
+            if not rerank_fallback:
+                raise
+            rows = rows[:q.top_k]
+    else:
+        rows = rows[:q.top_k]
 
     conn.close()
     for r in rows:

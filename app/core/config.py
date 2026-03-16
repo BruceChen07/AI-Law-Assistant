@@ -20,6 +20,7 @@ def _normalize_paths(cfg: dict, base_dir: str):
         "log_dir",
         "embedding_model",
         "embedding_tokenizer_dir",
+        "reranker_model_path",
     ]
     normalized = dict(cfg)
     for key in path_keys:
@@ -38,6 +39,13 @@ def _normalize_paths(cfg: dict, base_dir: str):
             else:
                 normalized_profiles[lang] = profile
         normalized["embedding_profiles"] = normalized_profiles
+
+    reranker_profiles = normalized.get("reranker_profiles")
+    if isinstance(reranker_profiles, dict):
+        normalized_reranker = {}
+        for lang, path in reranker_profiles.items():
+            normalized_reranker[lang] = _resolve_path(base_dir, path)
+        normalized["reranker_profiles"] = normalized_reranker
     return normalized
 
 

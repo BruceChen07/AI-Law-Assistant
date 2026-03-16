@@ -27,7 +27,6 @@ export default function App() {
     title: "",
     doc_no: "",
     issuer: "",
-    reg_type: "",
     status: "current",
     effective_date: "",
     expiry_date: "",
@@ -39,11 +38,12 @@ export default function App() {
   const [fileError, setFileError] = useState("")
   const [jobId, setJobId] = useState("")
   const [jobStatus, setJobStatus] = useState("")
-  const [query, setQuery] = useState({ query: "", language: "zh", top_k: 10, date: "", region: "", industry: "", use_semantic: true, semantic_weight: 0.6, bm25_weight: 0.4, candidate_size: 200 })
+  const [query, setQuery] = useState({ query: "", language: "zh", top_k: 10, date: "", region: "", industry: "", use_semantic: true, semantic_weight: 0.6, bm25_weight: 0.4, candidate_size: 50, rerank_enabled: true, rerank_top_n: 50 })
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
   const [searchError, setSearchError] = useState("")
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const i18n = {
     zh: {
@@ -84,7 +84,10 @@ export default function App() {
       semanticWeight: "Semantic Weight",
       bm25Weight: "BM25 Weight",
       candidateSize: "Candidates",
-      advancedConfig: "Advanced Config"
+      rerankEnabled: "Rerank Enabled",
+      rerankTopN: "Rerank Candidates",
+      advancedConfig: "Advanced Config",
+      advancedToggle: "Show Advanced"
     }
   }
   const t = i18n[uiLang] || i18n.zh
@@ -93,7 +96,10 @@ export default function App() {
     t.semanticWeight = "语义权重"
     t.bm25Weight = "关键词权重"
     t.candidateSize = "召回数量"
+    t.rerankEnabled = "精排启用"
+    t.rerankTopN = "精排候选"
     t.advancedConfig = "高级配置"
+    t.advancedToggle = "展开高级配置"
   }
   const fileInputRef = useRef(null)
 
@@ -182,7 +188,6 @@ export default function App() {
               <input placeholder={uiLang === "zh" ? "标题" : "Title"} value={upload.title} onChange={e => setUpload({ ...upload, title: e.target.value })} />
               <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={upload.doc_no} onChange={e => setUpload({ ...upload, doc_no: e.target.value })} />
               <input placeholder={uiLang === "zh" ? "发布机构" : "Issuer"} value={upload.issuer} onChange={e => setUpload({ ...upload, issuer: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "类型" : "Type"} value={upload.reg_type} onChange={e => setUpload({ ...upload, reg_type: e.target.value })} />
               <input placeholder={uiLang === "zh" ? "生效日期 yyyy-mm-dd" : "Effective Date yyyy-mm-dd"} value={upload.effective_date} onChange={e => setUpload({ ...upload, effective_date: e.target.value })} />
               <input placeholder={uiLang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={upload.expiry_date} onChange={e => setUpload({ ...upload, expiry_date: e.target.value })} />
               <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={upload.region} onChange={e => setUpload({ ...upload, region: e.target.value })} />
@@ -220,49 +225,77 @@ export default function App() {
               <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={query.industry} onChange={e => setQuery({ ...query, industry: e.target.value })} />
               
               <div style={{ gridColumn: "1 / -1", border: "1px solid #eee", padding: "10px", borderRadius: "4px", marginTop: "10px" }}>
-                <div style={{ marginBottom: "10px", fontWeight: "bold" }}>{t.advancedConfig}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", alignItems: "center" }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                    <input type="checkbox" checked={query.use_semantic} onChange={e => setQuery({ ...query, use_semantic: e.target.checked })} /> 
-                    {t.semantic}
-                  </label>
-                  
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <label>{t.semanticWeight}: {query.semantic_weight}</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.1" 
-                      value={query.semantic_weight} 
-                      onChange={e => setQuery({ ...query, semantic_weight: parseFloat(e.target.value) })} 
-                      style={{ width: "100px" }}
-                    />
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <label>{t.bm25Weight}: {query.bm25_weight}</label>
-                    <input 
-                      type="range" 
-                      min="0" 
-                      max="1" 
-                      step="0.1" 
-                      value={query.bm25_weight} 
-                      onChange={e => setQuery({ ...query, bm25_weight: parseFloat(e.target.value) })} 
-                      style={{ width: "100px" }}
-                    />
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <label>{t.candidateSize}:</label>
-                    <input 
-                      type="number" 
-                      value={query.candidate_size} 
-                      onChange={e => setQuery({ ...query, candidate_size: parseInt(e.target.value||"0") })} 
-                      style={{ width: "80px" }}
-                    />
-                  </div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                  <div style={{ fontWeight: "bold" }}>{t.advancedConfig}</div>
+                  <button type="button" onClick={() => setShowAdvanced(!showAdvanced)}>
+                    {showAdvanced ? (uiLang === "zh" ? "收起" : "Hide") : t.advancedToggle}
+                  </button>
                 </div>
+                {showAdvanced && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", alignItems: "center" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                      <input type="checkbox" checked={query.use_semantic} onChange={e => setQuery({ ...query, use_semantic: e.target.checked })} /> 
+                      {t.semantic}
+                    </label>
+                    
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <label>{t.semanticWeight}: {query.semantic_weight}</label>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.1" 
+                        value={query.semantic_weight} 
+                        onChange={e => setQuery({ ...query, semantic_weight: parseFloat(e.target.value) })} 
+                        style={{ width: "100px" }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <label>{t.bm25Weight}: {query.bm25_weight}</label>
+                      <input 
+                        type="range" 
+                        min="0" 
+                        max="1" 
+                        step="0.1" 
+                        value={query.bm25_weight} 
+                        onChange={e => setQuery({ ...query, bm25_weight: parseFloat(e.target.value) })} 
+                        style={{ width: "100px" }}
+                      />
+                    </div>
+
+                    <label style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                      <input type="checkbox" checked={query.rerank_enabled} onChange={e => setQuery({ ...query, rerank_enabled: e.target.checked })} />
+                      {t.rerankEnabled}
+                    </label>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <label>{t.candidateSize}: {query.candidate_size}</label>
+                      <input 
+                        type="range" 
+                        min="10" 
+                        max="200" 
+                        step="10" 
+                        value={query.candidate_size} 
+                        onChange={e => setQuery({ ...query, candidate_size: parseInt(e.target.value || "0") })} 
+                        style={{ width: "140px" }}
+                      />
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <label>{t.rerankTopN}: {query.rerank_top_n}</label>
+                      <input 
+                        type="range" 
+                        min="10" 
+                        max="200" 
+                        step="10" 
+                        value={query.rerank_top_n} 
+                        onChange={e => setQuery({ ...query, rerank_top_n: parseInt(e.target.value || "0") })} 
+                        style={{ width: "140px" }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <button type="submit" style={{ gridColumn: "1 / -1" }}>{t.searchBtn}</button>

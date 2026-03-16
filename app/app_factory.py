@@ -8,6 +8,7 @@ from app.core.config import get_config, ensure_dirs
 from app.core.logger import setup_logging
 from app.core.database import init_db, ensure_embedding_columns
 from app.core.embedding import EmbeddingService
+from app.core.reranker import RerankerService
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
@@ -37,6 +38,13 @@ def create_app():
         cfg.get("db_path"),
         embedder_count > 0,
         status["languages"],
+    )
+
+    reranker = RerankerService(
+        cfg.get("reranker_model_path"),
+        profiles=cfg.get("reranker_profiles"),
+        batch_size=cfg.get("rerank_batch_size", 8),
+        max_len=cfg.get("rerank_max_len", 512),
     )
 
     app = FastAPI(title="Law Assistant")
@@ -81,11 +89,12 @@ def create_app():
 
     app.include_router(build_health_router(embedder))
     app.include_router(build_embedding_router(embedder))
-    app.include_router(build_regulations_router(cfg, embedder))
+    app.include_router(build_regulations_router(cfg, embedder, reranker))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
 
     app.state.cfg = cfg
     app.state.embedder = embedder
+    app.state.reranker = reranker
     app.state.logger = logger
     return app

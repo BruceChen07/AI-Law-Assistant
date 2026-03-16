@@ -12,7 +12,10 @@ class SearchQuery(BaseModel):
     use_semantic: bool = False
     semantic_weight: float = 0.6
     bm25_weight: float = 0.4
-    candidate_size: int = 200
+    candidate_size: int = 50
+    rerank_enabled: Optional[bool] = None
+    rerank_top_n: Optional[int] = None
+    rerank_mode: Optional[str] = None
 
 
 class EmbeddingRequest(BaseModel):

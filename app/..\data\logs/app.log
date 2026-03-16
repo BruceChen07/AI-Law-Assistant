@@ -77,3 +77,34 @@
 2026-03-16 21:40:02,924 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
 2026-03-16 21:40:02,928 | INFO | http GET /api/auth/me status=200 cost_ms=3
 2026-03-16 21:40:02,929 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 23:04:21,450 | WARNING | embedding_model_missing lang=en path=/Users/bruce/workspace/AI-Law-Assistant/app/../models/embedding/bge-small-en-v1.5.onnx
+2026-03-16 23:04:21,450 | INFO | service_start db=/Users/bruce/workspace/AI-Law-Assistant/app/..\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 23:04:21,450 | INFO | Loading reranker model from /Users/bruce/workspace/AI-Law-Assistant/app/..\models\reranker\zh on cpu
+2026-03-16 23:04:21,450 | ERROR | Failed to load reranker model: Incorrect path_or_model_id: '/Users/bruce/workspace/AI-Law-Assistant/app/..\models\reranker\zh'. Please provide either the path to a local folder or the repo_id of a model on the Hub.
+2026-03-16 23:05:05,072 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 23:05:05,073 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 23:05:05,076 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 23:05:05,077 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 23:05:09,600 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 23:05:09,600 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 23:08:25,032 | INFO | http GET /api/auth/me status=200 cost_ms=4
+2026-03-16 23:08:25,033 | INFO | http GET /api/auth/me status=200 cost_ms=5
+2026-03-16 23:08:32,916 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 23:08:32,916 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 23:08:35,613 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 23:08:35,614 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 23:10:12,150 | INFO | http OPTIONS /regulations/import status=200 cost_ms=0
+2026-03-16 23:10:12,159 | INFO | http POST /regulations/import status=200 cost_ms=6
+2026-03-16 23:10:12,159 | INFO | import_start job_id=4735b0ff-252a-433a-b6a7-71e7248e2245 file=/Users/bruce/workspace/AI-Law-Assistant/app/..\data\files/4735b0ff-252a-433a-b6a7-71e7248e2245.docx
+2026-03-16 23:10:13,014 | INFO | import_embedding_lang job_id=4735b0ff-252a-433a-b6a7-71e7248e2245 language=zh
+2026-03-16 23:10:13,015 | INFO | import_done job_id=4735b0ff-252a-433a-b6a7-71e7248e2245 version_id=e365f9dc-e9f3-443e-8ba3-790db4350866 article_count=11
+2026-03-16 23:10:13,907 | INFO | http GET /regulations/import/4735b0ff-252a-433a-b6a7-71e7248e2245 status=200 cost_ms=1
+2026-03-16 23:24:06,980 | INFO | http OPTIONS /regulations/search status=200 cost_ms=0
+2026-03-16 23:24:06,987 | INFO | http POST /regulations/search status=200 cost_ms=3
+2026-03-16 23:26:07,781 | INFO | search_start query=卷烟适用于增值税退（免）税政策吗？ lang=zh active_lang=zh top_k=10 semantic=True model_id=BAAI/bge-small-zh-v1.5
+2026-03-16 23:26:07,789 | INFO | bm25_candidates query=卷烟适用于增值税退（免）税政策吗？ count=0
+2026-03-16 23:26:07,890 | INFO | semantic_candidates query=卷烟适用于增值税退（免）税政策吗？ count=26
+2026-03-16 23:26:07,890 | INFO | Loading reranker model from /Users/bruce/workspace/AI-Law-Assistant/app/..\models\reranker\zh on cpu
+2026-03-16 23:26:07,890 | ERROR | Failed to load reranker model: Incorrect path_or_model_id: '/Users/bruce/workspace/AI-Law-Assistant/app/..\models\reranker\zh'. Please provide either the path to a local folder or the repo_id of a model on the Hub.
+2026-03-16 23:26:07,891 | INFO | search_done query=卷烟适用于增值税退（免）税政策吗？ results=10
+2026-03-16 23:26:07,892 | INFO | http POST /regulations/search status=200 cost_ms=111

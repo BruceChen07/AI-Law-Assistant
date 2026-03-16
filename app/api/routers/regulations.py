@@ -10,7 +10,7 @@ from app.api.schemas import SearchQuery
 from app.api.dependencies import get_current_user
 
 
-def build_router(cfg, embedder):
+def build_router(cfg, embedder, reranker=None):
     router = APIRouter()
 
     @router.post("/regulations/import")
@@ -50,7 +50,6 @@ def build_router(cfg, embedder):
             mime_type=getattr(file, "content_type", None),
             user_id=current_user["id"],
             title=title,
-            category=reg_type,
             status="active",
         )
         background_tasks.add_task(
@@ -94,6 +93,6 @@ def build_router(cfg, embedder):
 
     @router.post("/regulations/search")
     def search(q: SearchQuery):
-        return search_regulations(cfg, q, embedder)
+        return search_regulations(cfg, q, embedder, reranker)
 
     return router
