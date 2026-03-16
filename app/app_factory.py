@@ -11,7 +11,8 @@ from app.core.embedding import EmbeddingService
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
-
+from app.api.routers.auth import build_router as build_auth_router
+from app.api.routers.admin import router as admin_router
 
 def init_only():
     cfg = get_config()
@@ -81,6 +82,8 @@ def create_app():
     app.include_router(build_health_router(embedder))
     app.include_router(build_embedding_router(embedder))
     app.include_router(build_regulations_router(cfg, embedder))
+    app.include_router(build_auth_router())
+    app.include_router(admin_router)
 
     app.state.cfg = cfg
     app.state.embedder = embedder

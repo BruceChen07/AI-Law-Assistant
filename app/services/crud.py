@@ -76,3 +76,30 @@ def insert_articles(cfg, version_id, items, job_id=None, language: str = "zh", e
             upsert_job(cfg, job_id, "running")
     conn.commit()
     conn.close()
+
+
+def insert_document(cfg, doc_id, filename, original_filename, file_path, file_size, mime_type, user_id,
+                    title=None, category=None, status="active"):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO documents (id, filename, original_filename, file_path, file_size, mime_type, user_id, title, category, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            doc_id,
+            filename,
+            original_filename,
+            file_path,
+            int(file_size),
+            mime_type,
+            user_id,
+            title,
+            category,
+            status,
+            datetime.utcnow().isoformat(),
+        ),
+    )
+    conn.commit()
+    conn.close()

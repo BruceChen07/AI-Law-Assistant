@@ -137,15 +137,19 @@ class EmbeddingService:
         model_path = resolve_path(str(p.get("embedding_model", "")))
         tokenizer_dir = resolve_path(str(p.get("embedding_tokenizer_dir", "")))
         if not model_path or not os.path.exists(model_path):
-            logger.warning("embedding_model_missing lang=%s path=%s", lang, model_path)
+            logger.warning(
+                "embedding_model_missing lang=%s path=%s", lang, model_path)
             return False
         if not tokenizer_dir or not os.path.exists(tokenizer_dir):
-            logger.warning("embedding_tokenizer_missing lang=%s path=%s", lang, tokenizer_dir)
+            logger.warning(
+                "embedding_tokenizer_missing lang=%s path=%s", lang, tokenizer_dir)
             return False
         so = ort.SessionOptions()
         so.intra_op_num_threads = int(p.get("embedding_threads", 2))
-        sess = ort.InferenceSession(model_path, sess_options=so, providers=["CPUExecutionProvider"])
-        tokenizer = AutoTokenizer.from_pretrained(tokenizer_dir, local_files_only=True, use_fast=True)
+        sess = ort.InferenceSession(model_path, sess_options=so, providers=[
+                                    "CPUExecutionProvider"])
+        tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_dir, local_files_only=True, use_fast=True)
         self._registry[lang] = {
             "lang": lang,
             "model_id": str(p.get("embedding_model_id", "unknown")),
@@ -164,7 +168,8 @@ class EmbeddingService:
     def load_embedders(self, cfg):
         self._registry.clear()
         self._default_language = str(cfg.get("default_language", "zh")).lower()
-        profiles = cfg.get("embedding_profiles") or {self._default_language: cfg}
+        profiles = cfg.get("embedding_profiles") or {
+            self._default_language: cfg}
         ok = 0
         for lang, p in profiles.items():
             if isinstance(p, dict) and self._load_one(str(lang).lower(), p):
@@ -190,7 +195,8 @@ class EmbeddingService:
         payload = text.strip()
         if is_query and prof["query_instruction"]:
             payload = f"{prof['query_instruction']}{payload}"
-        encoded = prof["tokenizer"](payload, truncation=True, max_length=prof["max_len"], padding="max_length", return_tensors="np")
+        encoded = prof["tokenizer"](
+            payload, truncation=True, max_length=prof["max_len"], padding="max_length", return_tensors="np")
         feed = {}
         for k in prof["inputs"]:
             if k in encoded:
@@ -202,7 +208,8 @@ class EmbeddingService:
             return None
         first = out[0]
         if first.ndim == 3:
-            vec = _mean_pool(first.astype(np.float32), encoded.get("attention_mask", np.ones((first.shape[0], first.shape[1]), dtype=np.int64)).astype(np.int64))[0] if prof["pooling"] == "mean" else first[:, 0, :].astype(np.float32)[0]
+            vec = _mean_pool(first.astype(np.float32), encoded.get("attention_mask", np.ones((first.shape[0], first.shape[1]), dtype=np.int64)).astype(
+                np.int64))[0] if prof["pooling"] == "mean" else first[:, 0, :].astype(np.float32)[0]
         elif first.ndim == 2:
             vec = first.astype(np.float32)[0]
         else:

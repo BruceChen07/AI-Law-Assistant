@@ -1,7 +1,27 @@
-import React, { useState } from "react"
-import { importRegulation, getJob, searchRegulations } from "./api"
+import React, { useEffect, useState, useRef } from "react"
+import { importRegulation, getJob, searchRegulations, getCurrentUser, getMe, logout } from "./api"
+import Login from "./Login"
+import Admin from "./Admin"
 
 export default function App() {
+  const [view, setView] = useState("main")
+  const [user, setUser] = useState(getCurrentUser())
+
+  useEffect(() => {
+    const syncUser = async () => {
+      const localUser = getCurrentUser()
+      if (!localUser) return
+      try {
+        const me = await getMe()
+        localStorage.setItem("user", JSON.stringify(me))
+        setUser(me)
+      } catch {
+        logout()
+        setUser(null)
+      }
+    }
+    syncUser()
+  }, [])
   const [uiLang, setUiLang] = useState("zh")
   const [upload, setUpload] = useState({
     title: "",
@@ -29,6 +49,8 @@ export default function App() {
       appTitle: "法规助手",
       uiLanguage: "界面语言",
       importTitle: "法规导入",
+      chooseFile: "选择文件",
+      noFileChosen: "未选择任何文件",
       searchTitle: "检索",
       uploadBtn: "上传",
       checkJob: "查询任务",
@@ -45,6 +67,8 @@ export default function App() {
       appTitle: "Law Assistant",
       uiLanguage: "UI Language",
       importTitle: "Regulation Import",
+      chooseFile: "Choose File",
+      noFileChosen: "No file chosen",
       searchTitle: "Search",
       uploadBtn: "Upload",
       checkJob: "Check Job",
@@ -59,6 +83,7 @@ export default function App() {
     }
   }
   const t = i18n[uiLang]
+  const fileInputRef = useRef(null)
 
   const onUpload = async (e) => {
     e.preventDefault()
@@ -108,85 +133,102 @@ export default function App() {
     }
   }
 
+  if (!user) {
+    return <Login onLogin={() => { setUser(getCurrentUser()); setView("main") }} />
+  }
+
+  const canOpenAdmin = user.role === "admin" || user.username === "admin"
+
   return (
     <div className="page">
-      <h1>{t.appTitle}</h1>
-      <section className="card">
-        <div className="row">
-          <strong>{t.uiLanguage}</strong>
-          <select value={uiLang} onChange={e => onUiLanguageChange(e.target.value)}>
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-          </select>
+      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 20 }}>
+        <h1>{t.appTitle}</h1>
+        <div>
+          <span>Welcome, {user.username} ({user.role}) </span>
+          {canOpenAdmin && <button onClick={() => setView("admin")}>Admin</button>}
+          <button onClick={() => { logout(); setUser(null); }}>Logout</button>
         </div>
-      </section>
-      <section className="card">
-        <h2>{t.importTitle}</h2>
-        <form onSubmit={onUpload} className="grid">
-          <input placeholder={uiLang === "zh" ? "标题" : "Title"} value={upload.title} onChange={e => setUpload({ ...upload, title: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={upload.doc_no} onChange={e => setUpload({ ...upload, doc_no: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "发布机构" : "Issuer"} value={upload.issuer} onChange={e => setUpload({ ...upload, issuer: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "类型" : "Type"} value={upload.reg_type} onChange={e => setUpload({ ...upload, reg_type: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "生效日期 yyyy-mm-dd" : "Effective Date yyyy-mm-dd"} value={upload.effective_date} onChange={e => setUpload({ ...upload, effective_date: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={upload.expiry_date} onChange={e => setUpload({ ...upload, expiry_date: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={upload.region} onChange={e => setUpload({ ...upload, region: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={upload.industry} onChange={e => setUpload({ ...upload, industry: e.target.value })} />
-          <input type="file" accept=".docx,.pdf" onChange={e => {
-            const f = e.target.files?.[0] || null
-            setFile(f)
-            setFileError("")
-          }} />
-          {fileError && <span style={{color: 'red'}}>{fileError}</span>}
-          <button type="submit">{t.uploadBtn}</button>
-        </form>
-        <div className="row">
-          <button onClick={onCheck}>{t.checkJob}</button>
-          <span>Job: {jobId} {jobStatus}</span>
-        </div>
-      </section>
-
-      <section className="card">
-        <h2>{t.searchTitle}</h2>
-        <form onSubmit={onSearch} className="grid">
-          <input placeholder={uiLang === "zh" ? "问题" : "Query"} value={query.query} onChange={e => setQuery({ ...query, query: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "日期 yyyy-mm-dd" : "Date yyyy-mm-dd"} value={query.date} onChange={e => setQuery({ ...query, date: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={query.region} onChange={e => setQuery({ ...query, region: e.target.value })} />
-          <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={query.industry} onChange={e => setQuery({ ...query, industry: e.target.value })} />
-          <label><input type="checkbox" checked={query.use_semantic} onChange={e => setQuery({ ...query, use_semantic: e.target.checked })} /> {t.semantic}</label>
-          <input placeholder="Semantic Weight (0-1)" value={query.semantic_weight} onChange={e => setQuery({ ...query, semantic_weight: parseFloat(e.target.value||"0") })} />
-          <input placeholder="BM25 Weight (0-1)" value={query.bm25_weight} onChange={e => setQuery({ ...query, bm25_weight: parseFloat(e.target.value||"0") })} />
-          <input placeholder="Candidates" value={query.candidate_size} onChange={e => setQuery({ ...query, candidate_size: parseInt(e.target.value||"200") })} />
-          <button type="submit">{t.searchBtn}</button>
-        </form>
-        <div className="row">
-          <strong>{t.result}</strong>
-          <span className="meta">{searching ? t.searching : `${results.length} item(s)`}</span>
-        </div>
-        {searchError && <div className="error">{searchError}</div>}
-        {!searching && !searchError && query.query.trim() && results.length === 0 && (
-          <div className="meta">{t.noMatch}</div>
-        )}
-        {results.length > 0 && (
-          <div className="card">
-            <h3>{t.topAnswer}</h3>
-            {(() => { const top = [...results].sort((a,b) => (b.answer_score||0)-(a.answer_score||0))[0]; return top?.answer ? (
-              <div>
-                <div className="content">{top.answer}</div>
-                <div className="meta">citation: {top.citation_id} | effective: {top.effective_status}</div>
+      </div>
+      
+      {view === "admin" ? (
+        <Admin lang={uiLang} onBack={() => setView("main")} />
+      ) : (
+        <>
+          <section className="card">
+            <div className="row">
+              <strong>{t.uiLanguage}</strong>
+              <select value={uiLang} onChange={e => onUiLanguageChange(e.target.value)}>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+          </section>
+          <section className="card">
+            <h2>{t.importTitle}</h2>
+            <form onSubmit={onUpload} className="grid">
+              <input placeholder={uiLang === "zh" ? "标题" : "Title"} value={upload.title} onChange={e => setUpload({ ...upload, title: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={upload.doc_no} onChange={e => setUpload({ ...upload, doc_no: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "发布机构" : "Issuer"} value={upload.issuer} onChange={e => setUpload({ ...upload, issuer: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "类型" : "Type"} value={upload.reg_type} onChange={e => setUpload({ ...upload, reg_type: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "生效日期 yyyy-mm-dd" : "Effective Date yyyy-mm-dd"} value={upload.effective_date} onChange={e => setUpload({ ...upload, effective_date: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={upload.expiry_date} onChange={e => setUpload({ ...upload, expiry_date: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={upload.region} onChange={e => setUpload({ ...upload, region: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={upload.industry} onChange={e => setUpload({ ...upload, industry: e.target.value })} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".docx,.pdf"
+                  onChange={e => {
+                    const f = e.target.files?.[0] || null
+                    setFile(f)
+                    setFileError("")
+                  }}
+                  style={{ display: 'none' }}
+                />
+                <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()}>{t.chooseFile}</button>
+                <span className="meta">{file ? file.name : t.noFileChosen}</span>
               </div>
-            ) : <div className="meta">{t.noAnswer}</div>; })()}
-          </div>
-        )}
-        <ul className="list">
-          {results.map(r => (
-            <li key={r.article_id}>
-              <div className="title">{r.title} {r.article_no}</div>
-              <div className="meta">effective: {r.effective_status} | region: {r.region || "-"}</div>
-              <div className="content">{r.content}</div>
-            </li>
-          ))}
-        </ul>
-      </section>
+              {fileError && <span style={{color: 'red'}}>{fileError}</span>}
+              <button type="submit">{t.uploadBtn}</button>
+            </form>
+            <div className="row">
+              <button onClick={onCheck}>{t.checkJob}</button>
+              <span>Job: {jobId} {jobStatus}</span>
+            </div>
+          </section>
+
+          <section className="card">
+            <h2>{t.searchTitle}</h2>
+            <form onSubmit={onSearch} className="grid">
+              <input placeholder={uiLang === "zh" ? "问题" : "Query"} value={query.query} onChange={e => setQuery({ ...query, query: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "日期 yyyy-mm-dd" : "Date yyyy-mm-dd"} value={query.date} onChange={e => setQuery({ ...query, date: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={query.region} onChange={e => setQuery({ ...query, region: e.target.value })} />
+              <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={query.industry} onChange={e => setQuery({ ...query, industry: e.target.value })} />
+              <label><input type="checkbox" checked={query.use_semantic} onChange={e => setQuery({ ...query, use_semantic: e.target.checked })} /> {t.semantic}</label>
+              <input placeholder="Semantic Weight (0-1)" value={query.semantic_weight} onChange={e => setQuery({ ...query, semantic_weight: parseFloat(e.target.value||"0") })} />
+              <input placeholder="BM25 Weight (0-1)" value={query.bm25_weight} onChange={e => setQuery({ ...query, bm25_weight: parseFloat(e.target.value||"0") })} />
+              <input placeholder="Candidates" value={query.candidate_size} onChange={e => setQuery({ ...query, candidate_size: parseInt(e.target.value||"200") })} />
+              <button type="submit">{t.searchBtn}</button>
+            </form>
+            <div className="row">
+              <strong>{t.result}</strong>
+              <span className="meta">{searching ? t.searching : `${results.length} item(s)`}</span>
+            </div>
+            {searchError && <div className="error">{searchError}</div>}
+            {results.length === 0 && !searching && <div className="error">{t.noMatch}</div>}
+            <ul className="list">
+              {results.slice(0, 5).map((r, i) => (
+                <li key={i}>
+                  <div className="title">{r.title} - {r.article_no}</div>
+                  <div className="meta">{r.effective_date} | {r.region} | {r.industry}</div>
+                  <div className="content">{r.content?.slice(0, 300)}...</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
     </div>
   )
 }

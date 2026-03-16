@@ -1,12 +1,13 @@
 import os
 import uuid
 from typing import Optional
-from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException, Depends
 from app.core.database import get_conn
 from app.services.importer import process_import
-from app.services.crud import insert_job
+from app.services.crud import insert_job, insert_document
 from app.services.search import search_regulations
 from app.api.schemas import SearchQuery
+from app.api.dependencies import get_current_user
 
 
 def build_router(cfg, embedder):
@@ -26,7 +27,8 @@ def build_router(cfg, embedder):
         region: str = Form(""),
         industry: str = Form(""),
         regulation_id: str = Form(""),
-        language: str = Form("zh")
+        language: str = Form("zh"),
+        current_user: dict = Depends(get_current_user),
     ):
         job_id = str(uuid.uuid4())
         insert_job(cfg, job_id)
@@ -36,8 +38,27 @@ def build_router(cfg, embedder):
         save_path = os.path.join(cfg["files_dir"], f"{job_id}{ext}")
         with open(save_path, "wb") as f:
             f.write(await file.read())
-        background_tasks.add_task(process_import, cfg, embedder, job_id, save_path, title, doc_no, issuer, reg_type, status, effective_date, expiry_date, region, industry, regulation_id, language)
-        return {"job_id": job_id}
+        # record document for admin dashboard
+        doc_id = str(uuid.uuid4())
+        insert_document(
+            cfg,
+            doc_id=doc_id,
+            filename=os.path.basename(save_path),
+            original_filename=file.filename,
+            file_path=save_path,
+            file_size=os.path.getsize(save_path),
+            mime_type=getattr(file, "content_type", None),
+            user_id=current_user["id"],
+            title=title,
+            category=reg_type,
+            status="active",
+        )
+        background_tasks.add_task(
+            process_import,
+            cfg, embedder, job_id, save_path, title, doc_no, issuer, reg_type,
+            status, effective_date, expiry_date, region, industry, regulation_id, language,
+        )
+        return {"job_id": job_id, "doc_id": doc_id}
 
     @router.get("/regulations/import/{job_id}")
     def import_status(job_id: str):

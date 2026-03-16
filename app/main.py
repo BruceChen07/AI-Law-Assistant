@@ -1,4 +1,3 @@
-from app.app_factory import create_app, init_only
 import os
 import sys
 import socket
@@ -9,6 +8,7 @@ PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+from app.app_factory import create_app, init_only
 
 app = create_app()
 

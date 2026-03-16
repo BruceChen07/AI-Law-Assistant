@@ -134,3 +134,483 @@
 2026-03-10 14:49:41,443 | INFO | http POST /regulations/search status=200 cost_ms=181
 2026-03-10 15:47:23,486 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
 2026-03-10 15:47:23,487 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-10 21:36:05,795 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 21:36:05,796 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-10 21:53:11,613 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 21:53:11,613 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-10 21:53:51,513 | INFO | http OPTIONS /api/auth/register status=200 cost_ms=0
+2026-03-10 21:53:51,529 | ERROR | http POST /api/auth/register status=500 cost_ms=12
+Traceback (most recent call last):
+  File "D:\Workspace\AI-Law-Assistant\app\app_factory.py", line 71, in access_log
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 95, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 153, in simple_response
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 130, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 116, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 670, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 326, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\concurrency.py", line 32, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\to_thread.py", line 63, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2502, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "D:\Workspace\AI-Law-Assistant\app\api\routers\auth.py", line 69, in register
+    existing = get_user_by_username(req.username)
+  File "D:\Workspace\AI-Law-Assistant\app\core\auth.py", line 86, in get_user_by_username
+    conn = get_conn({})
+  File "D:\Workspace\AI-Law-Assistant\app\core\database.py", line 5, in get_conn
+    conn = sqlite3.connect(cfg["db_path"])
+                           ~~~^^^^^^^^^^^
+KeyError: 'db_path'
+2026-03-10 22:38:36,997 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-10 22:38:36,998 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 01:25:12,884 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-11 01:25:12,885 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 01:36:47,813 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-11 01:36:47,814 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 01:40:01,782 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-11 01:40:01,782 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 01:40:17,711 | INFO | http GET /health status=200 cost_ms=1
+2026-03-11 02:10:30,567 | INFO | http GET /health status=200 cost_ms=0
+2026-03-11 02:10:53,238 | INFO | http GET /docs status=200 cost_ms=0
+2026-03-11 02:10:53,377 | INFO | http GET /openapi.json status=200 cost_ms=13
+2026-03-11 02:10:53,388 | INFO | http GET /@vite/client status=404 cost_ms=0
+2026-03-11 10:50:04,047 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-11 10:50:04,048 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 15:15:39,767 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-11 15:15:39,776 | ERROR | http POST /api/auth/login status=500 cost_ms=4
+Traceback (most recent call last):
+  File "D:\Workspace\AI-Law-Assistant\app\app_factory.py", line 71, in access_log
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 95, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 153, in simple_response
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 130, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 116, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 670, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 326, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\concurrency.py", line 32, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\to_thread.py", line 63, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2502, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "D:\Workspace\AI-Law-Assistant\app\api\routers\auth.py", line 64, in login
+    user = authenticate_user(req.username, req.password)
+  File "D:\Workspace\AI-Law-Assistant\app\core\auth.py", line 111, in authenticate_user
+    user = get_user_by_username(username)
+  File "D:\Workspace\AI-Law-Assistant\app\core\auth.py", line 89, in get_user_by_username
+    cfg = get_config()
+          ^^^^^^^^^^
+NameError: name 'get_config' is not defined. Did you mean: 'get_conn'?
+2026-03-11 15:21:42,460 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-11 15:21:42,460 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 15:21:58,847 | ERROR | http POST /api/auth/login status=500 cost_ms=235
+Traceback (most recent call last):
+  File "D:\Workspace\AI-Law-Assistant\app\app_factory.py", line 71, in access_log
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 95, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 153, in simple_response
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 130, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 116, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 670, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 326, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\concurrency.py", line 32, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\to_thread.py", line 63, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2502, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "D:\Workspace\AI-Law-Assistant\app\api\routers\auth.py", line 74, in login
+    access_token = create_access_token(token_data)
+  File "D:\Workspace\AI-Law-Assistant\app\core\auth.py", line 31, in create_access_token
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+                  ^^^^^^^^^^
+AttributeError: module 'jwt' has no attribute 'encode'
+2026-03-11 16:48:47,393 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-11 16:48:47,592 | ERROR | http POST /api/auth/login status=500 cost_ms=197
+Traceback (most recent call last):
+  File "D:\Workspace\AI-Law-Assistant\app\app_factory.py", line 71, in access_log
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 95, in __call__
+    await self.simple_response(scope, receive, send, request_headers=headers)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\cors.py", line 153, in simple_response
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\middleware\exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 716, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 736, in app
+    await route.handle(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\routing.py", line 290, in handle
+    await self.app(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 130, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 116, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 670, in app
+    raw_response = await run_endpoint_function(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<3 lines>...
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\fastapi\routing.py", line 326, in run_endpoint_function
+    return await run_in_threadpool(dependant.call, **values)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\starlette\concurrency.py", line 32, in run_in_threadpool
+    return await anyio.to_thread.run_sync(func)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\to_thread.py", line 63, in run_sync
+    return await get_async_backend().run_sync_in_worker_thread(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        func, args, abandon_on_cancel=abandon_on_cancel, limiter=limiter
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 2502, in run_sync_in_worker_thread
+    return await future
+           ^^^^^^^^^^^^
+  File "D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 986, in run
+    result = context.run(func, *args)
+  File "D:\Workspace\AI-Law-Assistant\app\api\routers\auth.py", line 74, in login
+    access_token = create_access_token(token_data)
+  File "D:\Workspace\AI-Law-Assistant\app\core\auth.py", line 31, in create_access_token
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+                  ^^^^^^^^^^
+AttributeError: module 'jwt' has no attribute 'encode'
+2026-03-11 16:49:21,809 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-11 16:49:21,809 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-11 16:49:34,777 | INFO | http POST /api/auth/login status=200 cost_ms=216
+2026-03-11 16:50:57,585 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-11 16:50:57,784 | INFO | http POST /api/auth/login status=200 cost_ms=196
+2026-03-11 16:53:36,320 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-11 16:53:36,536 | INFO | http POST /api/auth/login status=200 cost_ms=211
+2026-03-16 12:54:15,367 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 12:54:15,368 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 13:05:59,888 | INFO | http GET /health status=200 cost_ms=6
+2026-03-16 13:36:11,280 | INFO | http GET /health status=200 cost_ms=1
+2026-03-16 13:46:17,253 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 13:46:17,255 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 13:46:17,261 | INFO | http GET /api/admin/documents status=401 cost_ms=5
+2026-03-16 13:46:17,264 | INFO | http GET /api/admin/documents status=401 cost_ms=1
+2026-03-16 13:46:28,705 | INFO | http GET /api/admin/documents status=401 cost_ms=0
+2026-03-16 13:46:28,708 | INFO | http GET /api/admin/documents status=401 cost_ms=0
+2026-03-16 13:46:41,080 | INFO | http OPTIONS /api/admin/stats status=200 cost_ms=0
+2026-03-16 13:46:41,082 | INFO | http GET /api/admin/stats status=401 cost_ms=0
+2026-03-16 13:48:33,824 | INFO | http POST /api/auth/login status=200 cost_ms=224
+2026-03-16 13:48:45,335 | INFO | http POST /api/auth/login status=200 cost_ms=196
+2026-03-16 13:48:57,379 | INFO | http GET /api/admin/stats status=200 cost_ms=4
+2026-03-16 13:54:23,458 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 13:54:23,459 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 13:54:26,653 | INFO | http POST /api/auth/login status=200 cost_ms=659
+2026-03-16 13:54:26,788 | INFO | http GET /api/admin/users status=200 cost_ms=8
+2026-03-16 14:01:22,828 | INFO | http POST /api/auth/login status=200 cost_ms=286
+2026-03-16 14:01:22,842 | INFO | http GET /api/admin/users status=200 cost_ms=5
+2026-03-16 14:03:56,709 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 14:03:56,710 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 14:05:33,863 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=1
+2026-03-16 14:05:33,866 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=2
+2026-03-16 14:05:33,870 | INFO | http GET /api/admin/documents status=401 cost_ms=2
+2026-03-16 14:05:33,874 | INFO | http GET /api/admin/documents status=401 cost_ms=1
+2026-03-16 14:05:41,193 | INFO | http OPTIONS /api/admin/users status=200 cost_ms=0
+2026-03-16 14:05:41,199 | INFO | http GET /api/admin/users status=401 cost_ms=2
+2026-03-16 14:05:48,513 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-16 14:05:49,126 | INFO | http POST /api/auth/login status=200 cost_ms=609
+2026-03-16 14:05:50,254 | INFO | http GET /api/admin/documents status=200 cost_ms=5
+2026-03-16 14:05:50,263 | INFO | http GET /api/admin/documents status=200 cost_ms=5
+2026-03-16 14:05:59,452 | INFO | http GET /api/admin/users status=200 cost_ms=5
+2026-03-16 14:06:00,246 | INFO | http OPTIONS /api/admin/stats status=200 cost_ms=0
+2026-03-16 14:06:00,254 | INFO | http GET /api/admin/stats status=200 cost_ms=4
+2026-03-16 14:06:01,076 | INFO | http GET /api/admin/documents status=200 cost_ms=4
+2026-03-16 14:06:01,484 | INFO | http GET /api/admin/users status=200 cost_ms=5
+2026-03-16 14:06:02,115 | INFO | http GET /api/admin/stats status=200 cost_ms=5
+2026-03-16 14:06:02,620 | INFO | http GET /api/admin/documents status=200 cost_ms=5
+2026-03-16 14:06:03,117 | INFO | http GET /api/admin/users status=200 cost_ms=4
+2026-03-16 14:06:03,828 | INFO | http GET /api/admin/stats status=200 cost_ms=5
+2026-03-16 14:06:05,230 | INFO | http GET /api/admin/documents status=200 cost_ms=6
+2026-03-16 14:06:05,716 | INFO | http GET /api/admin/users status=200 cost_ms=5
+2026-03-16 14:06:09,473 | INFO | http OPTIONS /api/admin/users/ce9b2669-7015-4740-97be-6a9a2a689668/role status=200 cost_ms=0
+2026-03-16 14:06:09,570 | INFO | http PUT /api/admin/users/ce9b2669-7015-4740-97be-6a9a2a689668/role status=200 cost_ms=94
+2026-03-16 14:06:09,579 | INFO | http GET /api/admin/users status=403 cost_ms=3
+2026-03-16 14:06:43,229 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 14:06:43,230 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 14:09:31,762 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 14:09:31,763 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 14:10:56,194 | INFO | http GET /api/admin/documents status=403 cost_ms=5
+2026-03-16 14:10:56,199 | INFO | http GET /api/admin/documents status=403 cost_ms=1
+2026-03-16 14:13:59,997 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 14:13:59,999 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 14:14:00,002 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 14:14:00,005 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 14:14:02,958 | INFO | http POST /api/auth/login status=200 cost_ms=240
+2026-03-16 14:14:09,893 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 14:14:09,899 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 14:14:11,980 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 14:14:11,983 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 14:14:55,618 | INFO | http POST /api/auth/login status=200 cost_ms=257
+2026-03-16 14:15:11,531 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 14:15:11,536 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 14:15:13,543 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 14:15:13,548 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 14:16:46,264 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 14:17:07,509 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 14:17:07,537 | INFO | http GET /api/auth/me status=200 cost_ms=6
+2026-03-16 14:17:09,555 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 14:17:09,558 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 14:17:21,812 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-16 14:17:22,063 | INFO | http POST /api/auth/login status=200 cost_ms=248
+2026-03-16 15:19:24,156 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:19:24,158 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:19:24,162 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 15:19:24,166 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 15:21:23,205 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:21:23,207 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:21:23,216 | INFO | http GET /api/admin/documents status=200 cost_ms=7
+2026-03-16 15:21:23,220 | INFO | http GET /api/admin/documents status=200 cost_ms=2
+2026-03-16 15:21:26,808 | INFO | http OPTIONS /api/admin/stats status=200 cost_ms=0
+2026-03-16 15:21:26,814 | INFO | http GET /api/admin/stats status=200 cost_ms=4
+2026-03-16 15:21:28,633 | INFO | http OPTIONS /api/admin/users status=200 cost_ms=0
+2026-03-16 15:21:28,638 | INFO | http GET /api/admin/users status=200 cost_ms=3
+2026-03-16 15:21:30,989 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:21:31,820 | INFO | http GET /api/admin/stats status=200 cost_ms=3
+2026-03-16 15:21:36,164 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:22:17,813 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:22:17,819 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:23:27,851 | INFO | http OPTIONS /regulations/import status=200 cost_ms=0
+2026-03-16 15:23:27,867 | INFO | http POST /regulations/import status=200 cost_ms=13
+2026-03-16 15:23:27,868 | INFO | import_start job_id=208d8634-5045-4de1-8819-49e7cc022be1 file=D:\Workspace\AI-Law-Assistant\data\files\208d8634-5045-4de1-8819-49e7cc022be1.docx
+2026-03-16 15:23:29,035 | INFO | http GET /regulations/import/208d8634-5045-4de1-8819-49e7cc022be1 status=200 cost_ms=2
+2026-03-16 15:23:30,362 | INFO | http GET /regulations/import/208d8634-5045-4de1-8819-49e7cc022be1 status=200 cost_ms=1
+2026-03-16 15:23:33,282 | INFO | http GET /regulations/import/208d8634-5045-4de1-8819-49e7cc022be1 status=200 cost_ms=2
+2026-03-16 15:23:36,474 | INFO | import_embedding_lang job_id=208d8634-5045-4de1-8819-49e7cc022be1 language=zh
+2026-03-16 15:23:36,480 | INFO | import_done job_id=208d8634-5045-4de1-8819-49e7cc022be1 version_id=d7e85a2f-5ae4-44e1-8df9-e668c80a9153 article_count=39
+2026-03-16 15:24:10,938 | INFO | http GET /regulations/import/208d8634-5045-4de1-8819-49e7cc022be1 status=200 cost_ms=1
+2026-03-16 15:24:30,147 | INFO | http OPTIONS /regulations/search status=200 cost_ms=0
+2026-03-16 15:24:30,155 | INFO | search_start query=境内发生应税交易都有哪些情形 lang=zh active_lang=zh top_k=10 semantic=True model_id=BAAI/bge-small-zh-v1.5
+2026-03-16 15:24:30,158 | INFO | bm25_candidates query=境内发生应税交易都有哪些情形 count=0
+2026-03-16 15:24:30,318 | INFO | semantic_candidates query=境内发生应税交易都有哪些情形 count=78
+2026-03-16 15:24:30,319 | INFO | search_done query=境内发生应税交易都有哪些情形 results=10
+2026-03-16 15:24:30,320 | INFO | http POST /regulations/search status=200 cost_ms=170
+2026-03-16 15:25:37,325 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:25:37,332 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:25:39,178 | INFO | http GET /api/admin/stats status=200 cost_ms=2
+2026-03-16 15:25:39,746 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:25:45,556 | INFO | http GET /api/admin/stats status=200 cost_ms=3
+2026-03-16 15:25:46,827 | INFO | http GET /api/admin/documents status=200 cost_ms=2
+2026-03-16 15:29:12,660 | INFO | http GET /api/admin/users status=200 cost_ms=2
+2026-03-16 15:29:23,164 | INFO | http GET /api/admin/stats status=200 cost_ms=2
+2026-03-16 15:29:32,871 | INFO | http GET /api/admin/documents status=200 cost_ms=4
+2026-03-16 15:32:28,961 | WARNING | embedding_model_missing lang=en path=D:\Workspace\AI-Law-Assistant\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 15:32:28,961 | INFO | service_start db=D:\Workspace\AI-Law-Assistant\data\app.db embedding_ready=True langs=['zh']
+2026-03-16 15:32:53,920 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:32:53,922 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:32:53,926 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 15:32:53,930 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 15:33:30,764 | INFO | http OPTIONS /regulations/import status=200 cost_ms=0
+2026-03-16 15:33:30,781 | INFO | http POST /regulations/import status=200 cost_ms=14
+2026-03-16 15:33:30,782 | INFO | import_start job_id=50581ded-5f1f-4898-b679-2cb0bcf20e8c file=D:\Workspace\AI-Law-Assistant\data\files\50581ded-5f1f-4898-b679-2cb0bcf20e8c.docx
+2026-03-16 15:33:32,171 | INFO | http GET /regulations/import/50581ded-5f1f-4898-b679-2cb0bcf20e8c status=200 cost_ms=2
+2026-03-16 15:33:35,642 | INFO | import_embedding_lang job_id=50581ded-5f1f-4898-b679-2cb0bcf20e8c language=zh
+2026-03-16 15:33:35,646 | INFO | import_done job_id=50581ded-5f1f-4898-b679-2cb0bcf20e8c version_id=4f561428-a0d1-4ad5-81fd-169b6429b7ed article_count=39
+2026-03-16 15:34:06,122 | INFO | http GET /regulations/import/50581ded-5f1f-4898-b679-2cb0bcf20e8c status=200 cost_ms=1
+2026-03-16 15:34:08,931 | INFO | search_start query=什么情况下，视同应税交易？ lang=zh active_lang=zh top_k=10 semantic=True model_id=BAAI/bge-small-zh-v1.5
+2026-03-16 15:34:08,933 | INFO | bm25_candidates query=什么情况下，视同应税交易？ count=0
+2026-03-16 15:34:09,090 | INFO | semantic_candidates query=什么情况下，视同应税交易？ count=117
+2026-03-16 15:34:09,091 | INFO | search_done query=什么情况下，视同应税交易？ results=10
+2026-03-16 15:34:09,092 | INFO | http POST /regulations/search status=200 cost_ms=162
+2026-03-16 15:34:56,843 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:34:56,845 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:34:56,852 | INFO | http GET /api/admin/documents status=200 cost_ms=6
+2026-03-16 15:34:56,861 | INFO | http GET /api/admin/documents status=200 cost_ms=5
+2026-03-16 15:35:17,473 | INFO | http OPTIONS /api/admin/stats status=200 cost_ms=0
+2026-03-16 15:35:17,479 | INFO | http GET /api/admin/stats status=200 cost_ms=3
+2026-03-16 15:35:26,713 | INFO | http OPTIONS /api/admin/users status=200 cost_ms=0
+2026-03-16 15:35:26,719 | INFO | http GET /api/admin/users status=200 cost_ms=3
+2026-03-16 15:45:11,158 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:45:11,159 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:45:11,163 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 15:45:11,166 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 15:47:09,708 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:47:09,710 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:47:09,714 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:47:09,718 | INFO | http GET /api/admin/documents status=200 cost_ms=2
+2026-03-16 15:47:13,717 | INFO | http GET /api/admin/documents status=200 cost_ms=4
+2026-03-16 15:47:13,722 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:54:13,264 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 15:54:13,268 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 15:54:27,347 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 15:54:27,352 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 15:54:57,346 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 15:54:57,350 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 15:57:47,258 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:57:47,260 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 15:57:47,263 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 15:57:47,266 | INFO | http GET /api/auth/me status=200 cost_ms=1
+2026-03-16 15:58:58,398 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:58:58,399 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 15:58:58,404 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:58:58,409 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:59:00,210 | INFO | http OPTIONS /api/admin/users status=200 cost_ms=0
+2026-03-16 15:59:00,215 | INFO | http GET /api/admin/users status=200 cost_ms=2
+2026-03-16 15:59:00,874 | INFO | http OPTIONS /api/admin/stats status=200 cost_ms=0
+2026-03-16 15:59:00,879 | INFO | http GET /api/admin/stats status=200 cost_ms=3
+2026-03-16 15:59:02,261 | INFO | http GET /api/admin/users status=200 cost_ms=3
+2026-03-16 15:59:02,637 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:59:03,142 | INFO | http GET /api/admin/stats status=200 cost_ms=3
+2026-03-16 15:59:03,772 | INFO | http GET /api/admin/users status=200 cost_ms=3
+2026-03-16 15:59:04,725 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:59:05,343 | INFO | http GET /api/admin/stats status=200 cost_ms=4
+2026-03-16 15:59:10,335 | INFO | http GET /api/admin/documents status=200 cost_ms=2
+2026-03-16 15:59:10,341 | INFO | http GET /api/admin/documents status=200 cost_ms=3
+2026-03-16 15:59:12,387 | INFO | http GET /api/admin/users status=200 cost_ms=2
+2026-03-16 15:59:13,036 | INFO | http GET /api/admin/stats status=200 cost_ms=3
+2026-03-16 16:00:43,266 | INFO | http GET /api/auth/me status=200 cost_ms=2
+2026-03-16 16:00:43,272 | INFO | http GET /api/auth/me status=200 cost_ms=2
