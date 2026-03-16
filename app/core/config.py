@@ -6,6 +6,7 @@ from functools import lru_cache
 def _resolve_path(base_dir: str, value):
     if not isinstance(value, str) or not value:
         return value
+    value = value.replace("\\", os.sep).replace("/", os.sep)
     if os.path.isabs(value):
         return value
     return os.path.abspath(os.path.join(base_dir, value))

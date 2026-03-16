@@ -1,14 +1,14 @@
 {
-    "data_dir": "..\\data",
-    "db_path": "..\\data\\app.db",
-    "files_dir": "..\\data\\files",
-    "static_dir": "..\\web\\dist",
+    "data_dir": "../data",
+    "db_path": "../data/app.db",
+    "files_dir": "../data/files",
+    "static_dir": "../web/dist",
     "default_language": "zh",
     "reranker_enabled": true,
-    "reranker_model_path": "..\\models\\reranker\\zh",
+    "reranker_model_path": "../models/reranker/zh",
     "reranker_profiles": {
-        "zh": "..\\models\\reranker\\zh",
-        "en": "..\\models\\reranker\\en"
+        "zh": "../models/reranker/zh",
+        "en": "../models/reranker/en"
     },
     "rerank_batch_size": 8,
     "rerank_max_len": 512,
@@ -16,8 +16,8 @@
     "rerank_score_threshold": 0.0,
     "embedding_profiles": {
         "zh": {
-            "embedding_model": "..\\models\\embedding\\zh\\model.onnx",
-            "embedding_tokenizer_dir": "..\\models\\embedding\\zh",
+            "embedding_model": "../models/embedding/zh/model.onnx",
+            "embedding_tokenizer_dir": "../models/embedding/zh",
             "embedding_model_id": "BAAI/bge-small-zh-v1.5",
             "embedding_source": "modelscope",
             "embedding_max_seq_len": 512,
@@ -26,8 +26,8 @@
             "embedding_threads": 2
         },
         "en": {
-            "embedding_model": "..\\models\\embedding\\bge-small-en-v1.5.onnx",
-            "embedding_tokenizer_dir": "..\\models\\embedding\\en",
+            "embedding_model": "../models/embedding/bge-small-en-v1.5.onnx",
+            "embedding_tokenizer_dir": "../models/embedding/en",
             "embedding_model_id": "BAAI/bge-small-en-v1.5",
             "embedding_source": "modelscope",
             "embedding_max_seq_len": 512,
@@ -37,7 +37,7 @@
         }
     },
     "log_level": "INFO",
-    "log_dir": "..\\data\\logs",
+    "log_dir": "../data/logs",
     "log_max_bytes": 5242880,
     "log_backup_count": 3,
     "max_upload_mb": 50,
