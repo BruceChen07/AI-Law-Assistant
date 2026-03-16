@@ -1,0 +1,20 @@
+2026-03-16 19:26:48,235 | WARNING | embedding_model_missing lang=zh path=/Users/bruce/workspace/AI-Law-Assistant/app/..\models\embedding\zh\model.onnx
+2026-03-16 19:26:48,235 | WARNING | embedding_model_missing lang=en path=/Users/bruce/workspace/AI-Law-Assistant/app/..\models\embedding\bge-small-en-v1.5.onnx
+2026-03-16 19:26:48,235 | INFO | service_start db=/Users/bruce/workspace/AI-Law-Assistant/app/..\data\app.db embedding_ready=False langs=[]
+2026-03-16 19:27:14,947 | INFO | http OPTIONS /api/auth/login status=200 cost_ms=0
+2026-03-16 19:27:14,955 | INFO | http POST /api/auth/login status=401 cost_ms=5
+2026-03-16 19:27:23,075 | INFO | http POST /api/auth/login status=401 cost_ms=2
+2026-03-16 19:31:24,363 | INFO | http POST /api/auth/login status=200 cost_ms=203
+2026-03-16 19:31:26,967 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 19:31:26,969 | INFO | http OPTIONS /api/admin/documents status=200 cost_ms=0
+2026-03-16 19:31:26,976 | INFO | http GET /api/admin/documents status=200 cost_ms=6
+2026-03-16 19:31:26,976 | INFO | http GET /api/admin/documents status=200 cost_ms=6
+2026-03-16 19:31:29,453 | INFO | http OPTIONS /api/admin/users status=200 cost_ms=0
+2026-03-16 19:31:29,456 | INFO | http GET /api/admin/users status=200 cost_ms=1
+2026-03-16 19:31:30,653 | INFO | http OPTIONS /api/admin/stats status=200 cost_ms=0
+2026-03-16 19:31:30,656 | INFO | http GET /api/admin/stats status=200 cost_ms=1
+2026-03-16 19:31:31,353 | INFO | http GET /api/admin/documents status=200 cost_ms=2
+2026-03-16 19:36:18,804 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 19:36:18,805 | INFO | http OPTIONS /api/auth/me status=200 cost_ms=0
+2026-03-16 19:36:18,817 | INFO | http GET /api/auth/me status=200 cost_ms=3
+2026-03-16 19:36:18,817 | INFO | http GET /api/auth/me status=200 cost_ms=5

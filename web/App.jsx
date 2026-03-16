@@ -42,6 +42,7 @@ export default function App() {
   const [query, setQuery] = useState({ query: "", language: "zh", top_k: 10, date: "", region: "", industry: "", use_semantic: true, semantic_weight: 0.6, bm25_weight: 0.4, candidate_size: 200 })
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
+  const [hasSearched, setHasSearched] = useState(false)
   const [searchError, setSearchError] = useState("")
 
   const i18n = {
@@ -121,6 +122,7 @@ export default function App() {
     if (!payload.region) delete payload.region
     if (!payload.industry) delete payload.industry
     setSearching(true)
+    setHasSearched(true)
     setSearchError("")
     try {
       const res = await searchRegulations(payload)
@@ -216,7 +218,7 @@ export default function App() {
               <span className="meta">{searching ? t.searching : `${results.length} item(s)`}</span>
             </div>
             {searchError && <div className="error">{searchError}</div>}
-            {results.length === 0 && !searching && <div className="error">{t.noMatch}</div>}
+            {hasSearched && !searchError && results.length === 0 && !searching && <div className="error">{t.noMatch}</div>}
             <ul className="list">
               {results.slice(0, 5).map((r, i) => (
                 <li key={i}>
