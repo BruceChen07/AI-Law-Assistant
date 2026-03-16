@@ -33,6 +33,34 @@
     "log_backup_count": 7,
     "log_when": "midnight",
     "log_interval": 1,
+    "ocr_enabled": true,
+    "ocr_languages": "chi_sim+eng",
+    "ocr_min_text_length": 200,
+    "ocr_dpi": 220,
+    "ocr_engine": "auto",
+    "ocr_engine_order": [
+        "tesseract",
+        "mineru"
+    ],
+    "ocr_engine_by_type": {
+        "pdf": "tesseract"
+    },
+    "ocr_engines": {
+        "mineru": {
+            "module": "mineru",
+            "function": "ocr_pdf"
+        }
+    },
+    "llm_config": {
+        "provider": "openai_compatible",
+        "api_base": "https://api.openai.com/v1",
+        "api_key": "",
+        "model": "gpt-4o-mini",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 60,
+        "headers": {}
+    },
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

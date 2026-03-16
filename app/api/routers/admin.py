@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.core.auth import get_all_users, update_user_role, log_audit
 from app.api.dependencies import require_admin
 from app.core.database import get_conn
-from app.core.config import get_config
+from app.core.config import get_config, update_config_patch
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -46,6 +46,46 @@ class StatsResponse(BaseModel):
     total_size: int
     documents_by_category: dict
     documents_by_user: dict
+
+
+class LLMConfigResponse(BaseModel):
+    provider: str
+    api_base: str
+    model: str
+    temperature: float
+    max_tokens: int
+    timeout: int
+    headers: dict
+    has_api_key: bool
+
+
+class LLMConfigUpdate(BaseModel):
+    provider: str
+    api_base: str
+    api_key: str
+    model: str
+    temperature: float
+    max_tokens: int
+    timeout: int
+    headers: dict
+
+
+def _validate_llm_config(payload: dict):
+    api_base = str(payload.get("api_base", "")).strip()
+    model = str(payload.get("model", "")).strip()
+    if not api_base.startswith("http"):
+        raise HTTPException(status_code=400, detail="api_base must be a valid http(s) url")
+    if not model:
+        raise HTTPException(status_code=400, detail="model is required")
+    temperature = float(payload.get("temperature", 0.2))
+    if temperature < 0 or temperature > 2:
+        raise HTTPException(status_code=400, detail="temperature out of range")
+    max_tokens = int(payload.get("max_tokens", 2048))
+    if max_tokens <= 0:
+        raise HTTPException(status_code=400, detail="max_tokens must be positive")
+    timeout = int(payload.get("timeout", 60))
+    if timeout <= 0:
+        raise HTTPException(status_code=400, detail="timeout must be positive")
 
 
 # ============ Document CRUD ============
@@ -216,4 +256,41 @@ def get_stats(current_user: dict = Depends(require_admin)):
         total_size=doc_stats["total_size"],
         documents_by_category=by_category,
         documents_by_user=by_user
+    )
+
+
+@router.get("/llm-config", response_model=LLMConfigResponse)
+def get_llm_config(current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    llm_cfg = cfg.get("llm_config") or {}
+    return LLMConfigResponse(
+        provider=str(llm_cfg.get("provider", "")),
+        api_base=str(llm_cfg.get("api_base", "")),
+        model=str(llm_cfg.get("model", "")),
+        temperature=float(llm_cfg.get("temperature", 0.2)),
+        max_tokens=int(llm_cfg.get("max_tokens", 2048)),
+        timeout=int(llm_cfg.get("timeout", 60)),
+        headers=llm_cfg.get("headers") if isinstance(llm_cfg.get("headers"), dict) else {},
+        has_api_key=bool(llm_cfg.get("api_key"))
+    )
+
+
+@router.put("/llm-config", response_model=LLMConfigResponse)
+def update_llm_config(payload: LLMConfigUpdate, current_user: dict = Depends(require_admin)):
+    data = payload.dict()
+    _validate_llm_config(data)
+    current = get_config().get("llm_config") or {}
+    if not data.get("api_key"):
+        data["api_key"] = current.get("api_key", "")
+    cfg = update_config_patch({"llm_config": data})
+    llm_cfg = cfg.get("llm_config") or {}
+    return LLMConfigResponse(
+        provider=str(llm_cfg.get("provider", "")),
+        api_base=str(llm_cfg.get("api_base", "")),
+        model=str(llm_cfg.get("model", "")),
+        temperature=float(llm_cfg.get("temperature", 0.2)),
+        max_tokens=int(llm_cfg.get("max_tokens", 2048)),
+        timeout=int(llm_cfg.get("timeout", 60)),
+        headers=llm_cfg.get("headers") if isinstance(llm_cfg.get("headers"), dict) else {},
+        has_api_key=bool(llm_cfg.get("api_key"))
     )

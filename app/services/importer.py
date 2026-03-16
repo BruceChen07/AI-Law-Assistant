@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from app.core.utils import extract_text, split_articles
+from app.core.utils import extract_text_with_config, split_articles
 from app.services.crud import create_regulation, create_version, insert_articles, upsert_job
 
 logger = logging.getLogger("law_assistant")
@@ -10,7 +10,7 @@ def process_import(cfg, embedder, job_id, file_path, title, doc_no, issuer, reg_
                    effective_date, expiry_date, region, industry, regulation_id, language):
     try:
         logger.info("import_start job_id=%s file=%s", job_id, file_path)
-        text = extract_text(file_path)
+        text, _ = extract_text_with_config(cfg, file_path)
         articles = split_articles(text)
         if not regulation_id:
             regulation_id = create_regulation(

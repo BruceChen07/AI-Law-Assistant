@@ -9,11 +9,13 @@ from app.core.logger import setup_logging
 from app.core.database import init_db, ensure_embedding_columns
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
+from app.core.llm import LLMService
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
 from app.api.routers.auth import build_router as build_auth_router
 from app.api.routers.admin import router as admin_router
+from app.api.routers.contracts import build_router as build_contracts_router
 
 def init_only():
     cfg = get_config()
@@ -46,6 +48,7 @@ def create_app():
         batch_size=cfg.get("rerank_batch_size", 8),
         max_len=cfg.get("rerank_max_len", 512),
     )
+    llm = LLMService(cfg)
 
     app = FastAPI(title="Law Assistant")
 
@@ -92,9 +95,11 @@ def create_app():
     app.include_router(build_regulations_router(cfg, embedder, reranker))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
+    app.include_router(build_contracts_router(cfg, llm))
 
     app.state.cfg = cfg
     app.state.embedder = embedder
     app.state.reranker = reranker
+    app.state.llm = llm
     app.state.logger = logger
     return app

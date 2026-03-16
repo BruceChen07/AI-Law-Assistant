@@ -98,6 +98,24 @@ export async function adminGetStats() {
   return res.json()
 }
 
+export async function adminGetLLMConfig() {
+  const res = await fetch(`${API_BASE}/api/admin/llm-config`, {
+    headers: { ...getAuthHeaders() }
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function adminUpdateLLMConfig(payload) {
+  const res = await fetch(`${API_BASE}/api/admin/llm-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function importRegulation(formData) {
   const headers = { ...getAuthHeaders() }
   const res = await fetch(`${API_BASE}/regulations/import`, { method: "POST", body: formData, headers })
@@ -117,6 +135,13 @@ export async function searchRegulations(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function auditContract(formData) {
+  const headers = { ...getAuthHeaders() }
+  const res = await fetch(`${API_BASE}/contracts/audit`, { method: "POST", body: formData, headers })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

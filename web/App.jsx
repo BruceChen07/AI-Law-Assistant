@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react"
-import { importRegulation, getJob, searchRegulations, getCurrentUser, getMe, logout } from "./api"
+import { auditContract, getCurrentUser, getMe, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 
@@ -23,133 +23,89 @@ export default function App() {
     syncUser()
   }, [])
   const [uiLang, setUiLang] = useState("zh")
-  const [upload, setUpload] = useState({
+  const [contract, setContract] = useState({
     title: "",
-    doc_no: "",
-    issuer: "",
-    status: "current",
-    effective_date: "",
-    expiry_date: "",
-    region: "",
-    industry: "",
     language: "zh"
   })
-  const [file, setFile] = useState(null)
-  const [fileError, setFileError] = useState("")
-  const [jobId, setJobId] = useState("")
-  const [jobStatus, setJobStatus] = useState("")
-  const [query, setQuery] = useState({ query: "", language: "zh", top_k: 10, date: "", region: "", industry: "", use_semantic: true, semantic_weight: 0.6, bm25_weight: 0.4, candidate_size: 50, rerank_enabled: true, rerank_top_n: 50 })
-  const [results, setResults] = useState([])
-  const [searching, setSearching] = useState(false)
-  const [hasSearched, setHasSearched] = useState(false)
-  const [searchError, setSearchError] = useState("")
-  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [contractFile, setContractFile] = useState(null)
+  const [contractError, setContractError] = useState("")
+  const [contractLoading, setContractLoading] = useState(false)
+  const [contractResult, setContractResult] = useState(null)
+  const [contractMeta, setContractMeta] = useState(null)
 
   const i18n = {
     zh: {
-      appTitle: "法规助手",
+      appTitle: "合同审计",
+      appSubtitle: "上传合同，生成财税与法律风险审计",
       uiLanguage: "界面语言",
-      importTitle: "法规导入",
       chooseFile: "选择文件",
       noFileChosen: "未选择任何文件",
-      searchTitle: "检索",
-      uploadBtn: "上传",
-      checkJob: "查询任务",
-      searchBtn: "搜索",
-      semantic: "语义检索",
-      searching: "检索中...",
-      result: "检索结果",
-      topAnswer: "最佳答案",
-      noMatch: "未匹配到条款，请尝试更宽泛关键词或取消筛选。",
-      noAnswer: "未提取到直接答案，请优化关键词。",
-      invalidFileType: "文档格式不对，请上传 docx 或 pdf 文档。"
+      uploadBtn: "开始审计",
+      contractTitle: "合同标题",
+      auditResult: "审计结果",
+      summary: "概览",
+      risks: "风险清单",
+      emptyRisk: "未识别到明显风险",
+      ocrMeta: "OCR",
+      pageMeta: "页数",
+      modelMeta: "模型",
+      invalidFileType: "文档格式不对，请上传 docx 或 pdf 文档。",
+      uploading: "审计中...",
+      uploadHint: "支持 docx / pdf / 扫描版 pdf"
     },
     en: {
-      appTitle: "Law Assistant",
+      appTitle: "Contract Audit",
+      appSubtitle: "Upload contracts and generate compliance risk audit",
       uiLanguage: "UI Language",
-      importTitle: "Regulation Import",
       chooseFile: "Choose File",
       noFileChosen: "No file chosen",
-      searchTitle: "Search",
-      uploadBtn: "Upload",
-      checkJob: "Check Job",
-      searchBtn: "Search",
-      semantic: "Semantic Search",
-      searching: "Searching...",
-      result: "Search Result",
-      topAnswer: "Top Answer",
-      noMatch: "No matched articles. Try broader keywords or disable filters.",
-      noAnswer: "No direct answer extracted, please refine keywords.",
+      uploadBtn: "Audit",
+      contractTitle: "Contract Title",
+      auditResult: "Audit Result",
+      summary: "Summary",
+      risks: "Risk List",
+      emptyRisk: "No obvious risks detected",
+      ocrMeta: "OCR",
+      pageMeta: "Pages",
+      modelMeta: "Model",
       invalidFileType: "Invalid file type. Please upload docx or pdf documents.",
-      semanticWeight: "Semantic Weight",
-      bm25Weight: "BM25 Weight",
-      candidateSize: "Candidates",
-      rerankEnabled: "Rerank Enabled",
-      rerankTopN: "Rerank Candidates",
-      advancedConfig: "Advanced Config",
-      advancedToggle: "Show Advanced"
+      uploading: "Auditing...",
+      uploadHint: "Supports docx / pdf / scanned pdf"
     }
   }
   const t = i18n[uiLang] || i18n.zh
-  // Ensure we have missing translations for zh
-  if (uiLang === "zh" && !t.semanticWeight) {
-    t.semanticWeight = "语义权重"
-    t.bm25Weight = "关键词权重"
-    t.candidateSize = "召回数量"
-    t.rerankEnabled = "精排启用"
-    t.rerankTopN = "精排候选"
-    t.advancedConfig = "高级配置"
-    t.advancedToggle = "展开高级配置"
-  }
   const fileInputRef = useRef(null)
 
-  const onUpload = async (e) => {
+  const onContractUpload = async (e) => {
     e.preventDefault()
-    if (!file) return
-    const ext = file.name.toLowerCase().split('.').pop()
-    if (!['docx', 'pdf'].includes(ext)) {
-      setFileError(t.invalidFileType)
+    if (!contractFile) return
+    const ext = contractFile.name.toLowerCase().split(".").pop()
+    if (!["docx", "pdf"].includes(ext)) {
+      setContractError(t.invalidFileType)
       return
     }
-    setFileError("")
-    const form = new FormData()
-    Object.entries(upload).forEach(([k, v]) => form.append(k, v))
-    form.append("file", file)
-    const res = await importRegulation(form)
-    setJobId(res.job_id)
-    setJobStatus("running")
-  }
-
-  const onCheck = async () => {
-    if (!jobId) return
-    const res = await getJob(jobId)
-    setJobStatus(res.status)
+    setContractError("")
+    setContractLoading(true)
+    try {
+      const form = new FormData()
+      form.append("title", contract.title || contractFile.name)
+      form.append("language", contract.language)
+      form.append("file", contractFile)
+      const res = await auditContract(form)
+      setContractResult(res.result || null)
+      setContractMeta(res.meta || null)
+    } catch (err) {
+      setContractError(String(err?.message || err || "Audit failed"))
+      setContractResult(null)
+      setContractMeta(null)
+    } finally {
+      setContractLoading(false)
+    }
   }
 
   const onUiLanguageChange = (next) => {
     setUiLang(next)
-    setUpload(prev => ({ ...prev, language: next }))
-    setQuery(prev => ({ ...prev, language: next }))
-  }
-
-  const onSearch = async (e) => {
-    e.preventDefault()
-    const payload = { ...query }
-    if (!payload.date) delete payload.date
-    if (!payload.region) delete payload.region
-    if (!payload.industry) delete payload.industry
-    setSearching(true)
-    setHasSearched(true)
-    setSearchError("")
-    try {
-      const res = await searchRegulations(payload)
-      setResults(Array.isArray(res) ? res : [])
-    } catch (err) {
-      setResults([])
-      setSearchError(String(err?.message || err || "Search failed"))
-    } finally {
-      setSearching(false)
-    }
+    setContract(prev => ({ ...prev, language: next }))
   }
 
   if (!user) {
@@ -158,166 +114,110 @@ export default function App() {
 
   const canOpenAdmin = user.role === "admin" || user.username === "admin"
 
+  if (view === "admin") {
+    return <Admin lang={uiLang} onBack={() => setView("main")} />
+  }
+
   return (
-    <div className="page">
-      <div className="row" style={{ justifyContent: 'space-between', marginBottom: 20 }}>
-        <h1>{t.appTitle}</h1>
-        <div>
-          <span>Welcome, {user.username} ({user.role}) </span>
-          {canOpenAdmin && <button onClick={() => setView("admin")}>Admin</button>}
-          <button onClick={() => { logout(); setUser(null); }}>Logout</button>
+    <div className="page contract-shell">
+      <header className="contract-header">
+        <div className="contract-heading">
+          <div className="contract-eyebrow">Tax & Compliance</div>
+          <h1>{t.appTitle}</h1>
+          <p>{t.appSubtitle}</p>
         </div>
-      </div>
-      
-      {view === "admin" ? (
-        <Admin lang={uiLang} onBack={() => setView("main")} />
-      ) : (
-        <>
-          <section className="card">
-            <div className="row">
-              <strong>{t.uiLanguage}</strong>
-              <select value={uiLang} onChange={e => onUiLanguageChange(e.target.value)}>
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-              </select>
-            </div>
-          </section>
-          <section className="card">
-            <h2>{t.importTitle}</h2>
-            <form onSubmit={onUpload} className="grid">
-              <input placeholder={uiLang === "zh" ? "标题" : "Title"} value={upload.title} onChange={e => setUpload({ ...upload, title: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "Tag" : "Tag"} value={upload.doc_no} onChange={e => setUpload({ ...upload, doc_no: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "发布机构" : "Issuer"} value={upload.issuer} onChange={e => setUpload({ ...upload, issuer: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "生效日期 yyyy-mm-dd" : "Effective Date yyyy-mm-dd"} value={upload.effective_date} onChange={e => setUpload({ ...upload, effective_date: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={upload.expiry_date} onChange={e => setUpload({ ...upload, expiry_date: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={upload.region} onChange={e => setUpload({ ...upload, region: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={upload.industry} onChange={e => setUpload({ ...upload, industry: e.target.value })} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="contract-actions">
+          <div className="lang-pill">
+            <span>{t.uiLanguage}</span>
+            <select value={uiLang} onChange={e => onUiLanguageChange(e.target.value)}>
+              <option value="zh">中文</option>
+              <option value="en">English</option>
+            </select>
+          </div>
+          <div className="user-pill">
+            <span>{user.username}</span>
+            <em>{user.role}</em>
+            {canOpenAdmin && <button className="ghost" onClick={() => setView("admin")}>Admin</button>}
+            <button className="ghost" onClick={() => { logout(); setUser(null); }}>Logout</button>
+          </div>
+        </div>
+      </header>
+        <div className="contract-grid">
+          <section className="card contract-upload">
+            <div className="contract-panel">
+              <div className="panel-title">{t.contractTitle}</div>
+              <input
+                className="contract-input"
+                placeholder={t.contractTitle}
+                value={contract.title}
+                onChange={e => setContract({ ...contract, title: e.target.value })}
+              />
+              <div className="contract-drop">
                 <input
                   ref={fileInputRef}
                   type="file"
                   accept=".docx,.pdf"
                   onChange={e => {
                     const f = e.target.files?.[0] || null
-                    setFile(f)
-                    setFileError("")
+                    setContractFile(f)
+                    setContractError("")
                   }}
-                  style={{ display: 'none' }}
+                  style={{ display: "none" }}
                 />
-                <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()}>{t.chooseFile}</button>
-                <span className="meta">{file ? file.name : t.noFileChosen}</span>
+                <button type="button" className="ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>
+                  {t.chooseFile}
+                </button>
+                <span>{contractFile ? contractFile.name : t.noFileChosen}</span>
+                <em>{t.uploadHint}</em>
               </div>
-              {fileError && <span style={{color: 'red'}}>{fileError}</span>}
-              <button type="submit">{t.uploadBtn}</button>
-            </form>
-            <div className="row">
-              <button onClick={onCheck}>{t.checkJob}</button>
-              <span>Job: {jobId} {jobStatus}</span>
+              {contractError && <div className="error">{contractError}</div>}
+              <button className="primary" onClick={onContractUpload} disabled={contractLoading}>
+                {contractLoading ? t.uploading : t.uploadBtn}
+              </button>
             </div>
           </section>
-
-          <section className="card">
-            <h2>{t.searchTitle}</h2>
-            <form onSubmit={onSearch} className="grid">
-              <input placeholder={uiLang === "zh" ? "问题" : "Query"} value={query.query} onChange={e => setQuery({ ...query, query: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "日期 yyyy-mm-dd" : "Date yyyy-mm-dd"} value={query.date} onChange={e => setQuery({ ...query, date: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "地区" : "Region"} value={query.region} onChange={e => setQuery({ ...query, region: e.target.value })} />
-              <input placeholder={uiLang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={query.industry} onChange={e => setQuery({ ...query, industry: e.target.value })} />
-              
-              <div style={{ gridColumn: "1 / -1", border: "1px solid #eee", padding: "10px", borderRadius: "4px", marginTop: "10px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                  <div style={{ fontWeight: "bold" }}>{t.advancedConfig}</div>
-                  <button type="button" onClick={() => setShowAdvanced(!showAdvanced)}>
-                    {showAdvanced ? (uiLang === "zh" ? "收起" : "Hide") : t.advancedToggle}
-                  </button>
+          <section className="card contract-result">
+            <div className="panel-title">{t.auditResult}</div>
+            {!contractResult && (
+              <div className="empty-state">
+                <div className="empty-mark">A</div>
+                <p>{t.appSubtitle}</p>
+              </div>
+            )}
+            {contractResult && (
+              <div className="result-body">
+                <div className="result-summary">
+                  <div className="result-title">{t.summary}</div>
+                  <p>{contractResult.summary || "-"}</p>
                 </div>
-                {showAdvanced && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "20px", alignItems: "center" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                      <input type="checkbox" checked={query.use_semantic} onChange={e => setQuery({ ...query, use_semantic: e.target.checked })} /> 
-                      {t.semantic}
-                    </label>
-                    
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <label>{t.semanticWeight}: {query.semantic_weight}</label>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="1" 
-                        step="0.1" 
-                        value={query.semantic_weight} 
-                        onChange={e => setQuery({ ...query, semantic_weight: parseFloat(e.target.value) })} 
-                        style={{ width: "100px" }}
-                      />
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <label>{t.bm25Weight}: {query.bm25_weight}</label>
-                      <input 
-                        type="range" 
-                        min="0" 
-                        max="1" 
-                        step="0.1" 
-                        value={query.bm25_weight} 
-                        onChange={e => setQuery({ ...query, bm25_weight: parseFloat(e.target.value) })} 
-                        style={{ width: "100px" }}
-                      />
-                    </div>
-
-                    <label style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                      <input type="checkbox" checked={query.rerank_enabled} onChange={e => setQuery({ ...query, rerank_enabled: e.target.checked })} />
-                      {t.rerankEnabled}
-                    </label>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <label>{t.candidateSize}: {query.candidate_size}</label>
-                      <input 
-                        type="range" 
-                        min="10" 
-                        max="200" 
-                        step="10" 
-                        value={query.candidate_size} 
-                        onChange={e => setQuery({ ...query, candidate_size: parseInt(e.target.value || "0") })} 
-                        style={{ width: "140px" }}
-                      />
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <label>{t.rerankTopN}: {query.rerank_top_n}</label>
-                      <input 
-                        type="range" 
-                        min="10" 
-                        max="200" 
-                        step="10" 
-                        value={query.rerank_top_n} 
-                        onChange={e => setQuery({ ...query, rerank_top_n: parseInt(e.target.value || "0") })} 
-                        style={{ width: "140px" }}
-                      />
-                    </div>
-                  </div>
-                )}
+                <div className="result-risks">
+                  <div className="result-title">{t.risks}</div>
+                  {Array.isArray(contractResult.risks) && contractResult.risks.length > 0 ? (
+                    <ul>
+                      {contractResult.risks.map((r, idx) => (
+                        <li key={idx}>
+                          <strong>{r.level || "N/A"}</strong>
+                          <span>{r.type || "-"}</span>
+                          <p>{r.issue || "-"}</p>
+                          <em>{r.suggestion || ""}</em>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="empty-risk">{t.emptyRisk}</div>
+                  )}
+                </div>
               </div>
-
-              <button type="submit" style={{ gridColumn: "1 / -1" }}>{t.searchBtn}</button>
-            </form>
-            <div className="row">
-              <strong>{t.result}</strong>
-              <span className="meta">{searching ? t.searching : `${results.length} item(s)`}</span>
-            </div>
-            {searchError && <div className="error">{searchError}</div>}
-            {hasSearched && !searchError && results.length === 0 && !searching && <div className="error">{t.noMatch}</div>}
-            <ul className="list">
-              {results.slice(0, 5).map((r, i) => (
-                <li key={i}>
-                  <div className="title">{r.title} - {r.article_no}</div>
-                  <div className="meta">{r.effective_date} | {r.region} | {r.industry}</div>
-                  <div className="content">{r.content?.slice(0, 300)}...</div>
-                </li>
-              ))}
-            </ul>
+            )}
+            {contractMeta && (
+              <div className="result-meta">
+                <span>{t.ocrMeta}: {contractMeta.ocr_used ? contractMeta.ocr_engine || "on" : "off"}</span>
+                <span>{t.pageMeta}: {contractMeta.page_count ?? "-"}</span>
+                <span>{t.modelMeta}: {contractMeta.llm_model || "-"}</span>
+              </div>
+            )}
           </section>
-        </>
-      )}
+        </div>
     </div>
   )
 }

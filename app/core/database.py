@@ -89,6 +89,22 @@ def init_db(cfg):
     cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS contract_audit(
+        id TEXT PRIMARY KEY,
+        document_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result_json TEXT,
+        model_provider TEXT,
+        model_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (document_id) REFERENCES documents(id)
+    )
+    """)
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_contract_audit_document_id ON contract_audit(document_id)")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_contract_audit_created_at ON contract_audit(created_at)")
     
     # Existing tables
     cur.execute("""
