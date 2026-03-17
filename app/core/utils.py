@@ -1,9 +1,12 @@
 import os
 import re
+import logging
 from typing import List, Tuple, Optional, Dict, Any
 from pypdf import PdfReader
 from docx import Document
 from app.core.ocr import OCREngineManager
+
+logger = logging.getLogger("law_assistant")
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -72,6 +75,7 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
 
     text, page_count = _extract_pdf_text(path)
     meta["page_count"] = page_count
+    logger.info("pdf_extract_done file=%s pages=%s text_length=%s", path, page_count, len(text))
 
     ocr_enabled = bool(cfg.get("ocr_enabled", True))
     ocr_min_len = int(cfg.get("ocr_min_text_length", 200))
@@ -79,6 +83,14 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
     ocr_dpi = int(cfg.get("ocr_dpi", 220))
 
     if ocr_enabled and len(text.strip()) < ocr_min_len:
+        logger.info(
+            "ocr_trigger file=%s text_length=%s min_len=%s langs=%s dpi=%s",
+            path,
+            len(text.strip()),
+            ocr_min_len,
+            ocr_langs,
+            ocr_dpi
+        )
         try:
             manager = OCREngineManager(cfg)
             ocr_text, ocr_pages, engine = manager.ocr_pdf(path, ocr_langs, ocr_dpi, doc_type="pdf")
@@ -86,9 +98,16 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
                 meta["ocr_used"] = True
                 meta["ocr_engine"] = engine or ""
                 meta["page_count"] = max(page_count, ocr_pages)
+                logger.info(
+                    "ocr_done file=%s engine=%s pages=%s text_length=%s",
+                    path,
+                    engine,
+                    ocr_pages,
+                    len(ocr_text)
+                )
                 return ocr_text, meta
         except Exception:
-            pass
+            logger.exception("ocr_failed file=%s", path)
     return text, meta
 
 

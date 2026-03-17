@@ -47,9 +47,19 @@
     },
     "ocr_engines": {
         "mineru": {
-            "module": "mineru",
+            "module": "app.core.mineru_ocr",
             "function": "ocr_pdf"
         }
+    },
+    "mineru": {
+        "backend": "hybrid-auto-engine",
+        "method": "auto",
+        "lang": "ch",
+        "device": "cpu",
+        "formula": true,
+        "table": true,
+        "model_source": "huggingface",
+        "timeout": 900
     },
     "llm_config": {
         "provider": "openai_compatible",

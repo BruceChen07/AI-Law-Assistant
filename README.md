@@ -7,17 +7,17 @@
   <img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License">
 </p>
 
-一个基于混合检索（BM25 + 语义向量 + 交叉编码重排）的法律法规智能检索系统。支持中英文法律条款语义搜索与两阶段排序，适用于企业合规、法务审计等场景。
+一个面向财税与法务的合同审计系统，包含合同上传审计、法规导入与检索、OCR增强解析，以及可配置的大语言模型调用。
 
 ## 功能特性
 
-- **两阶段检索**：召回（BM25 + 向量）+ 交叉编码重排，提升精度
-- **多语言支持**：支持中文（zh）和英文（en）法规检索
-- **法规管理**：支持 doc/docx/pdf 文件导入并自动解析条款
-- **向量语义**：BGE-small 向量模型支持语义检索
-- **鉴权与管理**：内置用户登录与管理端 API
-- **RESTful API**：提供完整 API 便于系统集成
-- **Web UI**：React + Vite 前端，支持中英文切换
+- **合同审计**：主界面上传合同（docx/pdf/扫描pdf），生成风险清单与摘要
+- **OCR 增强**：PDF 文本不足时自动回退 OCR，支持多引擎配置
+- **法规管理**：Admin 内上传法规文档并完成条款解析与检索
+- **混合检索**：BM25 + 向量召回 + 交叉编码重排
+- **模型配置**：集中式 LLM 参数管理与热切换
+- **鉴权与管理**：用户登录与管理端 API
+- **Web UI**：React + Vite 前端，中英文切换
 
 ## 技术架构
 
@@ -25,13 +25,13 @@
 Frontend (React + Vite)
         │ HTTP
 Backend (FastAPI + Uvicorn)
-  ├─ API Routes (auth, regulations, embedding, admin)
-  ├─ Services (search, importer, crud)
-  └─ Core (config, database, embedding, reranker, logger)
+  ├─ API Routes (auth, regulations, contracts, admin)
+  ├─ Services (search, importer, contract_audit, crud)
+  └─ Core (config, database, embedding, reranker, llm, ocr)
         │
 Data Layer (SQLite + FTS5 + Files)
         │
-Models (Embedding + Reranker)
+Models (Embedding + Reranker + LLM)
 ```
 
 ### 技术栈
@@ -53,6 +53,7 @@ Models (Embedding + Reranker)
 - Python 3.8+
 - Node.js 18+
 - Windows / Linux / macOS
+- OCR 依赖：tesseract、poppler（用于扫描 PDF）
 
 ### 1. 克隆项目
 
@@ -114,31 +115,38 @@ npm run dev
 
 ## 使用指南
 
-### 法规导入
+### 合同审计（主界面）
 
-1. 在「法规导入」表单中填写法规信息
-2. 上传 docx/doc/pdf 格式的法规文件
-3. 点击「上传」按钮
-4. 可通过「查询任务」查看导入状态
+1. 上传合同 docx/pdf/扫描 pdf
+2. 点击审计生成摘要与风险清单
+3. 结果中可查看 OCR 与模型元信息
 
-支持的字段：
+### 法规导入与检索（Admin 页面）
+
+1. 进入 Admin → 「法规上传」
+2. 上传法规文档（docx/pdf），填写法规元数据
+3. 通过「查询任务」查看导入状态
+4. 在「检索」区域输入关键词并调整权重
+
+支持字段：
 - **标题 (Title)**：法规文件标题
 - **Tag**：法规文号/标签
 - **发布机构 (Issuer)**：发布该法规的机构
-- **类型 (Type)**：法规类型
 - **生效日期 / 失效日期**：法规有效期
 - **地区 (Region)**：适用地区
 - **Sub-Tag**：行业分类
 
-### 法规检索
+### 模型配置（Admin 页面）
 
-1. 在「检索」区域输入查询关键词
-2. 可选筛选条件：日期、地区、Sub-Tag
-3. 配置检索权重：
-   - **Semantic Weight (0-1)**：语义检索权重
-   - **BM25 Weight (0-1)**：关键词匹配权重
-   - **Candidates**：候选文档数量
-4. 点击「搜索」查看结果
+1. 进入 Admin → 「模型配置」
+2. 填写 API 端点、模型、温度、最大 Token 等
+3. 保存后立即生效
+
+### OCR 验证
+
+```bash
+python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_report.json
+```
 
 ### 重排（Reranker）使用指南
 
@@ -175,12 +183,15 @@ npm run dev
 |------|------|------|
 | GET | `/health` | 健康检查 |
 | GET | `/docs` | API 文档 |
+| POST | `/contracts/audit` | 合同审计 |
 | POST | `/regulations/import` | 导入法规 |
 | GET | `/regulations/import/{job_id}` | 查询导入任务 |
 | GET | `/regulations` | 获取法规列表 |
 | GET | `/regulations/{id}/articles` | 获取法规条款 |
 | POST | `/regulations/search` | 检索法规 |
 | POST | `/embedding/compute` | 计算向量 |
+| GET | `/api/admin/llm-config` | 获取 LLM 配置 |
+| PUT | `/api/admin/llm-config` | 更新 LLM 配置 |
 
 ## 配置说明
 
@@ -193,36 +204,35 @@ npm run dev
     "files_dir": "../data/files",
     "static_dir": "../web/dist",
     "default_language": "zh",
+    "ocr_enabled": true,
+    "ocr_languages": "chi_sim+eng",
+    "ocr_min_text_length": 200,
+    "ocr_dpi": 220,
+    "ocr_engine": "auto",
+    "ocr_engine_order": ["tesseract", "mineru"],
+    "llm_config": {
+        "provider": "openai_compatible",
+        "api_base": "https://api.openai.com/v1",
+        "api_key": "",
+        "model": "gpt-4o-mini",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 60,
+        "headers": {}
+    },
     "reranker_enabled": true,
     "reranker_model_path": "../models/reranker/zh",
     "reranker_profiles": {
         "zh": "../models/reranker/zh",
         "en": "../models/reranker/en"
     },
-    "rerank_batch_size": 8,
-    "rerank_max_len": 512,
-    "rerank_fallback": true,
-    "rerank_score_threshold": 0.0,
     "embedding_profiles": {
         "zh": {
             "embedding_model": "../models/embedding/zh/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/zh",
-            "embedding_model_id": "BAAI/bge-small-zh-v1.5",
-            "embedding_max_seq_len": 512,
-            "embedding_pooling": "cls"
-        },
-        "en": {
-            "embedding_model": "../models/embedding/en/model.onnx",
-            "embedding_tokenizer_dir": "../models/embedding/en",
-            "embedding_model_id": "BAAI/bge-small-en-v1.5",
-            "embedding_max_seq_len": 512,
-            "embedding_pooling": "cls"
+            "embedding_model_id": "BAAI/bge-small-zh-v1.5"
         }
     },
-    "log_level": "INFO",
-    "log_dir": "../data/logs",
-    "log_max_bytes": 5242880,
-    "log_backup_count": 3,
     "cors_allow_origins": ["http://localhost:5173"]
 }
 ```
@@ -236,6 +246,13 @@ npm run dev
 | `files_dir` | string | 上传文件存储目录 |
 | `static_dir` | string | 前端静态资源目录 |
 | `default_language` | string | 默认语言 (zh/en) |
+| `ocr_enabled` | boolean | 是否启用 OCR 回退 |
+| `ocr_languages` | string | OCR 语言包配置 |
+| `ocr_min_text_length` | int | 触发 OCR 的文本长度阈值 |
+| `ocr_dpi` | int | OCR 转换 DPI |
+| `ocr_engine` | string | OCR 引擎（auto/tesseract/其他） |
+| `ocr_engine_order` | array | OCR 引擎优先级 |
+| `llm_config` | object | LLM 参数配置 |
 | `reranker_enabled` | boolean | 是否启用重排 |
 | `reranker_model_path` | string | 默认重排模型路径 |
 | `reranker_profiles` | object | 重排模型多语言路径 |

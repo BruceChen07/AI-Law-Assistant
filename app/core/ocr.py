@@ -2,7 +2,10 @@ import importlib
 import shutil
 import subprocess
 import time
+import logging
 from typing import Dict, Any, Tuple, Optional, List
+
+logger = logging.getLogger("law_assistant")
 
 
 class OCREngine:
@@ -110,11 +113,17 @@ class OCREngineManager:
     def ocr_pdf(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int, Optional[str]]:
         name = self.select_engine(doc_type)
         if not name:
+            logger.info("ocr_engine_missing file=%s doc_type=%s", path, doc_type)
             return "", 0, None
         engine = self.get_engine(name)
         if not engine:
+            logger.info("ocr_engine_not_found file=%s engine=%s", path, name)
             return "", 0, None
+        logger.info("ocr_engine_start file=%s engine=%s lang=%s dpi=%s", path, name, lang, dpi)
+        start = time.perf_counter()
         text, pages = engine.ocr_pdf(path, lang, dpi)
+        elapsed = int((time.perf_counter() - start) * 1000)
+        logger.info("ocr_engine_done file=%s engine=%s pages=%s text_length=%s cost_ms=%s", path, name, pages, len(text), elapsed)
         return text, pages, name
 
 
@@ -167,4 +176,18 @@ def detect_dependencies(cmd_runner=None) -> Dict[str, Any]:
                 info[name]["version"] = out.splitlines()[0].strip()
             except Exception:
                 info[name]["version"] = None
+    mineru_info = {"module": False, "cli": False, "version": None}
+    try:
+        mineru_info["module"] = importlib.util.find_spec("mineru") is not None
+    except Exception:
+        mineru_info["module"] = False
+    mineru_path = shutil.which("mineru")
+    mineru_info["cli"] = bool(mineru_path)
+    if mineru_path:
+        try:
+            out = cmd_runner(["mineru", "--version"])
+            mineru_info["version"] = out.splitlines()[0].strip()
+        except Exception:
+            mineru_info["version"] = None
+    info["mineru"] = mineru_info
     return info

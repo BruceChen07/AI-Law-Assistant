@@ -8,6 +8,7 @@ from app.core.auth import get_all_users, update_user_role, log_audit
 from app.api.dependencies import require_admin
 from app.core.database import get_conn
 from app.core.config import get_config, update_config_patch
+from app.core.llm import LLMService
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -68,6 +69,32 @@ class LLMConfigUpdate(BaseModel):
     max_tokens: int
     timeout: int
     headers: dict
+
+
+class LLMTestRequest(BaseModel):
+    prompt: Optional[str] = None
+
+
+class LLMTestResponse(BaseModel):
+    ok: bool
+    prompt: str
+    answer: str
+
+
+def _clean_text(v: str) -> str:
+    s = str(v or "").strip()
+    s = s.strip("`").strip('"').strip("'").strip()
+    return s
+
+
+def _normalize_llm_payload(payload: dict) -> dict:
+    data = dict(payload or {})
+    data["api_base"] = _clean_text(data.get("api_base", ""))
+    data["model"] = _clean_text(data.get("model", ""))
+    data["api_key"] = _clean_text(data.get("api_key", ""))
+    if not isinstance(data.get("headers"), dict):
+        data["headers"] = {}
+    return data
 
 
 def _validate_llm_config(payload: dict):
@@ -276,13 +303,15 @@ def get_llm_config(current_user: dict = Depends(require_admin)):
 
 
 @router.put("/llm-config", response_model=LLMConfigResponse)
-def update_llm_config(payload: LLMConfigUpdate, current_user: dict = Depends(require_admin)):
-    data = payload.dict()
+def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: dict = Depends(require_admin)):
+    data = _normalize_llm_payload(payload.dict())
     _validate_llm_config(data)
     current = get_config().get("llm_config") or {}
     if not data.get("api_key"):
-        data["api_key"] = current.get("api_key", "")
+        data["api_key"] = _clean_text(current.get("api_key", ""))
     cfg = update_config_patch({"llm_config": data})
+    if hasattr(request.app.state, "llm"):
+        request.app.state.llm.cfg = cfg
     llm_cfg = cfg.get("llm_config") or {}
     return LLMConfigResponse(
         provider=str(llm_cfg.get("provider", "")),
@@ -294,3 +323,23 @@ def update_llm_config(payload: LLMConfigUpdate, current_user: dict = Depends(req
         headers=llm_cfg.get("headers") if isinstance(llm_cfg.get("headers"), dict) else {},
         has_api_key=bool(llm_cfg.get("api_key"))
     )
+
+
+@router.post("/llm-test", response_model=LLMTestResponse)
+def test_llm(payload: Optional[LLMTestRequest] = None, request: Request = None, current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    llm = request.app.state.llm if request is not None and hasattr(request.app.state, "llm") else LLMService(cfg)
+    prompt = ""
+    if payload:
+        prompt = str(payload.prompt or "").strip()
+    if not prompt:
+        prompt = "你是什么模型？请简短回答。"
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": prompt}
+    ]
+    try:
+        answer, _ = llm.chat(messages)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"llm test failed: {str(e)}")
+    return LLMTestResponse(ok=True, prompt=prompt, answer=answer)

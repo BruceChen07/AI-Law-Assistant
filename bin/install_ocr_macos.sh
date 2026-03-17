@@ -22,5 +22,11 @@ if ! command -v pdftoppm >/dev/null 2>&1; then
   echo "poppler not found"
   exit 1
 fi
+if command -v python3 >/dev/null 2>&1; then
+  python3 -m pip install -U "mineru[all]==2.7.6"
+else
+  echo "python3 not found"
+  exit 1
+fi
 echo "tesseract: $(tesseract --version | head -n 1)"
 echo "poppler: $(pdftoppm -v 2>&1 | head -n 1)"

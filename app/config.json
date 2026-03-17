@@ -62,13 +62,13 @@
         }
     },
     "llm_config": {
-        "provider": "openai_compatible",
-        "api_base": "https://api.openai.com/v1",
-        "api_key": "",
-        "model": "gpt-4o-mini",
-        "temperature": 0.2,
+        "provider": "qwen",
+        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "sk-458a55fe938a40e181f2b4578d98d609",
+        "model": "qwen3.5-397b-a17b",
+        "temperature": 0.0,
         "max_tokens": 2048,
-        "timeout": 60,
+        "timeout": 120,
         "headers": {}
     },
     "max_upload_mb": 50,

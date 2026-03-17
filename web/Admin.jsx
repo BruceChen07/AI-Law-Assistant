@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 
 export default function Admin({ onBack, lang }) {
   const [tab, setTab] = useState("documents")
@@ -11,8 +11,13 @@ export default function Admin({ onBack, lang }) {
   const [search, setSearch] = useState("")
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [llmConfig, setLlmConfig] = useState(null)
+  const [llmHasApiKey, setLlmHasApiKey] = useState(false)
   const [llmSaving, setLlmSaving] = useState(false)
   const [llmError, setLlmError] = useState("")
+  const [llmTestPrompt, setLlmTestPrompt] = useState("")
+  const [llmTestResult, setLlmTestResult] = useState("")
+  const [llmTestError, setLlmTestError] = useState("")
+  const [llmTesting, setLlmTesting] = useState(false)
   const [regUpload, setRegUpload] = useState({
     title: "",
     doc_no: "",
@@ -100,7 +105,14 @@ export default function Admin({ onBack, lang }) {
       temperature: "温度",
       maxTokens: "最大 Token",
       timeout: "超时(秒)",
-      headers: "自定义 Header(JSON)",
+      llmTestPrompt: "测试问题",
+      llmTestButton: "测试配置",
+      llmTestRunning: "测试中...",
+      llmTestResult: "测试结果",
+      llmTestOk: "配置可用",
+      llmTestDefaultPrompt: "你是什么模型？请简短回答。",
+      llmApiKeySavedMask: "********（已保存，留空则不变）",
+      llmApiKeySavedHint: "已保存 API 密钥；不修改可留空。",
       save: "保存",
       saved: "已保存",
       validateFailed: "请检查配置参数",
@@ -168,7 +180,14 @@ export default function Admin({ onBack, lang }) {
       temperature: "Temperature",
       maxTokens: "Max Tokens",
       timeout: "Timeout (s)",
-      headers: "Custom Headers (JSON)",
+      llmTestPrompt: "Test Question",
+      llmTestButton: "Test Config",
+      llmTestRunning: "Testing...",
+      llmTestResult: "Test Result",
+      llmTestOk: "Config OK",
+      llmTestDefaultPrompt: "What model are you? Keep it brief.",
+      llmApiKeySavedMask: "******** (saved, keep empty to retain)",
+      llmApiKeySavedHint: "API key already saved; leave empty to keep it.",
       save: "Save",
       saved: "Saved",
       validateFailed: "Please check config fields",
@@ -189,6 +208,7 @@ export default function Admin({ onBack, lang }) {
   useEffect(() => {
     setRegUpload(prev => ({ ...prev, language: lang || "zh" }))
     setRegQuery(prev => ({ ...prev, language: lang || "zh" }))
+    setLlmTestPrompt(prev => prev || t.llmTestDefaultPrompt)
   }, [lang])
   
   const loadDocuments = async () => {
@@ -246,6 +266,10 @@ export default function Admin({ onBack, lang }) {
         timeout: data.timeout ?? 60,
         headers: data.headers || {}
       })
+      setLlmHasApiKey(!!data.has_api_key)
+      setLlmTestPrompt(prev => prev || t.llmTestDefaultPrompt)
+      setLlmTestResult("")
+      setLlmTestError("")
       setLlmError("")
     } catch (err) {
       setLlmError(err.message)
@@ -286,11 +310,32 @@ export default function Admin({ onBack, lang }) {
         headers: llmConfig.headers || {}
       })
       setLlmError(t.saved)
+      setLlmHasApiKey(true)
       setLlmConfig(prev => ({ ...prev, api_key: "" }))
     } catch (err) {
       setLlmError(err.message)
     } finally {
       setLlmSaving(false)
+    }
+  }
+
+  const testLLM = async () => {
+    if (!llmConfig) return
+    if (!validateLLM(llmConfig)) {
+      setLlmTestError(t.validateFailed)
+      return
+    }
+    const prompt = (llmTestPrompt || t.llmTestDefaultPrompt).trim()
+    setLlmTesting(true)
+    setLlmTestResult("")
+    setLlmTestError("")
+    try {
+      const res = await adminTestLLM({ prompt })
+      setLlmTestResult(res.answer || "")
+    } catch (err) {
+      setLlmTestError(err.message)
+    } finally {
+      setLlmTesting(false)
     }
   }
 
@@ -519,7 +564,13 @@ export default function Admin({ onBack, lang }) {
               </div>
               <div className="row">
                 <label>{t.apiKey}</label>
-                <input type="password" value={llmConfig.api_key} onChange={e => setLlmConfig(prev => ({ ...prev, api_key: e.target.value }))} />
+                <input
+                  type="password"
+                  value={llmConfig.api_key}
+                  placeholder={llmHasApiKey && !llmConfig.api_key ? t.llmApiKeySavedMask : ""}
+                  onChange={e => setLlmConfig(prev => ({ ...prev, api_key: e.target.value }))}
+                />
+                {llmHasApiKey && !llmConfig.api_key ? <span className="llm-key-hint">{t.llmApiKeySavedHint}</span> : null}
               </div>
               <div className="row">
                 <label>{t.model}</label>
@@ -538,24 +589,30 @@ export default function Admin({ onBack, lang }) {
                 <input type="number" value={llmConfig.timeout} onChange={e => setLlmConfig(prev => ({ ...prev, timeout: e.target.value }))} />
               </div>
               <div className="row">
-                <label>{t.headers}</label>
-                <textarea
-                  rows={4}
-                  value={JSON.stringify(llmConfig.headers || {}, null, 2)}
-                  onChange={e => {
-                    try {
-                      const v = JSON.parse(e.target.value || "{}")
-                      setLlmConfig(prev => ({ ...prev, headers: v }))
-                      setLlmError("")
-                    } catch (err) {
-                      setLlmError(t.validateFailed)
-                    }
-                  }}
-                />
-              </div>
-              <div className="row">
                 <button disabled={llmSaving} onClick={saveLLM}>{t.save}</button>
                 {llmError && <span style={{ marginLeft: 12 }}>{llmError}</span>}
+              </div>
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.llmTestPrompt}</label>
+                  <textarea
+                    className="llm-test-input"
+                    rows={2}
+                    value={llmTestPrompt}
+                    onChange={e => setLlmTestPrompt(e.target.value)}
+                  />
+                </div>
+                <div className="row llm-test-actions">
+                  <button disabled={llmTesting} onClick={testLLM}>{llmTesting ? t.llmTestRunning : t.llmTestButton}</button>
+                  {llmTestError && <span className="llm-test-error">{llmTestError}</span>}
+                  {!llmTestError && llmTestResult && <span className="llm-test-ok">{t.llmTestOk}</span>}
+                </div>
+                {llmTestResult && (
+                  <div className="row">
+                    <label>{t.llmTestResult}</label>
+                    <div className="llm-test-result">{llmTestResult}</div>
+                  </div>
+                )}
               </div>
             </div>
           )}

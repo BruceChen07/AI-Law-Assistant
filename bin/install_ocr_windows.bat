@@ -29,6 +29,12 @@ if errorlevel 1 (
   echo poppler not found in PATH
   exit /b 1
 )
+where python >nul 2>nul
+if errorlevel 1 (
+  echo python not found
+  exit /b 1
+)
+python -m pip install -U "mineru[all]==2.7.6"
 for /f "delims=" %%i in ('tesseract --version') do (
   echo %%i
   goto done_tess

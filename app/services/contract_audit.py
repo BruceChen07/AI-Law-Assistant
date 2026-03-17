@@ -31,13 +31,24 @@ def _build_prompt(text: str, lang: str) -> Dict[str, str]:
 
 
 def audit_contract(cfg: Dict[str, Any], llm, file_path: str, lang: str = "zh") -> Dict[str, Any]:
+    logger.info("audit_extract_start file=%s lang=%s", file_path, lang)
     text, meta = extract_text_with_config(cfg, file_path)
+    logger.info(
+        "audit_extract_done file=%s text_length=%s ocr_used=%s ocr_engine=%s page_count=%s",
+        file_path,
+        len(text),
+        meta.get("ocr_used"),
+        meta.get("ocr_engine"),
+        meta.get("page_count")
+    )
     prompt = _build_prompt(text, lang)
     messages = [
         {"role": "system", "content": prompt["system"]},
         {"role": "user", "content": prompt["user"]}
     ]
+    logger.info("audit_llm_start file=%s model=%s", file_path, (cfg.get("llm_config") or {}).get("model", ""))
     result_text, raw = llm.chat(messages)
+    logger.info("audit_llm_done file=%s result_length=%s", file_path, len(result_text))
     parsed = None
     try:
         parsed = json.loads(result_text)

@@ -387,6 +387,50 @@ input::placeholder, textarea::placeholder {
   margin-bottom: 10px;
 }
 
+.llm-test {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(12, 15, 22, 0.7);
+}
+
+.llm-test .row {
+  align-items: flex-start;
+}
+
+.llm-test-input {
+  flex: 1;
+}
+
+.llm-test-actions {
+  align-items: center;
+}
+
+.llm-test-result {
+  flex: 1;
+  white-space: pre-wrap;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(16, 19, 26, 0.8);
+  border: 1px solid var(--border);
+}
+
+.llm-test-ok {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.llm-test-error {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.llm-key-hint {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .advanced-title {
   font-weight: 600;
 }

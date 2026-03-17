@@ -116,6 +116,16 @@ export async function adminUpdateLLMConfig(payload) {
   return res.json()
 }
 
+export async function adminTestLLM(payload) {
+  const res = await fetch(`${API_BASE}/api/admin/llm-test`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload || {})
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function importRegulation(formData) {
   const headers = { ...getAuthHeaders() }
   const res = await fetch(`${API_BASE}/regulations/import`, { method: "POST", body: formData, headers })
