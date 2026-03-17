@@ -4,7 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException, Depends
 from app.core.database import get_conn
 from app.services.importer import process_import
-from app.services.crud import insert_job, insert_document
+from app.services.crud import insert_job, insert_document, backfill_legal_document_categories
 from app.services.search import search_regulations
 from app.api.schemas import SearchQuery
 from app.api.dependencies import get_current_user
@@ -50,8 +50,10 @@ def build_router(cfg, embedder, reranker=None):
             mime_type=getattr(file, "content_type", None),
             user_id=current_user["id"],
             title=title,
+            category="legal",
             status="active",
         )
+        backfill_legal_document_categories(cfg)
         background_tasks.add_task(
             process_import,
             cfg, embedder, job_id, save_path, title, doc_no, issuer, reg_type,

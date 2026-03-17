@@ -132,3 +132,25 @@ def insert_document(cfg, doc_id, filename, original_filename, file_path, file_si
     conn.commit()
     conn.close()
     return doc_id
+
+
+def backfill_legal_document_categories(cfg):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE documents
+        SET category = 'legal'
+        WHERE status = 'active'
+          AND (category IS NULL OR TRIM(category) = '')
+          AND EXISTS (
+              SELECT 1
+              FROM regulation_version v
+              WHERE v.source_file = documents.file_path
+          )
+        """
+    )
+    updated = cur.rowcount
+    conn.commit()
+    conn.close()
+    return updated

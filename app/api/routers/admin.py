@@ -101,7 +101,8 @@ def _validate_llm_config(payload: dict):
     api_base = str(payload.get("api_base", "")).strip()
     model = str(payload.get("model", "")).strip()
     if not api_base.startswith("http"):
-        raise HTTPException(status_code=400, detail="api_base must be a valid http(s) url")
+        raise HTTPException(
+            status_code=400, detail="api_base must be a valid http(s) url")
     if not model:
         raise HTTPException(status_code=400, detail="model is required")
     temperature = float(payload.get("temperature", 0.2))
@@ -109,7 +110,8 @@ def _validate_llm_config(payload: dict):
         raise HTTPException(status_code=400, detail="temperature out of range")
     max_tokens = int(payload.get("max_tokens", 2048))
     if max_tokens <= 0:
-        raise HTTPException(status_code=400, detail="max_tokens must be positive")
+        raise HTTPException(
+            status_code=400, detail="max_tokens must be positive")
     timeout = int(payload.get("timeout", 60))
     if timeout <= 0:
         raise HTTPException(status_code=400, detail="timeout must be positive")
@@ -136,8 +138,14 @@ def list_documents(
         params.extend([f"%{search}%", f"%{search}%"])
 
     if category:
-        where_clauses.append("d.category = ?")
-        params.append(category)
+        if category == "legal":
+            where_clauses.append(
+                "(d.category = ? OR ((d.category IS NULL OR TRIM(d.category) = '') AND EXISTS (SELECT 1 FROM regulation_version v WHERE v.source_file = d.file_path)))"
+            )
+            params.append(category)
+        else:
+            where_clauses.append("d.category = ?")
+            params.append(category)
 
     if user_id:
         where_clauses.append("d.user_id = ?")
@@ -297,7 +305,8 @@ def get_llm_config(current_user: dict = Depends(require_admin)):
         temperature=float(llm_cfg.get("temperature", 0.2)),
         max_tokens=int(llm_cfg.get("max_tokens", 2048)),
         timeout=int(llm_cfg.get("timeout", 60)),
-        headers=llm_cfg.get("headers") if isinstance(llm_cfg.get("headers"), dict) else {},
+        headers=llm_cfg.get("headers") if isinstance(
+            llm_cfg.get("headers"), dict) else {},
         has_api_key=bool(llm_cfg.get("api_key"))
     )
 
@@ -320,7 +329,8 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
         temperature=float(llm_cfg.get("temperature", 0.2)),
         max_tokens=int(llm_cfg.get("max_tokens", 2048)),
         timeout=int(llm_cfg.get("timeout", 60)),
-        headers=llm_cfg.get("headers") if isinstance(llm_cfg.get("headers"), dict) else {},
+        headers=llm_cfg.get("headers") if isinstance(
+            llm_cfg.get("headers"), dict) else {},
         has_api_key=bool(llm_cfg.get("api_key"))
     )
 
@@ -328,7 +338,8 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
 @router.post("/llm-test", response_model=LLMTestResponse)
 def test_llm(payload: Optional[LLMTestRequest] = None, request: Request = None, current_user: dict = Depends(require_admin)):
     cfg = get_config()
-    llm = request.app.state.llm if request is not None and hasattr(request.app.state, "llm") else LLMService(cfg)
+    llm = request.app.state.llm if request is not None and hasattr(
+        request.app.state, "llm") else LLMService(cfg)
     prompt = ""
     if payload:
         prompt = str(payload.prompt or "").strip()
@@ -341,5 +352,6 @@ def test_llm(payload: Optional[LLMTestRequest] = None, request: Request = None, 
     try:
         answer, _ = llm.chat(messages)
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f"llm test failed: {str(e)}")
+        raise HTTPException(
+            status_code=400, detail=f"llm test failed: {str(e)}")
     return LLMTestResponse(ok=True, prompt=prompt, answer=answer)

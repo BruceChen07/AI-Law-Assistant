@@ -9,6 +9,7 @@ export default function Admin({ onBack, lang }) {
   const [loading, setLoading] = useState(false)
   const [pagination, setPagination] = useState({ page: 1, page_size: 10, total: 0 })
   const [search, setSearch] = useState("")
+  const [docCategory, setDocCategory] = useState("contract")
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [llmConfig, setLlmConfig] = useState(null)
   const [llmHasApiKey, setLlmHasApiKey] = useState(false)
@@ -49,6 +50,8 @@ export default function Admin({ onBack, lang }) {
       welcome: "欢迎",
       tabStats: "统计",
       tabDocs: "文档",
+      docsContract: "合同文件",
+      docsLegal: "法律文件",
       tabUsers: "用户",
       docMgmt: "文档管理",
       searchPlaceholder: "搜索文档...",
@@ -84,7 +87,6 @@ export default function Admin({ onBack, lang }) {
       noFileChosen: "未选择任何文件",
       uploadBtn: "上传",
       checkJob: "查询任务",
-      searchBtn: "搜索",
       semantic: "语义检索",
       searching: "检索中...",
       result: "检索结果",
@@ -124,6 +126,8 @@ export default function Admin({ onBack, lang }) {
       welcome: "Welcome",
       tabStats: "Statistics",
       tabDocs: "Documents",
+      docsContract: "Contract Files",
+      docsLegal: "Legal Files",
       tabUsers: "Users",
       docMgmt: "Document Management",
       searchPlaceholder: "Search documents...",
@@ -159,7 +163,6 @@ export default function Admin({ onBack, lang }) {
       noFileChosen: "No file chosen",
       uploadBtn: "Upload",
       checkJob: "Check Job",
-      searchBtn: "Search",
       semantic: "Semantic Search",
       searching: "Searching...",
       result: "Search Result",
@@ -203,7 +206,7 @@ export default function Admin({ onBack, lang }) {
     if (tab === "stats") loadStats()
     if (tab === "model") loadLLM()
     if (tab === "regulations") {}
-  }, [tab, pagination.page])
+  }, [tab, pagination.page, docCategory])
 
   useEffect(() => {
     setRegUpload(prev => ({ ...prev, language: lang || "zh" }))
@@ -217,7 +220,8 @@ export default function Admin({ onBack, lang }) {
       const data = await adminListDocuments({
         page: pagination.page,
         page_size: pagination.page_size,
-        search: search
+        search: search,
+        category: docCategory
       })
       setDocuments(data.items)
       setPagination(prev => ({ ...prev, total: data.total }))
@@ -484,6 +488,26 @@ export default function Admin({ onBack, lang }) {
       {tab === "documents" && (
         <div className="card">
           <h2>{t.docMgmt}</h2>
+          <div className="tabs" style={{ marginBottom: 12 }}>
+            <button
+              className={docCategory === "contract" ? "active" : ""}
+              onClick={() => {
+                setDocCategory("contract")
+                setPagination(prev => ({ ...prev, page: 1 }))
+              }}
+            >
+              {t.docsContract}
+            </button>
+            <button
+              className={docCategory === "legal" ? "active" : ""}
+              onClick={() => {
+                setDocCategory("legal")
+                setPagination(prev => ({ ...prev, page: 1 }))
+              }}
+            >
+              {t.docsLegal}
+            </button>
+          </div>
           <div className="row">
             <input 
               placeholder={t.searchPlaceholder} 
@@ -512,7 +536,7 @@ export default function Admin({ onBack, lang }) {
                     <td>{doc.original_filename}</td>
                     <td>{formatSize(doc.file_size)}</td>
                     <td>{doc.username}</td>
-                    <td>{doc.category || "-"}</td>
+                    <td>{doc.category || (docCategory === "legal" ? "legal" : "-")}</td>
                     <td>{formatDate(doc.created_at)}</td>
                     <td>
                       {deleteConfirm === doc.id ? (
