@@ -43,12 +43,20 @@ web/.vite/
 # Data & Logs
 data/files/
 data/logs/
+data/memory/
 data/app.db
+logs/
 log/
 app/..\\data\\*
 models/embedding/
+models/reranker/
 *.onnx
 !models/embedding/zh/model.onnx
+
+# Temp files
+tmp_*.json
+*.tmp
+*.temp
 
 # System
 .DS_Store

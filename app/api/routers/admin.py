@@ -71,6 +71,14 @@ class LLMConfigUpdate(BaseModel):
     headers: dict
 
 
+class UIConfigResponse(BaseModel):
+    show_citation_source: bool
+
+
+class UIConfigUpdate(BaseModel):
+    show_citation_source: bool
+
+
 class LLMTestRequest(BaseModel):
     prompt: Optional[str] = None
 
@@ -115,6 +123,13 @@ def _validate_llm_config(payload: dict):
     timeout = int(payload.get("timeout", 60))
     if timeout <= 0:
         raise HTTPException(status_code=400, detail="timeout must be positive")
+
+
+def _get_ui_config(cfg: dict) -> dict:
+    ui_cfg = cfg.get("ui_config") if isinstance(cfg.get("ui_config"), dict) else {}
+    return {
+        "show_citation_source": bool(ui_cfg.get("show_citation_source", False))
+    }
 
 
 # ============ Document CRUD ============
@@ -333,6 +348,21 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
             llm_cfg.get("headers"), dict) else {},
         has_api_key=bool(llm_cfg.get("api_key"))
     )
+
+
+@router.get("/ui-config", response_model=UIConfigResponse)
+def get_ui_config(current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    ui_cfg = _get_ui_config(cfg)
+    return UIConfigResponse(**ui_cfg)
+
+
+@router.put("/ui-config", response_model=UIConfigResponse)
+def update_ui_config(payload: UIConfigUpdate, current_user: dict = Depends(require_admin)):
+    data = {"ui_config": {"show_citation_source": bool(payload.show_citation_source)}}
+    cfg = update_config_patch(data)
+    ui_cfg = _get_ui_config(cfg)
+    return UIConfigResponse(**ui_cfg)
 
 
 @router.post("/llm-test", response_model=LLMTestResponse)

@@ -10,7 +10,7 @@ def get_conn(cfg):
 def init_db(cfg):
     conn = get_conn(cfg)
     cur = conn.cursor()
-    
+
     # Users table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users(
@@ -24,9 +24,10 @@ def init_db(cfg):
         is_active INTEGER DEFAULT 1
     )
     """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)")
     cur.execute("CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)")
-    
+
     # Sessions table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS sessions(
@@ -40,9 +41,11 @@ def init_db(cfg):
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
-    
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)")
+
     # Documents table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS documents(
@@ -66,11 +69,15 @@ def init_db(cfg):
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
-    
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_user_id ON documents(user_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_category ON documents(category)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_documents_status ON documents(status)")
+
     # Audit logs table
     cur.execute("""
     CREATE TABLE IF NOT EXISTS audit_logs(
@@ -86,9 +93,12 @@ def init_db(cfg):
         FOREIGN KEY (user_id) REFERENCES users(id)
     )
     """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id ON audit_logs(user_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS contract_audit(
@@ -103,9 +113,11 @@ def init_db(cfg):
         FOREIGN KEY (document_id) REFERENCES documents(id)
     )
     """)
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_contract_audit_document_id ON contract_audit(document_id)")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_contract_audit_created_at ON contract_audit(created_at)")
-    
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_audit_document_id ON contract_audit(document_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_audit_created_at ON contract_audit(created_at)")
+
     # Existing tables
     cur.execute("""
     CREATE TABLE IF NOT EXISTS regulation(
@@ -164,6 +176,178 @@ def init_db(cfg):
         vec BLOB
     )
     """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS regulation_document(
+        id TEXT PRIMARY KEY,
+        original_filename TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        checksum TEXT,
+        parse_status TEXT NOT NULL DEFAULT 'pending',
+        uploaded_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_regulation_document_created_at ON regulation_document(created_at)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tax_rule(
+        id TEXT PRIMARY KEY,
+        regulation_document_id TEXT NOT NULL,
+        law_title TEXT,
+        article_no TEXT,
+        rule_type TEXT,
+        trigger_condition TEXT,
+        required_action TEXT,
+        prohibited_action TEXT,
+        numeric_constraints TEXT,
+        deadline_constraints TEXT,
+        region TEXT,
+        industry TEXT,
+        effective_date TEXT,
+        expiry_date TEXT,
+        source_page INTEGER,
+        source_paragraph TEXT,
+        source_text TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (regulation_document_id) REFERENCES regulation_document(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tax_rule_doc_id ON tax_rule(regulation_document_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tax_rule_rule_type ON tax_rule(rule_type)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS contract_document(
+        id TEXT PRIMARY KEY,
+        original_filename TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_type TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        parse_status TEXT NOT NULL DEFAULT 'pending',
+        ocr_used INTEGER NOT NULL DEFAULT 0,
+        uploaded_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_document_created_at ON contract_document(created_at)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS contract_clause(
+        id TEXT PRIMARY KEY,
+        contract_document_id TEXT NOT NULL,
+        clause_path TEXT,
+        page_no INTEGER,
+        paragraph_no TEXT,
+        clause_text TEXT NOT NULL,
+        entities_json TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (contract_document_id) REFERENCES contract_document(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_clause_contract_id ON contract_clause(contract_document_id)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS clause_rule_match(
+        id TEXT PRIMARY KEY,
+        clause_id TEXT NOT NULL,
+        rule_id TEXT NOT NULL,
+        match_score REAL NOT NULL DEFAULT 0,
+        match_label TEXT NOT NULL,
+        evidence_json TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (clause_id) REFERENCES contract_clause(id),
+        FOREIGN KEY (rule_id) REFERENCES tax_rule(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clause_rule_match_clause_id ON clause_rule_match(clause_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clause_rule_match_rule_id ON clause_rule_match(rule_id)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_issue(
+        id TEXT PRIMARY KEY,
+        contract_document_id TEXT NOT NULL,
+        clause_id TEXT,
+        rule_id TEXT,
+        risk_level TEXT NOT NULL,
+        issue_text TEXT NOT NULL,
+        suggestion TEXT,
+        reviewer_status TEXT NOT NULL DEFAULT 'pending',
+        reviewer_note TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (contract_document_id) REFERENCES contract_document(id),
+        FOREIGN KEY (clause_id) REFERENCES contract_clause(id),
+        FOREIGN KEY (rule_id) REFERENCES tax_rule(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_issue_contract_id ON audit_issue(contract_document_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_issue_risk_level ON audit_issue(risk_level)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_trace(
+        id TEXT PRIMARY KEY,
+        issue_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        operator TEXT,
+        payload_json TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (issue_id) REFERENCES audit_issue(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_trace_issue_id ON audit_trace(issue_id)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tax_audit_archive_record(
+        id TEXT PRIMARY KEY,
+        contract_document_id TEXT NOT NULL UNIQUE,
+        archive_path TEXT NOT NULL,
+        archived_at TEXT NOT NULL,
+        archived_by TEXT,
+        source_job_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (contract_document_id) REFERENCES contract_document(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tax_archive_contract_id ON tax_audit_archive_record(contract_document_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tax_archive_archived_at ON tax_audit_archive_record(archived_at)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS tax_audit_cleanup_job(
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        retention_days INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        archived_contracts INTEGER NOT NULL DEFAULT 0,
+        deleted_files INTEGER NOT NULL DEFAULT 0,
+        details_json TEXT,
+        error TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tax_cleanup_status ON tax_audit_cleanup_job(status)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tax_cleanup_started_at ON tax_audit_cleanup_job(started_at)")
     conn.commit()
     conn.close()
 

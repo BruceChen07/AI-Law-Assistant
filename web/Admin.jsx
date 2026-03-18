@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 
 export default function Admin({ onBack, lang }) {
   const [tab, setTab] = useState("documents")
@@ -19,6 +19,9 @@ export default function Admin({ onBack, lang }) {
   const [llmTestResult, setLlmTestResult] = useState("")
   const [llmTestError, setLlmTestError] = useState("")
   const [llmTesting, setLlmTesting] = useState(false)
+  const [uiConfig, setUiConfig] = useState({ showCitationSource: false })
+  const [uiSaving, setUiSaving] = useState(false)
+  const [uiError, setUiError] = useState("")
   const [regUpload, setRegUpload] = useState({
     title: "",
     doc_no: "",
@@ -115,6 +118,8 @@ export default function Admin({ onBack, lang }) {
       llmTestDefaultPrompt: "你是什么模型？请简短回答。",
       llmApiKeySavedMask: "********（已保存，留空则不变）",
       llmApiKeySavedHint: "已保存 API 密钥；不修改可留空。",
+      uiConfigTitle: "界面配置",
+      showCitationSource: "显示证据来源",
       save: "保存",
       saved: "已保存",
       validateFailed: "请检查配置参数",
@@ -191,6 +196,8 @@ export default function Admin({ onBack, lang }) {
       llmTestDefaultPrompt: "What model are you? Keep it brief.",
       llmApiKeySavedMask: "******** (saved, keep empty to retain)",
       llmApiKeySavedHint: "API key already saved; leave empty to keep it.",
+      uiConfigTitle: "UI Config",
+      showCitationSource: "Show citation source",
       save: "Save",
       saved: "Saved",
       validateFailed: "Please check config fields",
@@ -204,7 +211,10 @@ export default function Admin({ onBack, lang }) {
     if (tab === "documents") loadDocuments()
     if (tab === "users") loadUsers()
     if (tab === "stats") loadStats()
-    if (tab === "model") loadLLM()
+    if (tab === "model") {
+      loadLLM()
+      loadUIConfig()
+    }
     if (tab === "regulations") {}
   }, [tab, pagination.page, docCategory])
 
@@ -282,6 +292,16 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
+  const loadUIConfig = async () => {
+    try {
+      const data = await adminGetUIConfig()
+      setUiConfig({ showCitationSource: !!data.show_citation_source })
+      setUiError("")
+    } catch (err) {
+      setUiError(err.message)
+    }
+  }
+
   const validateLLM = (cfg) => {
     if (!cfg.api_base || !cfg.api_base.startsWith("http")) return false
     if (!cfg.model) return false
@@ -340,6 +360,18 @@ export default function Admin({ onBack, lang }) {
       setLlmTestError(err.message)
     } finally {
       setLlmTesting(false)
+    }
+  }
+
+  const saveUIConfig = async () => {
+    setUiSaving(true)
+    try {
+      await adminUpdateUIConfig({ show_citation_source: !!uiConfig.showCitationSource })
+      setUiError(t.saved)
+    } catch (err) {
+      setUiError(err.message)
+    } finally {
+      setUiSaving(false)
     }
   }
 
@@ -637,6 +669,25 @@ export default function Admin({ onBack, lang }) {
                     <div className="llm-test-result">{llmTestResult}</div>
                   </div>
                 )}
+              </div>
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.uiConfigTitle}</label>
+                </div>
+                <div className="row">
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={!!uiConfig.showCitationSource}
+                      onChange={e => setUiConfig(prev => ({ ...prev, showCitationSource: e.target.checked }))}
+                    />
+                    {t.showCitationSource}
+                  </label>
+                </div>
+                <div className="row">
+                  <button disabled={uiSaving} onClick={saveUIConfig}>{t.save}</button>
+                  {uiError && <span style={{ marginLeft: 12 }}>{uiError}</span>}
+                </div>
               </div>
             </div>
           )}

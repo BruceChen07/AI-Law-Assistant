@@ -71,6 +71,7 @@
         "timeout": 60,
         "headers": {}
     },
+    "memory_use_long_hits": true,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

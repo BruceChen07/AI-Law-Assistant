@@ -5,9 +5,9 @@
     "static_dir": "../web/dist",
     "default_language": "zh",
     "reranker_enabled": true,
-    "reranker_model_path": "../models/reranker/zh",
+    "reranker_model_path": "..\\models\\reranker\\zh",
     "reranker_profiles": {
-        "zh": "../models/reranker/zh",
+        "zh": "..\\models\\reranker\\zh",
         "en": "../models/reranker/en"
     },
     "rerank_batch_size": 8,
@@ -37,8 +37,8 @@
         }
     },
     "log_level": "INFO",
-    "log_base_dir": "/Users/bruce/workspace/AI-Law-Assistant/log",
-    "log_dir": "/Users/bruce/workspace/AI-Law-Assistant/log",
+    "log_base_dir": "../logs",
+    "log_dir": "../logs",
     "log_max_bytes": 10485760,
     "log_backup_count": 7,
     "log_when": "midnight",
@@ -71,6 +71,7 @@
         "timeout": 120,
         "headers": {}
     },
+    "memory_use_long_hits": true,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

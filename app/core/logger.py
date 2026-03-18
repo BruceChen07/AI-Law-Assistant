@@ -32,11 +32,18 @@ def _script_name():
     return base or "app"
 
 
+def _default_log_base_dir():
+    app_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    project_root = os.path.dirname(app_root)
+    return os.path.join(project_root, "logs")
+
+
 def setup_logging(cfg):
     try:
         level_name = str(cfg.get("log_level", "INFO")).upper()
         level = getattr(logging, level_name, logging.INFO)
-        base_dir = cfg.get("log_base_dir") or cfg.get("log_dir") or "/Users/bruce/workspace/AI-Law-Assistant/log"
+        base_dir = str(cfg.get("log_base_dir") or cfg.get("log_dir") or _default_log_base_dir())
+        base_dir = os.path.abspath(base_dir)
         date_dir = datetime.now().strftime("%Y-%m-%d")
         log_dir = os.path.join(base_dir, date_dir)
         os.makedirs(log_dir, exist_ok=True)
@@ -66,9 +73,10 @@ def setup_logging(cfg):
         handler.setFormatter(fmt)
         logger.addHandler(handler)
         logger.propagate = False
+        logger.info("logging_ready level=%s log_path=%s", level_name, log_path)
         return logger
     except Exception as e:
-        fallback_dir = "/Users/bruce/workspace/AI-Law-Assistant/log"
+        fallback_dir = _default_log_base_dir()
         try:
             os.makedirs(fallback_dir, exist_ok=True)
         except Exception:

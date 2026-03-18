@@ -1,5 +1,6 @@
 import logging
 import hashlib
+import sqlite3
 import numpy as np
 from fastapi import HTTPException
 from app.core.database import get_conn
@@ -7,6 +8,18 @@ from app.core.utils import tokenize_query, best_sentence
 from app.api.schemas import SearchQuery
 
 logger = logging.getLogger("law_assistant")
+
+
+def _build_fts_match_query(raw_query: str) -> str:
+    tokens = tokenize_query(raw_query)
+    if tokens:
+        return " OR ".join([f'"{t.replace("\"", "\"\"")}"' for t in tokens])
+    cleaned = " ".join(raw_query.replace("\n", " ").replace("\r", " ").split())
+    cleaned = "".join(ch if ("\u4e00" <= ch <= "\u9fff") or ch.isalnum() or ch.isspace() else " " for ch in cleaned)
+    simple = [x for x in cleaned.split(" ") if x]
+    if simple:
+        return " OR ".join([f'"{x.replace("\"", "\"\"")}"' for x in simple[:10]])
+    return '"合同"'
 
 
 def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
@@ -27,6 +40,7 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     logger.info("search_start query=%s lang=%s active_lang=%s top_k=%s semantic=%s model_id=%s",
                 q.query[:80], lang, active_lang, q.top_k, q.use_semantic, (prof or {}).get("model_id", "none"))
     tokens = tokenize_query(q.query)
+    bm_query = _build_fts_match_query(q.query)
     conn = get_conn(cfg)
     cur = conn.cursor()
     candidate_min = 10
@@ -54,7 +68,7 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     JOIN regulation r ON r.id=v.regulation_id
     WHERE article_fts MATCH ?
     """
-    bm_params = [q.query]
+    bm_params = [bm_query]
     if q.region:
         bm_sql += " AND (v.region='' OR v.region=?)"
         bm_params.append(q.region)
@@ -67,10 +81,14 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     bm_sql += " ORDER BY bm25_raw LIMIT ?"
     bm_params.append(candidate_n)
 
-    cur.execute(bm_sql, bm_params)
-    bm_rows = [dict(r) for r in cur.fetchall()]
-    logger.info("bm25_candidates query=%s count=%s",
-                q.query[:80], len(bm_rows))
+    bm_rows = []
+    try:
+        cur.execute(bm_sql, bm_params)
+        bm_rows = [dict(r) for r in cur.fetchall()]
+        logger.info("bm25_candidates query=%s count=%s",
+                    q.query[:80], len(bm_rows))
+    except sqlite3.OperationalError as e:
+        logger.warning("bm25_failed query=%s match=%s err=%s", q.query[:80], bm_query[:120], str(e))
     for idx, r in enumerate(bm_rows):
         r["bm25_score"] = 1.0 - (idx / max(1, len(bm_rows)))
 

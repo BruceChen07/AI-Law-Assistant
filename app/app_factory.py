@@ -16,6 +16,8 @@ from app.api.routers.regulations import build_router as build_regulations_router
 from app.api.routers.auth import build_router as build_auth_router
 from app.api.routers.admin import router as admin_router
 from app.api.routers.contracts import build_router as build_contracts_router
+from app.api.routers.tax_audit import build_router as build_tax_audit_router
+
 
 def init_only():
     cfg = get_config()
@@ -95,7 +97,8 @@ def create_app():
     app.include_router(build_regulations_router(cfg, embedder, reranker))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
-    app.include_router(build_contracts_router(cfg, llm))
+    app.include_router(build_contracts_router(cfg, llm, embedder, reranker))
+    app.include_router(build_tax_audit_router(cfg))
 
     app.state.cfg = cfg
     app.state.embedder = embedder

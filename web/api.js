@@ -116,6 +116,24 @@ export async function adminUpdateLLMConfig(payload) {
   return res.json()
 }
 
+export async function adminGetUIConfig() {
+  const res = await fetch(`${API_BASE}/api/admin/ui-config`, {
+    headers: { ...getAuthHeaders() }
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function adminUpdateUIConfig(payload) {
+  const res = await fetch(`${API_BASE}/api/admin/ui-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
 export async function adminTestLLM(payload) {
   const res = await fetch(`${API_BASE}/api/admin/llm-test`, {
     method: "POST",
@@ -152,6 +170,28 @@ export async function searchRegulations(payload) {
 export async function auditContract(formData) {
   const headers = { ...getAuthHeaders() }
   const res = await fetch(`${API_BASE}/contracts/audit`, { method: "POST", body: formData, headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getAuditProgress(auditId) {
+  const headers = { ...getAuthHeaders() }
+  const res = await fetch(`${API_BASE}/contracts/audit/${auditId}/progress`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getUIConfig() {
+  const headers = { ...getAuthHeaders() }
+  const res = await fetch(`${API_BASE}/contracts/ui-config`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getContractPreview(documentId, clauseLimit = 2000) {
+  const headers = { ...getAuthHeaders() }
+  const query = new URLSearchParams({ clause_limit: String(clauseLimit) }).toString()
+  const res = await fetch(`${API_BASE}/contracts/${documentId}/preview?${query}`, { headers })
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
