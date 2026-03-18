@@ -95,7 +95,7 @@ class LLMService:
         except APITimeoutError as e:
             fallback_model = self._clean_text(cfg.get("fallback_model", ""))
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
-            retry_max_tokens = max(256, min(max_tokens, int(cfg.get("max_tokens_retry", 1024))))
+            retry_max_tokens = max_tokens
             retry_model = fallback_model or model
             logger.warning(
                 "llm_request_timeout_retry base_url=%s model=%s retry_model=%s timeout=%s->%s max_tokens=%s->%s",

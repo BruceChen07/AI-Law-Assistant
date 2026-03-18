@@ -45,6 +45,9 @@ export default function App() {
   const [previewMeta, setPreviewMeta] = useState(null)
   const [activeRiskIndex, setActiveRiskIndex] = useState(-1)
   const [riskFilter, setRiskFilter] = useState("all")
+  const [expandedEvidence, setExpandedEvidence] = useState({})
+  const [contractProgress, setContractProgress] = useState(0)
+  const [contractProgressStage, setContractProgressStage] = useState("working")
   const previewScrollRef = useRef(null)
 
   const i18n = {
@@ -106,7 +109,10 @@ export default function App() {
       riskHigh: "高风险",
       riskMedium: "中风险",
       riskLow: "低风险",
-      riskShown: "当前显示"
+      riskShown: "当前显示",
+      viewArticle: "查看条文全文",
+      collapseArticle: "收起条文全文",
+      articleSummary: "摘要"
     },
     en: {
       appTitle: "Contract Audit",
@@ -166,7 +172,10 @@ export default function App() {
       riskHigh: "High",
       riskMedium: "Medium",
       riskLow: "Low",
-      riskShown: "Showing"
+      riskShown: "Showing",
+      viewArticle: "View Full Article",
+      collapseArticle: "Collapse Full Article",
+      articleSummary: "Summary"
     }
   }
   const t = i18n[uiLang] || i18n.zh
@@ -185,16 +194,37 @@ export default function App() {
     if (v.startsWith("第")) return `${v}条`
     return `第${v}条`
   }
-  const buildCitationDisplay = (citation) => {
+  const normalizeLawTitle = (value) => String(value || "").replace(/[《》\s]/g, "").trim().toLowerCase()
+  const buildLawArticleKey = (lawTitle, articleNo) => {
+    const law = normalizeLawTitle(lawTitle)
+    const article = normalizeArticleNo(articleNo).toLowerCase()
+    if (!law || !article) return ""
+    return `${law}##${article}`
+  }
+  const citationLawArticleMap = citationList.reduce((acc, c) => {
+    const key = buildLawArticleKey(c?.law_title || c?.title, c?.article_no)
+    if (!key) return acc
+    acc[key] = c
+    return acc
+  }, {})
+  const parseBasisLawArticle = (basis) => {
+    const text = String(basis || "").replace(/[《》]/g, " ").replace(/\s+/g, " ").trim()
+    if (!text) return { lawTitle: "", articleNo: "" }
+    const matchedArticle = text.match(/第[一二三四五六七八九十百千万0-9]+条/)
+    if (!matchedArticle) return { lawTitle: "", articleNo: "" }
+    const articleNo = matchedArticle[0]
+    const lawTitle = text.replace(articleNo, "").trim()
+    return { lawTitle, articleNo }
+  }
+  const buildCitationTitle = (citation) => {
     if (!citation) return ""
     const lawTitle = String(citation.law_title || citation.title || "").trim()
     const articleNo = normalizeArticleNo(citation.article_no)
-    const excerpt = String(citation.excerpt || citation.content || "").trim()
     const titlePart = lawTitle ? `《${lawTitle}》` : ""
-    const articlePart = articleNo ? `${articleNo}` : ""
-    const summary = excerpt ? `（摘要：${excerpt}）` : ""
-    return `${titlePart}${articlePart}${summary}`.trim()
+    return `${titlePart}${articleNo}`.trim()
   }
+  const getCitationSummary = (citation) => String(citation?.excerpt || "").trim()
+  const getCitationContent = (citation) => String(citation?.content || citation?.excerpt || "").trim()
   const toContractTitle = (filename) => {
     const name = String(filename || "").trim()
     if (!name) return ""
@@ -217,10 +247,53 @@ export default function App() {
     if (riskFilter === "all") return riskList
     return riskList.filter((risk) => String(risk?.level || "").toLowerCase() === riskFilter)
   }, [riskList, riskFilter])
+  const summaryText = String(contractResult?.summary || "").trim()
+  const progressStageText = {
+    uploading: t.progressUploading,
+    extracting: t.progressExtracting,
+    retrieval: t.progressRetrieval,
+    auditing: t.progressAuditing,
+    done: t.progressDone,
+    failed: t.progressFailed,
+    working: t.progressWorking
+  }[contractProgressStage] || t.progressWorking
+  const bumpProgress = (percent, stage) => {
+    const next = Math.max(0, Math.min(100, Number(percent) || 0))
+    setContractProgress((p) => Math.max(p, next))
+    if (stage) setContractProgressStage(stage)
+  }
 
   useEffect(() => {
     setActiveRiskIndex(-1)
+    setExpandedEvidence({})
   }, [riskFilter, documentId])
+
+  useEffect(() => {
+    if (!contractLoading) {
+      setContractProgress(0)
+      setContractProgressStage("working")
+      return
+    }
+    bumpProgress(12, "uploading")
+    const timers = [
+      setTimeout(() => {
+        bumpProgress(32, "extracting")
+      }, 700),
+      setTimeout(() => {
+        bumpProgress(58, "retrieval")
+      }, 1800),
+      setTimeout(() => {
+        bumpProgress(78, "auditing")
+      }, 3200)
+    ]
+    const ticker = setInterval(() => {
+      setContractProgress((p) => Math.min(p + 1, 95))
+    }, 900)
+    return () => {
+      timers.forEach(clearTimeout)
+      clearInterval(ticker)
+    }
+  }, [contractLoading])
 
   useEffect(() => {
     if (!user) return
@@ -273,6 +346,11 @@ export default function App() {
     container.scrollTo({ top: 0, behavior: "smooth" })
   }
 
+  const toggleEvidence = (key) => {
+    if (!key) return
+    setExpandedEvidence(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+
   const onContractUpload = async (e) => {
     e.preventDefault()
     if (!contractFile) return
@@ -285,9 +363,11 @@ export default function App() {
     setContractLoading(true)
     setRiskFilter("all")
     setActiveRiskIndex(-1)
+    bumpProgress(16, "uploading")
     try {
       const form = new FormData()
-      form.append("title", toContractTitle(contractFile.name))
+      const customTitle = String(contract.title || "").trim()
+      form.append("title", customTitle || toContractTitle(contractFile.name))
       form.append("language", contract.language)
       form.append("audit_mode", contract.auditMode)
       form.append("region", contract.region)
@@ -296,12 +376,14 @@ export default function App() {
       form.append("tax_focus", String(contract.taxFocus))
       form.append("file", contractFile)
       const res = await auditContract(form)
+      bumpProgress(100, "done")
       const nextDocumentId = String(res.document_id || "")
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)
       setDocumentId(nextDocumentId)
       await loadContractPreview(nextDocumentId)
     } catch (err) {
+      bumpProgress(100, "failed")
       setContractError(String(err?.message || err || "Audit failed"))
       setContractResult(null)
       setContractMeta(null)
@@ -360,7 +442,7 @@ export default function App() {
             className="contract-input"
             placeholder={t.noFileChosen}
             value={contract.title}
-            readOnly
+            onChange={e => setContract({ ...contract, title: e.target.value })}
           />
           <div className="grid">
             <label>
@@ -429,6 +511,18 @@ export default function App() {
           <button className="primary" onClick={onContractUpload} disabled={contractLoading}>
             {contractLoading ? t.uploading : t.uploadBtn}
           </button>
+          {contractLoading && (
+            <div className="audit-progress">
+              <div className="audit-progress-head">
+                <span>{t.progressTitle}</span>
+                <span>{contractProgress}%</span>
+              </div>
+              <div className="audit-progress-bar">
+                <div className="audit-progress-fill" style={{ width: `${contractProgress}%` }} />
+              </div>
+              <div className="audit-progress-note">{progressStageText}</div>
+            </div>
+          )}
         </div>
       </section>
       <div className="workbench-grid">
@@ -485,7 +579,11 @@ export default function App() {
               </div>
               <div className="result-summary">
                 <div className="result-title">{t.summary}</div>
-                <p>{contractResult.summary || "-"}</p>
+                <div className="summary-meta">
+                  <span>{t.riskAll}: {riskSummary.all}</span>
+                  <span>{uiLang === "zh" ? `${summaryText.length} 字` : `${summaryText.length} chars`}</span>
+                </div>
+                <div className={`summary-content${summaryText ? "" : " is-empty"}`}>{summaryText || "-"}</div>
               </div>
               <div className="result-risks">
                 <div className="result-title">{t.risks}</div>
@@ -552,15 +650,41 @@ export default function App() {
                               <em>{r.suggestion || ""}</em>
                               {(() => {
                                 const cid = String(r.citation_id || "").trim()
-                                const linked = cid ? citationMap[cid] : null
                                 const basis = String(r.basis || r.law_reference || "").trim()
+                                const linkedById = cid ? citationMap[cid] : null
+                                const basisParsed = parseBasisLawArticle(basis)
+                                const riskLawTitle = String(r.law_title || basisParsed.lawTitle || "").trim()
+                                const riskArticleNo = String(r.article_no || basisParsed.articleNo || "").trim()
+                                const linkedByLaw = linkedById ? null : citationLawArticleMap[buildLawArticleKey(riskLawTitle, riskArticleNo)]
+                                const linked = linkedById || linkedByLaw
                                 if (!cid && !linked && !basis) return null
+                                const evidenceKey = `${idx}:${cid || basis}`
+                                const citationTitle = linked ? buildCitationTitle(linked) : ""
+                                const citationSummary = linked ? getCitationSummary(linked) : ""
+                                const citationContent = linked ? getCitationContent(linked) : ""
+                                const expanded = !!expandedEvidence[evidenceKey]
                                 return (
                                   <div className="risk-evidence">
                                     <div className="evidence-title">{t.evidenceTitle}</div>
                                     {linked ? (
                                       <div className="evidence-card">
-                                        <p>{buildCitationDisplay(linked) || "-"}</p>
+                                        <div className="evidence-law">{citationTitle || "-"}</div>
+                                        {citationSummary ? <p className="evidence-summary">{t.articleSummary}: {citationSummary}</p> : null}
+                                        {citationContent ? (
+                                          <>
+                                            <button
+                                              type="button"
+                                              className="evidence-toggle"
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                toggleEvidence(evidenceKey)
+                                              }}
+                                            >
+                                              {expanded ? t.collapseArticle : t.viewArticle}
+                                            </button>
+                                            {expanded ? <pre className="evidence-content">{citationContent}</pre> : null}
+                                          </>
+                                        ) : null}
                                       </div>
                                     ) : null}
                                     {!linked && basis ? <div className="evidence-id">{t.legalBasis}: {basis}</div> : null}

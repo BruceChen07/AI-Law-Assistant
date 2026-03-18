@@ -363,6 +363,7 @@ def _audit_with_memory(
         if str(it.get("citation_id") or "").strip()
     }
     evidence_whitelist_text = _build_evidence_whitelist_text(evidence_items)
+    clause_parse_state = {"count": 0, "clause_ids": []}
 
     async def _clause_cb(payload: Dict[str, Any]) -> Dict[str, Any]:
         clause = payload.get("clause") or {}
@@ -392,9 +393,25 @@ def _audit_with_memory(
         try:
             parsed = json.loads(result_text)
             if not isinstance(parsed, dict):
+                clause_parse_state["count"] += 1
+                clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+                logger.warning(
+                    "memory_clause_parse_failed round=%s clause_id=%s reason=non_dict_json",
+                    payload.get("round"),
+                    str(clause.get("clause_id") or ""),
+                )
                 return {"summary": "", "risks": []}
             return parsed
-        except Exception:
+        except Exception as e:
+            clause_parse_state["count"] += 1
+            clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+            logger.warning(
+                "memory_clause_parse_failed round=%s clause_id=%s reason=json_decode_error error=%s raw_preview=%s",
+                payload.get("round"),
+                str(clause.get("clause_id") or ""),
+                str(e),
+                str(result_text or "")[:280],
+            )
             return {"summary": "", "risks": []}
 
     async def _flush_cb(prompt: str) -> str:
@@ -450,18 +467,34 @@ def _audit_with_memory(
     risk_summary = {"high": 0, "medium": 0, "low": 0}
     for r in normalized_risks:
         risk_summary[r.get("level", "low")] += 1
+    parse_failed_count = int(clause_parse_state.get("count") or 0)
+    if parse_failed_count > 0 and not normalized_risks:
+        raise RuntimeError("memory audit degraded: llm json parse failed and no risks produced")
+    legal_validation = report.get("legal_validation") if isinstance(report.get("legal_validation"), dict) else {"ok": True, "issues": []}
+    if parse_failed_count > 0:
+        issues = legal_validation.get("issues") if isinstance(legal_validation.get("issues"), list) else []
+        issues = list(issues)
+        issues.append({
+            "risk_id": "pipeline",
+            "message": f"LLM JSON parse failed in {parse_failed_count} clause(s): {','.join([x for x in clause_parse_state.get('clause_ids', []) if x])}"
+        })
+        legal_validation = {"ok": False, "issues": issues}
+    report_summary = str(report.get("summary") or "").strip()
+    if not report_summary:
+        report_summary = f"条款级长短记忆审核完成，共发现 {len(normalized_risks)} 项风险"
     audit = {
-        "summary": f"条款级长短记忆审核完成，共发现 {len(normalized_risks)} 项风险",
+        "summary": report_summary,
         "executive_opinion": [],
         "risk_summary": risk_summary,
         "risks": normalized_risks,
         "citations": _enrich_citations([], evidence_items),
-        "legal_validation": report.get("legal_validation", {"ok": True, "issues": []}),
+        "legal_validation": legal_validation,
     }
     logger.info(
-        "memory_pipeline_done risks=%s validation_ok=%s",
+        "memory_pipeline_done risks=%s validation_ok=%s parse_failed=%s",
         len(normalized_risks),
-        bool((report.get("legal_validation") or {}).get("ok")),
+        bool(legal_validation.get("ok")),
+        parse_failed_count,
     )
     return {
         "audit": audit,
@@ -471,9 +504,11 @@ def _audit_with_memory(
             "memory_db": memory_db,
             "memory_use_long_hits": memory_use_long_hits,
             "memory_report_risk_count": len(normalized_risks),
-            "memory_validation_ok": bool((report.get("legal_validation") or {}).get("ok", False)),
+            "memory_validation_ok": bool(legal_validation.get("ok", False)),
             "risk_dedup_enabled": False,
             "dropped_non_whitelist_risks": dropped_non_whitelist,
+            "parse_failed_clauses": parse_failed_count,
+            "memory_degraded": parse_failed_count > 0,
         },
     }
 

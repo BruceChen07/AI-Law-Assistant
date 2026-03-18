@@ -66,13 +66,14 @@ class HybridSearcher:
         qvec = qv[0]
         qnorm = float(np.linalg.norm(qvec) + 1e-12)
 
-        mat, ids = self.indexer.fetch_embeddings()
+        mat, ids = self.indexer.fetch_embeddings(expected_dim=qvec.shape[0])
         vec_scores: Dict[int, float] = {}
         if mat.shape[0] > 0:
-            mnorm = np.linalg.norm(mat, axis=1) + 1e-12
-            sims = (mat @ qvec) / (mnorm * qnorm)
-            for cid, s in zip(ids, sims):
-                vec_scores[int(cid)] = float(s)
+            if mat.shape[1] == qvec.shape[0]:
+                mnorm = np.linalg.norm(mat, axis=1) + 1e-12
+                sims = (mat @ qvec) / (mnorm * qnorm)
+                for cid, s in zip(ids, sims):
+                    vec_scores[int(cid)] = float(s)
 
         kw_scores_raw: Dict[int, float] = {}
         fts_q = self._fts_query(query)

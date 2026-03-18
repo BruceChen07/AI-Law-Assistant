@@ -323,15 +323,39 @@ class MemoryIndexer:
                     str(self.cfg.memory_root), total)
         return total
 
-    def fetch_embeddings(self) -> tuple[np.ndarray, list[int]]:
+    def fetch_embeddings(self, expected_dim: int | None = None) -> tuple[np.ndarray, list[int]]:
         with self._conn() as conn:
-            rows = conn.execute(
-                "SELECT e.chunk_id,e.vector_blob FROM embeddings e JOIN chunks c ON c.id=e.chunk_id ORDER BY e.chunk_id"
-            ).fetchall()
+            if expected_dim is not None:
+                rows = conn.execute(
+                    "SELECT e.chunk_id,e.vector_blob FROM embeddings e JOIN chunks c ON c.id=e.chunk_id WHERE e.dim=? ORDER BY e.chunk_id",
+                    (expected_dim,)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT e.chunk_id,e.vector_blob FROM embeddings e JOIN chunks c ON c.id=e.chunk_id ORDER BY e.chunk_id"
+                ).fetchall()
+
         if not rows:
-            return np.zeros((0, 1), dtype=np.float32), []
+            return np.zeros((0, expected_dim or 1), dtype=np.float32), []
+
         ids = [int(r["chunk_id"]) for r in rows]
         vecs = [self._from_blob(r["vector_blob"]) for r in rows]
+
+        # Safety check for mixed dimensions if expected_dim was not provided
+        if not expected_dim and vecs:
+            first_dim = vecs[0].shape[0]
+            valid_vecs = []
+            valid_ids = []
+            for i, v in enumerate(vecs):
+                if v.shape[0] == first_dim:
+                    valid_vecs.append(v)
+                    valid_ids.append(ids[i])
+            vecs = valid_vecs
+            ids = valid_ids
+
+        if not vecs:
+            return np.zeros((0, expected_dim or 1), dtype=np.float32), []
+
         mat = np.vstack(vecs).astype(np.float32)
         return mat, ids
 

@@ -205,6 +205,7 @@ class MemoryLifecycleManager:
         logger.info("memory_audit_start clauses=%s short_limit=%s top_k=%s", len(
             clauses), self.cfg.short_memory_token_limit, self.cfg.retrieval_top_k)
         all_risks: List[Risk] = []
+        clause_summaries: List[str] = []
         for i, clause in enumerate(clauses, start=1):
             hits = self.searcher.search(
                 clause.text[:800], top_k=self.cfg.retrieval_top_k)
@@ -222,6 +223,8 @@ class MemoryLifecycleManager:
             risks = res.get("risks") if isinstance(
                 res.get("risks"), list) else []
             summary = str(res.get("summary") or "").strip()
+            if summary:
+                clause_summaries.append(summary)
             record = {
                 "clause": clause.model_dump(),
                 "summary": summary,
@@ -259,8 +262,13 @@ class MemoryLifecycleManager:
             final_risks = self._cluster_and_dedup(all_risks)
         else:
             final_risks = sorted(all_risks, key=lambda x: (self._risk_rank(x.level), -x.confidence, x.risk_id))
+        final_summary = ""
+        if clause_summaries:
+            final_summary = sorted(clause_summaries, key=len, reverse=True)[0]
         report = {
             "generated_at": datetime.utcnow().isoformat(),
+            "summary": final_summary,
+            "clause_summaries": clause_summaries[-8:],
             "risk_count": len(final_risks),
             "risks": [r.model_dump() for r in final_risks],
         }

@@ -145,7 +145,7 @@ input::placeholder, textarea::placeholder {
   display: grid;
   grid-template-columns: minmax(0, clamp(560px, 58vw, 1120px)) minmax(320px, 1fr);
   gap: clamp(16px, 1.4vw, 28px);
-  align-items: start;
+  /* align-items: start; removed to allow stretch */
 }
 
 .contract-upload .contract-panel {
@@ -225,11 +225,13 @@ input::placeholder, textarea::placeholder {
 }
 
 .contract-result {
-  min-height: clamp(460px, 64vh, 860px);
+  height: clamp(500px, 75vh, 920px);
+  display: flex;
+  flex-direction: column;
 }
 
 .contract-preview {
-  min-height: clamp(460px, 72vh, 920px);
+  height: clamp(500px, 75vh, 920px);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -258,7 +260,7 @@ input::placeholder, textarea::placeholder {
 .preview-scroll {
   flex: 1;
   min-height: 0;
-  max-height: clamp(420px, 68vh, 860px);
+  /* max-height removed to fill flex container */
   overflow: auto;
   display: grid;
   gap: 10px;
@@ -266,7 +268,10 @@ input::placeholder, textarea::placeholder {
 }
 
 .preview-empty {
-  height: 280px;
+  flex: 1;
+  height: auto;
+  display: grid;
+  place-items: center;
 }
 
 .preview-document {
@@ -335,13 +340,45 @@ input::placeholder, textarea::placeholder {
 .result-body {
   display: grid;
   gap: 18px;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 6px;
+  min-height: 0;
 }
 
 .result-summary {
-  background: rgba(17, 20, 28, 0.7);
-  border: 1px solid var(--border);
+  background: linear-gradient(145deg, rgba(19, 23, 32, 0.85), rgba(12, 16, 24, 0.88));
+  border: 1px solid rgba(111, 209, 192, 0.28);
   border-radius: 14px;
   padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.summary-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.summary-content {
+  color: #ece7df;
+  line-height: 1.72;
+  font-size: 14px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 12px 13px;
+  border-radius: 10px;
+  border: 1px solid rgba(111, 209, 192, 0.18);
+  background: rgba(8, 12, 18, 0.55);
+}
+
+.summary-content.is-empty {
+  color: var(--muted);
 }
 
 .result-opinion {
@@ -514,10 +551,49 @@ input::placeholder, textarea::placeholder {
   margin-bottom: 6px;
 }
 
-.evidence-card p {
+.evidence-law {
   margin: 0;
   font-size: 13px;
-  color: #ddd7ce;
+  color: #e6dfd4;
+  font-weight: 600;
+}
+
+.evidence-summary {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #cfc7bc;
+  line-height: 1.6;
+}
+
+.evidence-toggle {
+  margin-top: 10px;
+  border: 1px solid rgba(111, 209, 192, 0.35);
+  background: rgba(17, 30, 33, 0.56);
+  color: var(--accent-2);
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.evidence-toggle:hover {
+  border-color: rgba(111, 209, 192, 0.58);
+  background: rgba(17, 36, 38, 0.68);
+}
+
+.evidence-content {
+  margin: 10px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(169, 162, 153, 0.24);
+  background: rgba(10, 13, 18, 0.72);
+  color: #e0d8cc;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
 }
 
 .result-risks strong {
@@ -543,7 +619,8 @@ input::placeholder, textarea::placeholder {
 }
 
 .empty-state {
-  height: 300px;
+  height: 100%;
+  flex: 1;
   display: grid;
   place-items: center;
   text-align: center;
