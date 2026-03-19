@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Literal
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from app.core.auth import get_all_users, update_user_role, log_audit
@@ -73,10 +73,12 @@ class LLMConfigUpdate(BaseModel):
 
 class UIConfigResponse(BaseModel):
     show_citation_source: bool
+    default_theme: Literal["dark", "light"]
 
 
 class UIConfigUpdate(BaseModel):
     show_citation_source: bool
+    default_theme: Optional[str] = None
 
 
 class LLMTestRequest(BaseModel):
@@ -125,10 +127,16 @@ def _validate_llm_config(payload: dict):
         raise HTTPException(status_code=400, detail="timeout must be positive")
 
 
+def _normalize_theme(v: Optional[str]) -> str:
+    s = str(v or "").strip().lower()
+    return "light" if s == "light" else "dark"
+
+
 def _get_ui_config(cfg: dict) -> dict:
     ui_cfg = cfg.get("ui_config") if isinstance(cfg.get("ui_config"), dict) else {}
     return {
-        "show_citation_source": bool(ui_cfg.get("show_citation_source", False))
+        "show_citation_source": bool(ui_cfg.get("show_citation_source", False)),
+        "default_theme": _normalize_theme(ui_cfg.get("default_theme")),
     }
 
 
@@ -359,7 +367,15 @@ def get_ui_config(current_user: dict = Depends(require_admin)):
 
 @router.put("/ui-config", response_model=UIConfigResponse)
 def update_ui_config(payload: UIConfigUpdate, current_user: dict = Depends(require_admin)):
-    data = {"ui_config": {"show_citation_source": bool(payload.show_citation_source)}}
+    cfg_current = get_config()
+    current_ui = cfg_current.get("ui_config") if isinstance(cfg_current.get("ui_config"), dict) else {}
+    next_theme = _normalize_theme(payload.default_theme if payload.default_theme is not None else current_ui.get("default_theme"))
+    data = {
+        "ui_config": {
+            "show_citation_source": bool(payload.show_citation_source),
+            "default_theme": next_theme,
+        }
+    }
     cfg = update_config_patch(data)
     ui_cfg = _get_ui_config(cfg)
     return UIConfigResponse(**ui_cfg)

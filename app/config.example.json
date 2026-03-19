@@ -71,6 +71,10 @@
         "timeout": 60,
         "headers": {}
     },
+    "ui_config": {
+        "show_citation_source": false,
+        "default_theme": "dark"
+    },
     "memory_use_long_hits": true,
     "max_upload_mb": 50,
     "cors_allow_origins": [

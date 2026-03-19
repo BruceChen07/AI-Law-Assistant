@@ -18,6 +18,11 @@ _audit_progress: Dict[str, Dict[str, Any]] = {}
 _audit_progress_lock = threading.Lock()
 
 
+def _normalize_theme(v: Optional[str]) -> str:
+    s = str(v or "").strip().lower()
+    return "light" if s == "light" else "dark"
+
+
 def _set_audit_progress(audit_id: str, status: str, progress: int, stage: str, message: str = "") -> None:
     payload = {
         "audit_id": audit_id,
@@ -203,7 +208,10 @@ def build_router(cfg, llm, embedder=None, reranker=None):
         _ = current_user
         cfg = get_config()
         ui_cfg = cfg.get("ui_config") if isinstance(cfg.get("ui_config"), dict) else {}
-        return {"show_citation_source": bool(ui_cfg.get("show_citation_source", False))}
+        return {
+            "show_citation_source": bool(ui_cfg.get("show_citation_source", False)),
+            "default_theme": _normalize_theme(ui_cfg.get("default_theme")),
+        }
 
     @router.get("/contracts/{document_id}/preview")
     def preview_contract_document(

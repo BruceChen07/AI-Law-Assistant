@@ -19,7 +19,7 @@ export default function Admin({ onBack, lang }) {
   const [llmTestResult, setLlmTestResult] = useState("")
   const [llmTestError, setLlmTestError] = useState("")
   const [llmTesting, setLlmTesting] = useState(false)
-  const [uiConfig, setUiConfig] = useState({ showCitationSource: false })
+  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark" })
   const [uiSaving, setUiSaving] = useState(false)
   const [uiError, setUiError] = useState("")
   const [regUpload, setRegUpload] = useState({
@@ -120,6 +120,9 @@ export default function Admin({ onBack, lang }) {
       llmApiKeySavedHint: "已保存 API 密钥；不修改可留空。",
       uiConfigTitle: "界面配置",
       showCitationSource: "显示证据来源",
+      defaultTheme: "默认主题",
+      themeDark: "深色",
+      themeLight: "浅色",
       save: "保存",
       saved: "已保存",
       validateFailed: "请检查配置参数",
@@ -198,6 +201,9 @@ export default function Admin({ onBack, lang }) {
       llmApiKeySavedHint: "API key already saved; leave empty to keep it.",
       uiConfigTitle: "UI Config",
       showCitationSource: "Show citation source",
+      defaultTheme: "Default theme",
+      themeDark: "Dark",
+      themeLight: "Light",
       save: "Save",
       saved: "Saved",
       validateFailed: "Please check config fields",
@@ -295,7 +301,10 @@ export default function Admin({ onBack, lang }) {
   const loadUIConfig = async () => {
     try {
       const data = await adminGetUIConfig()
-      setUiConfig({ showCitationSource: !!data.show_citation_source })
+      setUiConfig({
+        showCitationSource: !!data.show_citation_source,
+        defaultTheme: String(data?.default_theme || "").toLowerCase() === "light" ? "light" : "dark"
+      })
       setUiError("")
     } catch (err) {
       setUiError(err.message)
@@ -366,7 +375,10 @@ export default function Admin({ onBack, lang }) {
   const saveUIConfig = async () => {
     setUiSaving(true)
     try {
-      await adminUpdateUIConfig({ show_citation_source: !!uiConfig.showCitationSource })
+      await adminUpdateUIConfig({
+        show_citation_source: !!uiConfig.showCitationSource,
+        default_theme: uiConfig.defaultTheme === "light" ? "light" : "dark"
+      })
       setUiError(t.saved)
     } catch (err) {
       setUiError(err.message)
@@ -683,6 +695,16 @@ export default function Admin({ onBack, lang }) {
                     />
                     {t.showCitationSource}
                   </label>
+                </div>
+                <div className="row">
+                  <label>{t.defaultTheme}</label>
+                  <select
+                    value={uiConfig.defaultTheme}
+                    onChange={e => setUiConfig(prev => ({ ...prev, defaultTheme: e.target.value === "light" ? "light" : "dark" }))}
+                  >
+                    <option value="dark">{t.themeDark}</option>
+                    <option value="light">{t.themeLight}</option>
+                  </select>
                 </div>
                 <div className="row">
                   <button disabled={uiSaving} onClick={saveUIConfig}>{t.save}</button>

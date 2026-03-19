@@ -3,6 +3,15 @@ import { auditContract, getContractPreview, getCurrentUser, getMe, getUIConfig, 
 import Login from "./Login"
 import Admin from "./Admin"
 
+const THEME_STORAGE_KEY = "ui_theme"
+
+const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
+
+const getStoredTheme = () => {
+  const v = String(localStorage.getItem(THEME_STORAGE_KEY) || "").toLowerCase()
+  return v === "light" || v === "dark" ? v : ""
+}
+
 export default function App() {
   const [view, setView] = useState("main")
   const [user, setUser] = useState(getCurrentUser())
@@ -23,6 +32,7 @@ export default function App() {
     syncUser()
   }, [])
   const [uiLang, setUiLang] = useState("zh")
+  const [theme, setTheme] = useState("dark")
   const [contract, setContract] = useState({
     title: "",
     language: "zh",
@@ -38,7 +48,7 @@ export default function App() {
   const [contractResult, setContractResult] = useState(null)
   const [contractMeta, setContractMeta] = useState(null)
   const [documentId, setDocumentId] = useState("")
-  const [uiConfig, setUiConfig] = useState({ showCitationSource: false })
+  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark" })
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState("")
   const [previewText, setPreviewText] = useState("")
@@ -55,6 +65,9 @@ export default function App() {
       appTitle: "合同审计",
       appSubtitle: "上传合同，生成财税与法律风险审计",
       uiLanguage: "界面语言",
+      themeLabel: "界面主题",
+      themeDark: "深色",
+      themeLight: "浅色",
       chooseFile: "选择文件",
       noFileChosen: "未选择任何文件",
       uploadBtn: "开始审计",
@@ -118,6 +131,9 @@ export default function App() {
       appTitle: "Contract Audit",
       appSubtitle: "Upload contracts and generate compliance risk audit",
       uiLanguage: "UI Language",
+      themeLabel: "Theme",
+      themeDark: "Dark",
+      themeLight: "Light",
       chooseFile: "Choose File",
       noFileChosen: "No file chosen",
       uploadBtn: "Audit",
@@ -296,11 +312,26 @@ export default function App() {
   }, [contractLoading])
 
   useEffect(() => {
+    const stored = getStoredTheme()
+    if (stored) setTheme(stored)
+  }, [])
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", normalizeTheme(theme))
+  }, [theme])
+
+  useEffect(() => {
     if (!user) return
     const loadUIConfig = async () => {
       try {
         const data = await getUIConfig()
-        setUiConfig({ showCitationSource: !!data.show_citation_source })
+        const serverTheme = normalizeTheme(data?.default_theme)
+        setUiConfig({
+          showCitationSource: !!data.show_citation_source,
+          defaultTheme: serverTheme
+        })
+        const stored = getStoredTheme()
+        if (!stored) setTheme(serverTheme)
       } catch {
       }
     }
@@ -401,6 +432,12 @@ export default function App() {
     setContract(prev => ({ ...prev, language: next }))
   }
 
+  const onThemeChange = (next) => {
+    const normalized = normalizeTheme(next)
+    setTheme(normalized)
+    localStorage.setItem(THEME_STORAGE_KEY, normalized)
+  }
+
   if (!user) {
     return <Login onLogin={() => { setUser(getCurrentUser()); setView("main") }} />
   }
@@ -425,6 +462,13 @@ export default function App() {
             <select value={uiLang} onChange={e => onUiLanguageChange(e.target.value)}>
               <option value="zh">中文</option>
               <option value="en">English</option>
+            </select>
+          </div>
+          <div className="lang-pill">
+            <span>{t.themeLabel}</span>
+            <select value={theme} onChange={e => onThemeChange(e.target.value)}>
+              <option value="dark">{t.themeDark}</option>
+              <option value="light">{t.themeLight}</option>
             </select>
           </div>
           <div className="user-pill">
