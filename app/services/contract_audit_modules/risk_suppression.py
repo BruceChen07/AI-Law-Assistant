@@ -1,0 +1,211 @@
+"""
+Risk Suppression.
+职责: 识别缺失类风险（未明确/未提及等），并通过跨条款反证或全局涉税上下文进行风险抑制。
+输入输出: 接收单一风险项和全量条款，返回是否应抑制该风险及抑制命中详情。
+异常场景: 风险结构异常或缺失上下文时，默认不抑制。
+"""
+import structlog
+from typing import Dict, Any, List, Set, Tuple, Optional
+
+logger = structlog.get_logger(__name__)
+
+MISSING_RISK_MARKERS = [
+    "未明确", "未约定", "未提及", "未说明", "缺失", "缺乏", "未写明", "not mention", "not specified", "not clear"
+]
+
+RISK_TOPIC_KEYWORDS = {
+    "invoice": ["发票", "增值税普通发票", "专用发票", "电子发票", "invoice", "vat invoice"],
+    "invoice_timing": ["开票时点", "开票时间", "发送发票", "发票发送", "invoice timing", "issue invoice"],
+    "tax_rate": ["税率", "税点", "增值税税率", "vat rate", "tax rate"],
+    "tax_obligation": ["纳税义务", "纳税时间", "征管", "tax obligation", "tax liability"],
+    "withholding": ["代扣", "代缴", "代扣代缴", "withholding"],
+}
+
+def contains_any(text: str, keywords: List[str]) -> bool:
+    """检查文本是否包含关键词列表中的任一词。"""
+    t = str(text or "").lower()
+    return any(str(k or "").lower() in t for k in keywords)
+
+def is_missing_style_risk(risk: Dict[str, Any]) -> bool:
+    """判定风险是否属于“缺失类”。"""
+    merged = " ".join([
+        str(risk.get("issue", "") or ""),
+        str(risk.get("suggestion", "") or ""),
+        str(risk.get("evidence", "") or ""),
+    ])
+    return contains_any(merged, MISSING_RISK_MARKERS)
+
+def detect_risk_topics(risk: Dict[str, Any]) -> Set[str]:
+    """检测风险关联的涉税主题。"""
+    merged = " ".join([
+        str(risk.get("issue", "") or ""),
+        str(risk.get("suggestion", "") or ""),
+        str(risk.get("evidence", "") or ""),
+    ])
+    topics: Set[str] = set()
+    for topic, kws in RISK_TOPIC_KEYWORDS.items():
+        if contains_any(merged, kws):
+            topics.add(topic)
+    return topics
+
+def find_counter_evidence_clause(
+    topics: Set[str],
+    clauses: List[Dict[str, Any]],
+    skip_clause_id: str = "",
+) -> Tuple[bool, Dict[str, Any]]:
+    """在全部条款中查找能推翻“缺失类风险”的反证条款。"""
+    if not topics or not clauses:
+        return False, {}
+    for clause in clauses:
+        cid = str(clause.get("clause_id") or "")
+        if skip_clause_id and cid == skip_clause_id:
+            continue
+        ctext = str(clause.get("clause_text") or "")
+        if not ctext.strip():
+            continue
+        for topic in topics:
+            kws = RISK_TOPIC_KEYWORDS.get(topic, [])
+            if kws and contains_any(ctext, kws):
+                return True, {
+                    "clause_id": cid,
+                    "clause_path": str(clause.get("clause_path") or ""),
+                    "page_no": int(clause.get("page_no") or 0),
+                    "paragraph_no": str(clause.get("paragraph_no") or ""),
+                    "topic": topic,
+                    "quote": ctext[:160],
+                }
+    return False, {}
+
+def find_counter_evidence_in_global_context(
+    topics: Set[str],
+    global_tax_context: Dict[str, Any],
+    skip_clause_id: str = "",
+) -> Tuple[bool, Dict[str, Any]]:
+    """在全局涉税上下文中查找反证。"""
+    if not topics or not isinstance(global_tax_context, dict):
+        return False, {}
+    for topic in topics:
+        items = global_tax_context.get(topic)
+        if not isinstance(items, list):
+            continue
+        for it in items:
+            cid = str(it.get("clause_id") or "")
+            if skip_clause_id and cid == skip_clause_id:
+                continue
+            return True, {
+                "topic": topic,
+                "clause_id": cid,
+                "clause_path": str(it.get("clause_path") or ""),
+                "page_no": int(it.get("page_no") or 0),
+                "paragraph_no": str(it.get("paragraph_no") or ""),
+                "quote": str(it.get("quote") or ""),
+                "source": "global_tax_context",
+            }
+    return False, {}
+
+def should_suppress_missing_risk(
+    risk: Dict[str, Any],
+    clauses: List[Dict[str, Any]],
+    current_clause_id: str = "",
+    global_tax_context: Optional[Dict[str, Any]] = None,
+) -> Tuple[bool, Dict[str, Any]]:
+    """判断是否应抑制某条缺失类风险。"""
+    if not isinstance(risk, dict) or not is_missing_style_risk(risk):
+        return False, {}
+    topics = detect_risk_topics(risk)
+    found, hit = find_counter_evidence_in_global_context(topics, global_tax_context or {}, current_clause_id)
+    if found:
+        return True, hit
+    found, hit = find_counter_evidence_clause(topics, clauses, current_clause_id)
+    if not found:
+        return False, {}
+    hit["source"] = "clause_scan"
+    return True, hit
+
+def build_global_tax_context(clauses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """构建合同全局的涉税事实画像。"""
+    context = {
+        "invoice": [],
+        "invoice_timing": [],
+        "tax_rate": [],
+        "tax_obligation": [],
+        "withholding": [],
+    }
+    if not clauses:
+        return context
+    seen: Set[str] = set()
+    for clause in clauses:
+        cid = str(clause.get("clause_id") or "")
+        cpath = str(clause.get("clause_path") or "")
+        ctext = str(clause.get("clause_text") or "")
+        if not ctext.strip():
+            continue
+        for topic, kws in RISK_TOPIC_KEYWORDS.items():
+            if not kws or not contains_any(ctext, kws):
+                continue
+            key = f"{topic}##{cid}"
+            if key in seen:
+                continue
+            seen.add(key)
+            context[topic].append(
+                {
+                    "clause_id": cid,
+                    "clause_path": cpath,
+                    "page_no": int(clause.get("page_no") or 0),
+                    "paragraph_no": str(clause.get("paragraph_no") or ""),
+                    "quote": ctext[:220],
+                }
+            )
+    return context
+
+def format_global_tax_context(context: Dict[str, Any], per_topic_limit: int = 3) -> str:
+    """将全局涉税画像格式化为 Prompt 可用的文本。"""
+    if not isinstance(context, dict):
+        return ""
+    lines: List[str] = []
+    for topic in ["invoice", "invoice_timing", "tax_rate", "tax_obligation", "withholding"]:
+        items = context.get(topic)
+        if not isinstance(items, list) or not items:
+            continue
+        lines.append(f"{topic}:")
+        for it in items[:per_topic_limit]:
+            cid = str(it.get("clause_id") or "")
+            cpath = str(it.get("clause_path") or "")
+            quote = str(it.get("quote") or "")
+            lines.append(f"- {cid} {cpath} | {quote}")
+    return "\n".join(lines)
+
+def reconcile_cross_clause_conflicts(
+    risks: List[Dict[str, Any]],
+    clauses: List[Dict[str, Any]],
+    global_tax_context: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """协调跨条款冲突，二次移除在其他条款中有说明的假阳性风险。"""
+    if not risks:
+        return risks, []
+    kept: List[Dict[str, Any]] = []
+    removed: List[Dict[str, Any]] = []
+    for risk in risks:
+        if not isinstance(risk, dict):
+            continue
+        loc = risk.get("location") if isinstance(risk.get("location"), dict) else {}
+        cid = str(loc.get("clause_id") or "")
+        suppress, hit = should_suppress_missing_risk(
+            risk,
+            clauses,
+            current_clause_id=cid,
+            global_tax_context=global_tax_context,
+        )
+        if suppress:
+            removed.append(
+                {
+                    "risk_id": str(loc.get("risk_id") or ""),
+                    "clause_id": cid,
+                    "topic": str(hit.get("topic") or ""),
+                    "counter_clause_id": str(hit.get("clause_id") or ""),
+                    "counter_source": str(hit.get("source") or ""),
+                }
+            )
+            continue
+        kept.append(risk)
+    return kept, removed

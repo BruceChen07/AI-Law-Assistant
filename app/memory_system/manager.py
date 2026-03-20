@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from app.memory_system.indexer import MemoryIndexer
 from app.memory_system.search import HybridSearcher
 from app.memory_system.validator import validate_report_citations
+from app.services.tax_contract_parser import split_contract_clauses
 
 logger = logging.getLogger("law_assistant")
 
@@ -81,32 +82,66 @@ class MemoryLifecycleManager:
         self.memory_root.mkdir(parents=True, exist_ok=True)
 
     def split_contract(self, text: str) -> List[Clause]:
+        raw = split_contract_clauses(str(text or ""))
+
+        def _is_major_heading(path: str) -> bool:
+            p = str(path or "").strip()
+            if not p or p.startswith("段"):
+                return False
+            if re.match(r"^[一二三四五六七八九十百千]+、$", p):
+                return True
+            if re.match(r"^第[一二三四五六七八九十百千0-9]+[章节编部分篇]$", p):
+                return True
+            return False
+
+        out: List[Clause] = []
+        preamble_lines: List[str] = []
+        preamble_start = 1
+        current_lines: List[str] = []
+        current_title = ""
+        current_start = 0
+
+        def _flush_current() -> None:
+            nonlocal current_lines, current_title, current_start
+            body = "\n".join([x for x in current_lines if x]).strip()
+            if body:
+                cid = f"c{max(1, int(current_start or 1))}"
+                title = current_title or f"Clause {cid[1:]}"
+                out.append(Clause(clause_id=cid, title=title, text=body))
+            current_lines = []
+            current_title = ""
+            current_start = 0
+
+        for raw_idx, item in enumerate(raw, start=1):
+            clause_text = str(item.get("clause_text") or "").strip()
+            if not clause_text:
+                continue
+            clause_path = str(item.get("clause_path") or "").strip()
+            if _is_major_heading(clause_path):
+                if preamble_lines:
+                    out.append(Clause(clause_id=f"c{preamble_start}", title="导言", text="\n".join(preamble_lines).strip()))
+                    preamble_lines = []
+                _flush_current()
+                current_start = raw_idx
+                current_title = f"{clause_path} {clause_text}".strip()
+                current_lines = [current_title]
+                continue
+            if current_start == 0:
+                preamble_lines.append(clause_text)
+            else:
+                current_lines.append(clause_text)
+
+        if preamble_lines:
+            out.append(Clause(clause_id=f"c{preamble_start}", title="导言", text="\n".join(preamble_lines).strip()))
+        _flush_current()
+
+        if out:
+            out.sort(key=lambda x: int(re.sub(r"\D+", "", x.clause_id) or "1"))
+            return out
         lines = [x.strip() for x in str(text or "").splitlines() if x.strip()]
         if not lines:
             return []
-        out: List[Clause] = []
-        current: List[str] = []
-        title = ""
-        idx = 1
-        head = re.compile(
-            r"^(第[一二三四五六七八九十百千0-9]+条|Article\s+\d+|Clause\s+\d+)", re.I)
-        for line in lines:
-            if head.search(line):
-                if current:
-                    body = "\n".join(current).strip()
-                    out.append(
-                        Clause(clause_id=f"c{idx}", title=title or f"Clause {idx}", text=body))
-                    idx += 1
-                    current = []
-                title = line
-                current.append(line)
-            else:
-                current.append(line)
-        if current:
-            body = "\n".join(current).strip()
-            out.append(
-                Clause(clause_id=f"c{idx}", title=title or f"Clause {idx}", text=body))
-        return out
+        return [Clause(clause_id="c1", title="Clause 1", text="\n".join(lines))]
 
     def _daily_file(self) -> Path:
         day = datetime.utcnow().strftime("%Y-%m-%d")
@@ -136,6 +171,20 @@ class MemoryLifecycleManager:
     def _append_text(self, path: Path, block: str) -> None:
         with path.open("a", encoding="utf-8") as f:
             f.write(block)
+
+    def _dump_clause_split(self, clauses: List[Clause]) -> Path:
+        debug_dir = self.memory_root / "debug"
+        debug_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
+        target = debug_dir / f"contract_clause_split_{stamp}.json"
+        payload = {
+            "generated_at": datetime.utcnow().isoformat(),
+            "count": len(clauses),
+            "clauses": [c.model_dump() for c in clauses],
+        }
+        with target.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return target
 
     async def check_and_flush(self, llm_flush_callback: Callable[[str], Awaitable[str]]) -> None:
         if self.short.total_tokens() <= self.cfg.flush_soft_threshold:
@@ -204,9 +253,17 @@ class MemoryLifecycleManager:
         clauses = self.split_contract(contract_text)
         logger.info("memory_audit_start clauses=%s short_limit=%s top_k=%s", len(
             clauses), self.cfg.short_memory_token_limit, self.cfg.retrieval_top_k)
+        try:
+            dump_path = await asyncio.to_thread(self._dump_clause_split, clauses)
+            logger.info("memory_clause_split_dumped file=%s clauses=%s", str(dump_path), len(clauses))
+        except Exception as e:
+            logger.error("memory_clause_split_dump_failed error=%s", str(e))
         all_risks: List[Risk] = []
         clause_summaries: List[str] = []
         for i, clause in enumerate(clauses, start=1):
+            if i > 30:
+                logger.error("memory_audit_round_exceeded max_rounds=%s actual_round=%s", 30, i)
+                raise RuntimeError("memory audit aborted: round limit exceeded")
             hits = self.searcher.search(
                 clause.text[:800], top_k=self.cfg.retrieval_top_k)
             long_ctx = "\n\n".join(h.content[:500] for h in hits)

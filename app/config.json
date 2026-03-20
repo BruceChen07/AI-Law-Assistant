@@ -5,10 +5,10 @@
     "static_dir": "../web/dist",
     "default_language": "zh",
     "reranker_enabled": true,
-    "reranker_model_path": "..\\models\\reranker\\zh",
+    "reranker_model_path": "..\\models\\reranker\\en",
     "reranker_profiles": {
         "zh": "..\\models\\reranker\\zh",
-        "en": "../models/reranker/en"
+        "en": "..\\models\\reranker\\en"
     },
     "rerank_batch_size": 8,
     "rerank_max_len": 512,
@@ -65,16 +65,23 @@
         "provider": "qwen",
         "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "api_key": "sk-458a55fe938a40e181f2b4578d98d609",
-        "model": "qwen3.5-397b-a17b",
+        "model": "qwen3.5-122b-a10b",
         "temperature": 0.0,
         "max_tokens": 2048,
         "timeout": 120,
         "headers": {}
     },
+    "llm_trace_enabled": true,
+    "llm_trace_dir": "../data/memory/llm_interactions",
+    "llm_trace_max_chars": 12000,
     "memory_use_long_hits": true,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",
         "http://localhost:5174"
-    ]
+    ],
+    "ui_config": {
+        "show_citation_source": false,
+        "default_theme": "dark"
+    }
 }

@@ -6,9 +6,11 @@ import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query
+from fastapi.responses import FileResponse
 from app.api.dependencies import get_current_user
 from app.services.crud import insert_document, insert_contract_audit, get_document_by_id_for_user
 from app.services.contract_audit import audit_contract
+from app.services.contract_preview_assets import build_contract_preview_manifest, find_preview_page
 from app.core.utils import extract_text_with_config
 from app.core.config import get_config
 
@@ -212,6 +214,64 @@ def build_router(cfg, llm, embedder=None, reranker=None):
             "show_citation_source": bool(ui_cfg.get("show_citation_source", False)),
             "default_theme": _normalize_theme(ui_cfg.get("default_theme")),
         }
+
+    @router.get("/contracts/{document_id}/preview-manifest")
+    def get_contract_preview_manifest(
+        document_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        doc = get_document_by_id_for_user(cfg, document_id, current_user["id"])
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+        file_path = str(doc.get("file_path") or "")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="document file not found")
+        manifest = build_contract_preview_manifest(
+            cfg=cfg,
+            document_id=document_id,
+            file_path=file_path,
+            mime_type=str(doc.get("mime_type") or ""),
+        )
+        pages = []
+        for page in manifest.get("pages") or []:
+            page_no = int(page.get("page_no") or 0)
+            item = {k: v for k, v in page.items() if k != "image_file"}
+            item["image_api"] = f"/contracts/{document_id}/preview/pages/{page_no}/image" if page_no > 0 and page.get("image_file") else ""
+            pages.append(item)
+        return {
+            "document_id": document_id,
+            "filename": doc.get("original_filename") or doc.get("filename"),
+            "mime_type": doc.get("mime_type"),
+            "mode": manifest.get("mode", "text"),
+            "source": manifest.get("source", "text_fallback"),
+            "meta": manifest.get("meta") or {},
+            "pages": pages,
+            "text": manifest.get("text", ""),
+        }
+
+    @router.get("/contracts/{document_id}/preview/pages/{page_no}/image")
+    def get_contract_preview_page_image(
+        document_id: str,
+        page_no: int,
+        current_user: dict = Depends(get_current_user),
+    ):
+        doc = get_document_by_id_for_user(cfg, document_id, current_user["id"])
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+        file_path = str(doc.get("file_path") or "")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="document file not found")
+        manifest = build_contract_preview_manifest(
+            cfg=cfg,
+            document_id=document_id,
+            file_path=file_path,
+            mime_type=str(doc.get("mime_type") or ""),
+        )
+        page = find_preview_page(manifest, page_no)
+        image_file = str(page.get("image_file") or "")
+        if not image_file or not os.path.exists(image_file):
+            raise HTTPException(status_code=404, detail="preview image not found")
+        return FileResponse(image_file, media_type="image/png")
 
     @router.get("/contracts/{document_id}/preview")
     def preview_contract_document(

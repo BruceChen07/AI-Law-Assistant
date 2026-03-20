@@ -318,6 +318,113 @@ input::placeholder, textarea::placeholder {
   place-items: center;
 }
 
+.preview-visual {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.preview-thumbs {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+  padding: 10px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.preview-thumb {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 8px;
+  cursor: pointer;
+  display: grid;
+  gap: 6px;
+}
+
+.preview-thumb.is-active {
+  border-color: var(--accent-2);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-2) 45%, transparent);
+}
+
+.preview-thumb-media {
+  width: 100%;
+  aspect-ratio: 1 / 1.42;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.preview-thumb-media img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.preview-thumb-no {
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.preview-main {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+  padding: 12px;
+  overflow: auto;
+}
+
+.preview-main-media {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--panel);
+  min-height: 320px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.preview-main-media img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.preview-highlight {
+  position: absolute;
+  border: 2px solid var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 18%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent-2) 45%, transparent);
+  border-radius: 4px;
+  pointer-events: none;
+  animation: previewPulse 1.2s ease-in-out 2;
+}
+
+@keyframes previewPulse {
+  0% { opacity: 0.25; }
+  50% { opacity: 0.9; }
+  100% { opacity: 0.45; }
+}
+
+.preview-main-loading {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .preview-document {
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -924,5 +1031,14 @@ input::placeholder, textarea::placeholder {
   }
   .stats-grid {
     grid-template-columns: 1fr;
+  }
+  .preview-visual {
+    grid-template-columns: 1fr;
+  }
+  .preview-thumbs {
+    grid-auto-flow: column;
+    grid-auto-columns: 110px;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 }

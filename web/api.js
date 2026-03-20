@@ -195,3 +195,17 @@ export async function getContractPreview(documentId, clauseLimit = 2000) {
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }
+
+export async function getContractPreviewManifest(documentId) {
+  const headers = { ...getAuthHeaders() }
+  const res = await fetch(`${API_BASE}/contracts/${documentId}/preview-manifest`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function getContractPreviewPageImage(documentId, pageNo) {
+  const headers = { ...getAuthHeaders() }
+  const res = await fetch(`${API_BASE}/contracts/${documentId}/preview/pages/${pageNo}/image`, { headers })
+  if (!res.ok) throw new Error(await res.text())
+  return res.blob()
+}

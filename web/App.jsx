@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, getContractPreview, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { auditContract, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 
@@ -53,12 +53,22 @@ export default function App() {
   const [previewError, setPreviewError] = useState("")
   const [previewText, setPreviewText] = useState("")
   const [previewMeta, setPreviewMeta] = useState(null)
+  const [previewMode, setPreviewMode] = useState("text")
+  const [previewPages, setPreviewPages] = useState([])
+  const [previewPageUrls, setPreviewPageUrls] = useState({})
+  const [activePreviewPage, setActivePreviewPage] = useState(1)
+  const [activePreviewHighlight, setActivePreviewHighlight] = useState(null)
   const [activeRiskIndex, setActiveRiskIndex] = useState(-1)
   const [riskFilter, setRiskFilter] = useState("all")
   const [expandedEvidence, setExpandedEvidence] = useState({})
   const [contractProgress, setContractProgress] = useState(0)
   const [contractProgressStage, setContractProgressStage] = useState("working")
   const previewScrollRef = useRef(null)
+  const previewMainRef = useRef(null)
+  const previewThumbRefs = useRef({})
+  const previewPageUrlsRef = useRef({})
+  const previewLocateSeqRef = useRef(0)
+  const previewLastBlockByPageRef = useRef({})
 
   const i18n = {
     zh: {
@@ -110,8 +120,10 @@ export default function App() {
       contractPreview: "合同预览",
       previewLoading: "正在加载合同预览...",
       previewEmpty: "暂无可预览的合同原文",
-      previewHint: "左侧仅展示原文预览，不做条款切分",
+      previewHint: "左侧支持版式预览，失败时自动回退到文本预览",
       previewError: "预览加载失败",
+      previewVisualMode: "版式",
+      previewTextMode: "文本",
       location: "定位",
       pageParagraph: "页/段",
       noLocation: "未定位到具体条款",
@@ -176,8 +188,10 @@ export default function App() {
       contractPreview: "Contract Preview",
       previewLoading: "Loading contract preview...",
       previewEmpty: "No previewable contract text available",
-      previewHint: "Left panel only shows full-text preview without clause splitting",
+      previewHint: "Left panel uses visual preview and falls back to text mode when needed",
       previewError: "Failed to load preview",
+      previewVisualMode: "Visual",
+      previewTextMode: "Text",
       location: "Location",
       pageParagraph: "Page/Para",
       noLocation: "No linked clause",
@@ -282,7 +296,29 @@ export default function App() {
   useEffect(() => {
     setActiveRiskIndex(-1)
     setExpandedEvidence({})
+    setActivePreviewHighlight(null)
   }, [riskFilter, documentId])
+
+  useEffect(() => {
+    previewPageUrlsRef.current = previewPageUrls
+  }, [previewPageUrls])
+
+  useEffect(() => {
+    if (previewMode !== "visual") return
+    const bbox = Array.isArray(activePreviewHighlight?.bbox) ? activePreviewHighlight.bbox : null
+    if (!bbox || bbox.length !== 4) return
+    const box = previewMainRef.current
+    if (!box) return
+    const y = (Number(bbox[1]) || 0) + (Number(bbox[3]) || 0) / 2
+    const target = Math.max(0, box.scrollHeight * y - box.clientHeight / 2)
+    box.scrollTo({ top: target, behavior: "smooth" })
+  }, [previewMode, activePreviewPage, activePreviewHighlight])
+
+  useEffect(() => () => {
+    Object.values(previewPageUrlsRef.current || {}).forEach((u) => {
+      if (u) URL.revokeObjectURL(u)
+    })
+  }, [])
 
   useEffect(() => {
     if (!contractLoading) {
@@ -299,11 +335,11 @@ export default function App() {
         bumpProgress(58, "retrieval")
       }, 1800),
       setTimeout(() => {
-        bumpProgress(78, "auditing")
+        bumpProgress(75, "auditing")
       }, 3200)
     ]
     const ticker = setInterval(() => {
-      setContractProgress((p) => Math.min(p + 1, 95))
+      setContractProgress((p) => Math.min(p + 1, 75))
     }, 900)
     return () => {
       timers.forEach(clearTimeout)
@@ -348,8 +384,100 @@ export default function App() {
     return t.noLocation
   }
 
+  const normalizeMatchText = (value) => String(value || "")
+    .toLowerCase()
+    .replace(/[\s\r\n\t，。；：、“”‘’"'（）()【】\[\]{}<>《》,.!?;:|\\/]+/g, "")
+    .trim()
+
+  const extractMatchTerms = (value) => {
+    const raw = String(value || "").toLowerCase()
+    const matched = raw.match(/[\u4e00-\u9fa5]{2,}|[a-z0-9]{3,}/g) || []
+    return Array.from(new Set(matched)).slice(0, 28)
+  }
+
+  const pickPreviewHighlight = (risk, blocks, pageNo) => {
+    const list = Array.isArray(blocks) ? blocks : []
+    if (list.length === 0) return null
+    const rawPara = String(risk?.location?.paragraph_no || "").trim()
+    const paraDigits = rawPara.match(/\d+/)
+    const paraIndex = paraDigits ? (Number(paraDigits[0]) - 1) : -1
+    const clausePath = String(risk?.location?.clause_path || "").trim()
+    const riskText = [risk?.issue, risk?.suggestion, risk?.evidence, risk?.basis, risk?.law_reference, clausePath].join(" ")
+    const riskNorm = normalizeMatchText(riskText)
+    const terms = extractMatchTerms(riskText)
+    const clausePathNorm = normalizeMatchText(clausePath)
+    const recentIndex = Number(previewLastBlockByPageRef.current[String(pageNo)])
+    let bestScore = -1
+    let best = null
+    list.forEach((b, idx) => {
+      const bbox = Array.isArray(b?.bbox) && b.bbox.length === 4 ? b.bbox : null
+      if (!bbox) return
+      const lineNorm = normalizeMatchText(b?.text)
+      if (!lineNorm) return
+      let score = 0
+      if (riskNorm) {
+        const headA = lineNorm.slice(0, Math.min(28, lineNorm.length))
+        const headB = riskNorm.slice(0, Math.min(28, riskNorm.length))
+        if (headA && riskNorm.includes(headA)) score += 4
+        if (headB && lineNorm.includes(headB)) score += 3
+      }
+      if (terms.length > 0) {
+        const hit = terms.reduce((n, term) => n + (lineNorm.includes(term) ? 1 : 0), 0)
+        const ratio = hit / Math.max(terms.length, 1)
+        score += hit * 1.2 + ratio * 2.4
+      }
+      if (clausePathNorm && lineNorm.includes(clausePathNorm)) {
+        score += 5.5
+      }
+      if (paraIndex >= 0) {
+        score += Math.max(0, 0.9 - Math.abs(idx - paraIndex) * 0.08)
+      }
+      if (Number.isFinite(recentIndex)) {
+        score += Math.max(0, 1.2 - Math.abs(idx - recentIndex) * 0.18)
+      }
+      if (score > bestScore) {
+        bestScore = score
+        best = {
+          bbox,
+          blockId: String(b?.block_id || `p${pageNo}-b${idx + 1}`),
+          blockIndex: idx,
+        }
+      }
+    })
+    return bestScore > 0 ? best : null
+  }
+
+  const clearPreviewUrls = () => {
+    setPreviewPageUrls((prev) => {
+      Object.values(prev).forEach((u) => {
+        if (u) URL.revokeObjectURL(u)
+      })
+      return {}
+    })
+  }
+
+  const ensurePreviewPageUrl = async (nextDocumentId, pageNo) => {
+    const key = String(pageNo)
+    if (!nextDocumentId || !key) return ""
+    if (previewPageUrls[key]) return previewPageUrls[key]
+    const blob = await getContractPreviewPageImage(nextDocumentId, pageNo)
+    const objectUrl = URL.createObjectURL(blob)
+    setPreviewPageUrls((prev) => {
+      const old = prev[key]
+      if (old && old !== objectUrl) URL.revokeObjectURL(old)
+      return { ...prev, [key]: objectUrl }
+    })
+    return objectUrl
+  }
+
   const loadContractPreview = async (nextDocumentId) => {
     if (!nextDocumentId) {
+      clearPreviewUrls()
+      previewLastBlockByPageRef.current = {}
+      setPreviewMode("text")
+      setPreviewPages([])
+      setActivePreviewPage(1)
+      setActivePreviewHighlight(null)
       setPreviewText("")
       setPreviewMeta(null)
       setPreviewError("")
@@ -358,20 +486,80 @@ export default function App() {
     setPreviewLoading(true)
     setPreviewError("")
     try {
-      const preview = await getContractPreview(nextDocumentId)
-      setPreviewText(String(preview?.text || ""))
-      setPreviewMeta(preview?.meta || null)
-    } catch (err) {
-      setPreviewError(String(err?.message || err || "Preview failed"))
-      setPreviewText("")
-      setPreviewMeta(null)
+      const manifest = await getContractPreviewManifest(nextDocumentId)
+      const mode = String(manifest?.mode || "text") === "visual" ? "visual" : "text"
+      const pages = Array.isArray(manifest?.pages) ? manifest.pages : []
+      clearPreviewUrls()
+      previewLastBlockByPageRef.current = {}
+      setPreviewMode(mode)
+      setPreviewPages(pages)
+      setActivePreviewPage(1)
+      setActivePreviewHighlight(null)
+      setPreviewText(String(manifest?.text || ""))
+      setPreviewMeta(manifest?.meta || null)
+      if (mode === "visual" && pages.length > 0) {
+        const first = Number(pages[0]?.page_no || 1)
+        setActivePreviewPage(first)
+        await ensurePreviewPageUrl(nextDocumentId, first)
+      }
+      if (mode !== "visual") return
+      const preload = pages.slice(1, 4)
+      preload.forEach((p) => {
+        const no = Number(p?.page_no || 0)
+        if (no > 0) ensurePreviewPageUrl(nextDocumentId, no)
+      })
+    } catch {
+      try {
+        const preview = await getContractPreview(nextDocumentId)
+        clearPreviewUrls()
+        previewLastBlockByPageRef.current = {}
+        setPreviewMode("text")
+        setPreviewPages([])
+        setActivePreviewPage(1)
+        setActivePreviewHighlight(null)
+        setPreviewText(String(preview?.text || ""))
+        setPreviewMeta(preview?.meta || null)
+      } catch (err) {
+        setPreviewError(String(err?.message || err || "Preview failed"))
+        setPreviewMode("text")
+        setPreviewPages([])
+        setActivePreviewHighlight(null)
+        setPreviewText("")
+        setPreviewMeta(null)
+      }
     } finally {
       setPreviewLoading(false)
     }
   }
 
-  const onRiskLocate = (_risk, idx) => {
+  const onRiskLocate = (risk, idx) => {
     setActiveRiskIndex(idx)
+    const pageNo = Number(risk?.location?.page_no || 0)
+    if (previewMode === "visual" && pageNo > 0) {
+      setActivePreviewPage(pageNo)
+      ensurePreviewPageUrl(documentId, pageNo)
+      const page = previewPages.find((p) => Number(p?.page_no || 0) === pageNo)
+      const blocks = Array.isArray(page?.blocks) ? page.blocks : []
+      const picked = pickPreviewHighlight(risk, blocks, pageNo)
+      if (picked) {
+        previewLastBlockByPageRef.current[String(pageNo)] = picked.blockIndex
+        previewLocateSeqRef.current += 1
+        setActivePreviewHighlight({
+          pageNo,
+          bbox: picked.bbox,
+          blockId: picked.blockId,
+          seq: previewLocateSeqRef.current,
+        })
+      } else {
+        setActivePreviewHighlight(null)
+      }
+      const el = previewThumbRefs.current[String(pageNo)]
+      if (el && typeof el.scrollIntoView === "function") {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" })
+      }
+      return
+    }
+    setActivePreviewHighlight(null)
     const container = previewScrollRef.current
     if (!container) return
     container.scrollTo({ top: 0, behavior: "smooth" })
@@ -419,6 +607,12 @@ export default function App() {
       setContractResult(null)
       setContractMeta(null)
       setDocumentId("")
+      clearPreviewUrls()
+      previewLastBlockByPageRef.current = {}
+      setPreviewMode("text")
+      setPreviewPages([])
+      setActivePreviewPage(1)
+      setActivePreviewHighlight(null)
       setPreviewText("")
       setPreviewMeta(null)
       setPreviewError("")
@@ -575,8 +769,9 @@ export default function App() {
             <div className="panel-title">{t.contractPreview}</div>
             {previewMeta && (
               <div className="preview-meta">
-                <span>{t.pageMeta}: {previewMeta.page_count ?? "-"}</span>
+                <span>{t.pageMeta}: {previewMeta.page_count ?? previewPages.length ?? "-"}</span>
                 <span>{t.lineCount}: {previewMeta.line_total ?? 0}</span>
+                <span>{previewMode === "visual" ? t.previewVisualMode : t.previewTextMode}</span>
               </div>
             )}
           </div>
@@ -586,12 +781,74 @@ export default function App() {
             </div>
           )}
           {!previewLoading && previewError && <div className="error">{t.previewError}: {previewError}</div>}
-          {!previewLoading && !previewError && !previewText && (
+          {!previewLoading && !previewError && previewMode === "visual" && previewPages.length === 0 && (
             <div className="empty-state preview-empty">
               <p>{t.previewEmpty}</p>
             </div>
           )}
-          {!previewLoading && !previewError && !!previewText && (
+          {!previewLoading && !previewError && previewMode === "visual" && previewPages.length > 0 && (
+            <div className="preview-visual">
+              <aside className="preview-thumbs" ref={previewScrollRef}>
+                {previewPages.map((p) => {
+                  const pageNo = Number(p?.page_no || 0)
+                  const key = String(pageNo)
+                  const active = pageNo === activePreviewPage
+                  const url = previewPageUrls[key] || ""
+                  return (
+                    <button
+                      key={key}
+                      type="button"
+                      ref={(el) => { previewThumbRefs.current[key] = el }}
+                      className={`preview-thumb${active ? " is-active" : ""}`}
+                      onClick={() => {
+                        setActivePreviewPage(pageNo)
+                        setActivePreviewHighlight(null)
+                        ensurePreviewPageUrl(documentId, pageNo)
+                      }}
+                    >
+                      <div className="preview-thumb-media">
+                        {url ? <img src={url} alt={`page-${pageNo}`} /> : <span>{pageNo}</span>}
+                      </div>
+                      <div className="preview-thumb-no">P{pageNo}</div>
+                    </button>
+                  )
+                })}
+              </aside>
+              <div className="preview-main" ref={previewMainRef}>
+                {(() => {
+                  const key = String(activePreviewPage)
+                  const url = previewPageUrls[key] || ""
+                  return (
+                    <div className="preview-main-media">
+                      {url ? (
+                        <>
+                          <img src={url} alt={`page-${activePreviewPage}`} />
+                          {Array.isArray(activePreviewHighlight?.bbox) && activePreviewHighlight.bbox.length === 4 && Number(activePreviewHighlight?.pageNo || 0) === activePreviewPage ? (
+                            <div
+                              key={`hl-${activePreviewHighlight.seq || 0}`}
+                              className="preview-highlight"
+                              style={{
+                                left: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[0]) || 0)) * 100}%`,
+                                top: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[1]) || 0)) * 100}%`,
+                                width: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[2]) || 0)) * 100}%`,
+                                height: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[3]) || 0)) * 100}%`,
+                              }}
+                            />
+                          ) : null}
+                        </>
+                      ) : <div className="preview-main-loading">{t.previewLoading}</div>}
+                    </div>
+                  )
+                })()}
+              </div>
+            </div>
+          )}
+          {!previewLoading && !previewError && previewMode !== "visual" && !previewText && (
+            <div className="empty-state preview-empty">
+              <p>{t.previewEmpty}</p>
+            </div>
+          )}
+          {!previewLoading && !previewError && previewMode !== "visual" && !!previewText && (
             <div className="preview-scroll" ref={previewScrollRef}>
               <article className="preview-document">
                 <pre>{previewText}</pre>
@@ -609,18 +866,6 @@ export default function App() {
           )}
           {contractResult && (
             <div className="result-body">
-              <div className="result-opinion">
-                <div className="result-title">{t.executiveOpinion}</div>
-                {Array.isArray(contractResult.executive_opinion) && contractResult.executive_opinion.length > 0 ? (
-                  <ol>
-                    {contractResult.executive_opinion.map((item, idx) => (
-                      <li key={idx}>{String(item || "")}</li>
-                    ))}
-                  </ol>
-                ) : (
-                  <div className="empty-risk">{t.emptyOpinion}</div>
-                )}
-              </div>
               <div className="result-summary">
                 <div className="result-title">{t.summary}</div>
                 <div className="summary-meta">
@@ -704,7 +949,6 @@ export default function App() {
                                 if (!cid && !linked && !basis) return null
                                 const evidenceKey = `${idx}:${cid || basis}`
                                 const citationTitle = linked ? buildCitationTitle(linked) : ""
-                                const citationSummary = linked ? getCitationSummary(linked) : ""
                                 const citationContent = linked ? getCitationContent(linked) : ""
                                 const expanded = !!expandedEvidence[evidenceKey]
                                 return (
@@ -713,7 +957,6 @@ export default function App() {
                                     {linked ? (
                                       <div className="evidence-card">
                                         <div className="evidence-law">{citationTitle || "-"}</div>
-                                        {citationSummary ? <p className="evidence-summary">{t.articleSummary}: {citationSummary}</p> : null}
                                         {citationContent ? (
                                           <>
                                             <button

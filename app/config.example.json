@@ -71,9 +71,26 @@
         "timeout": 60,
         "headers": {}
     },
+    "llm_trace_enabled": false,
+    "llm_trace_dir": "../data/memory/llm_interactions",
+    "llm_trace_max_chars": 12000,
     "ui_config": {
         "show_citation_source": false,
         "default_theme": "dark"
+    },
+    "contract_preview": {
+        "enabled": true,
+        "cache_dir": "../data/files/preview_cache",
+        "pdf_dpi": 160,
+        "pdf_max_pages": 30,
+        "text_lines_per_page": 80,
+        "docx_visual_enabled": true,
+        "docx_page_width": 1240,
+        "docx_page_height": 1754,
+        "docx_margin": 72,
+        "docx_line_height": 36,
+        "docx_chars_per_line": 44,
+        "docx_paragraph_spacing": 14
     },
     "memory_use_long_hits": true,
     "max_upload_mb": 50,
