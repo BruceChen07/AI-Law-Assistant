@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react"
 import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import TokenMonitor from "./TokenMonitor"
 
 export default function Admin({ onBack, lang }) {
   const [tab, setTab] = useState("documents")
@@ -84,6 +85,7 @@ export default function Admin({ onBack, lang }) {
       statsByUser: "按用户统计",
       tabModel: "模型配置",
       tabRegulations: "法规上传",
+      tabTokenMonitor: "Token 监控",
       importTitle: "法规导入",
       searchTitle: "法规检索",
       chooseFile: "选择文件",
@@ -165,6 +167,7 @@ export default function Admin({ onBack, lang }) {
       statsByUser: "Documents by User",
       tabModel: "Model Config",
       tabRegulations: "Regulations",
+      tabTokenMonitor: "Token Monitor",
       importTitle: "Regulation Import",
       searchTitle: "Search",
       chooseFile: "Choose File",
@@ -493,6 +496,7 @@ export default function Admin({ onBack, lang }) {
         <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>{t.tabUsers}</button>
         <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>{t.tabModel}</button>
         <button className={tab === "regulations" ? "active" : ""} onClick={() => setTab("regulations")}>{t.tabRegulations}</button>
+        <button className={tab === "token-monitor" ? "active" : ""} onClick={() => setTab("token-monitor")}>{t.tabTokenMonitor}</button>
       </div>
       
       {tab === "stats" && stats && (
@@ -873,6 +877,8 @@ export default function Admin({ onBack, lang }) {
           </ul>
         </div>
       )}
+
+      {tab === "token-monitor" && <TokenMonitor lang={lang} />}
     </div>
   )
 }

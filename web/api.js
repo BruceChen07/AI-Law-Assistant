@@ -134,6 +134,24 @@ export async function adminUpdateUIConfig(payload) {
   return res.json()
 }
 
+export async function adminGetTokenStats(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const res = await fetch(`${API_BASE}/api/admin/token-usage?${query}`, {
+    headers: { ...getAuthHeaders() }
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+export async function adminExportTokenStats(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const res = await fetch(`${API_BASE}/api/admin/token-usage/csv?${query}`, {
+    headers: { ...getAuthHeaders() }
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.blob()
+}
+
 export async function adminTestLLM(payload) {
   const res = await fetch(`${API_BASE}/api/admin/llm-test`, {
     method: "POST",
