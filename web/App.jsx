@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { auditContract, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
+import { appI18n } from "./i18n/appI18n"
 
 const THEME_STORAGE_KEY = "ui_theme"
 
@@ -48,14 +49,19 @@ export default function App() {
   const [contractResult, setContractResult] = useState(null)
   const [contractMeta, setContractMeta] = useState(null)
   const [documentId, setDocumentId] = useState("")
-  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark" })
+  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: false })
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState("")
   const [previewText, setPreviewText] = useState("")
   const [previewMeta, setPreviewMeta] = useState(null)
   const [previewMode, setPreviewMode] = useState("text")
+  const [previewContinuous, setPreviewContinuous] = useState(false)
   const [previewPages, setPreviewPages] = useState([])
   const [previewPageUrls, setPreviewPageUrls] = useState({})
+  const [streamVisiblePages, setStreamVisiblePages] = useState({})
+  const [previewZoom, setPreviewZoom] = useState(1)
+  const [previewScrollPercent, setPreviewScrollPercent] = useState(0)
+  const [previewThumbsOpen, setPreviewThumbsOpen] = useState(false)
   const [activePreviewPage, setActivePreviewPage] = useState(1)
   const [activePreviewHighlight, setActivePreviewHighlight] = useState(null)
   const [activeRiskIndex, setActiveRiskIndex] = useState(-1)
@@ -66,149 +72,14 @@ export default function App() {
   const previewScrollRef = useRef(null)
   const previewMainRef = useRef(null)
   const previewThumbRefs = useRef({})
+  const previewPageRefs = useRef({})
   const previewPageUrlsRef = useRef({})
+  const previewPageObserverRef = useRef(null)
+  const previewScrollRatioRef = useRef(0)
   const previewLocateSeqRef = useRef(0)
   const previewLastBlockByPageRef = useRef({})
 
-  const i18n = {
-    zh: {
-      appTitle: "合同审计",
-      appSubtitle: "上传合同，生成财税与法律风险审计",
-      uiLanguage: "界面语言",
-      themeLabel: "界面主题",
-      themeDark: "深色",
-      themeLight: "浅色",
-      chooseFile: "选择文件",
-      noFileChosen: "未选择任何文件",
-      uploadBtn: "开始审计",
-      contractTitle: "合同标题",
-      auditResult: "审计结果",
-      summary: "概览",
-      executiveOpinion: "税务团队优先处理",
-      risks: "风险清单",
-      emptyRisk: "未识别到明显风险",
-      emptyOpinion: "暂无可执行审核意见",
-      evidenceTitle: "关联法规证据",
-      citationLabel: "证据来源",
-      legalBasis: "法规依据",
-      ocrMeta: "OCR",
-      pageMeta: "页数",
-      modelMeta: "模型",
-      retrievalMode: "检索模式",
-      evidenceMeta: "证据条数",
-      queryMeta: "检索查询",
-      promptMeta: "估算Token",
-      taxFocus: "仅输出税务相关",
-      taxFocusMeta: "税务聚焦",
-      region: "地区",
-      date: "日期",
-      industry: "行业",
-      auditMode: "审计模式",
-      modeRag: "RAG增强",
-      modeBaseline: "基础模式",
-      invalidFileType: "文档格式不对，请上传 docx 或 pdf 文档。",
-      uploading: "审计中...",
-      uploadHint: "支持 docx / pdf / 扫描版 pdf",
-      progressTitle: "处理进度",
-      progressWorking: "处理中...",
-      progressUploading: "上传文件",
-      progressExtracting: "解析合同",
-      progressRetrieval: "检索法规",
-      progressAuditing: "风险识别",
-      progressDone: "完成",
-      progressFailed: "失败",
-      contractPreview: "合同预览",
-      previewLoading: "正在加载合同预览...",
-      previewEmpty: "暂无可预览的合同原文",
-      previewHint: "左侧支持版式预览，失败时自动回退到文本预览",
-      previewError: "预览加载失败",
-      previewVisualMode: "版式",
-      previewTextMode: "文本",
-      location: "定位",
-      pageParagraph: "页/段",
-      noLocation: "未定位到具体条款",
-      clauseCount: "条款数",
-      lineCount: "行数",
-      riskFilter: "风险筛选",
-      riskAll: "全部",
-      riskHigh: "高风险",
-      riskMedium: "中风险",
-      riskLow: "低风险",
-      riskShown: "当前显示",
-      viewArticle: "查看条文全文",
-      collapseArticle: "收起条文全文",
-      articleSummary: "摘要"
-    },
-    en: {
-      appTitle: "Contract Audit",
-      appSubtitle: "Upload contracts and generate compliance risk audit",
-      uiLanguage: "UI Language",
-      themeLabel: "Theme",
-      themeDark: "Dark",
-      themeLight: "Light",
-      chooseFile: "Choose File",
-      noFileChosen: "No file chosen",
-      uploadBtn: "Audit",
-      contractTitle: "Contract Title",
-      auditResult: "Audit Result",
-      summary: "Summary",
-      executiveOpinion: "Tax Team Priorities",
-      risks: "Risk List",
-      emptyRisk: "No obvious risks detected",
-      emptyOpinion: "No actionable opinions",
-      evidenceTitle: "Linked Evidence",
-      citationLabel: "Citation Source",
-      legalBasis: "Legal Basis",
-      ocrMeta: "OCR",
-      pageMeta: "Pages",
-      modelMeta: "Model",
-      retrievalMode: "Mode",
-      evidenceMeta: "Evidence",
-      queryMeta: "Queries",
-      promptMeta: "Est Tokens",
-      taxFocus: "Tax-only output",
-      taxFocusMeta: "Tax Focus",
-      region: "Region",
-      date: "Date",
-      industry: "Industry",
-      auditMode: "Audit Mode",
-      modeRag: "RAG",
-      modeBaseline: "Baseline",
-      invalidFileType: "Invalid file type. Please upload docx or pdf documents.",
-      uploading: "Auditing...",
-      uploadHint: "Supports docx / pdf / scanned pdf",
-      progressTitle: "Progress",
-      progressWorking: "Working...",
-      progressUploading: "Uploading",
-      progressExtracting: "Parsing",
-      progressRetrieval: "Retrieving",
-      progressAuditing: "Auditing",
-      progressDone: "Completed",
-      progressFailed: "Failed",
-      contractPreview: "Contract Preview",
-      previewLoading: "Loading contract preview...",
-      previewEmpty: "No previewable contract text available",
-      previewHint: "Left panel uses visual preview and falls back to text mode when needed",
-      previewError: "Failed to load preview",
-      previewVisualMode: "Visual",
-      previewTextMode: "Text",
-      location: "Location",
-      pageParagraph: "Page/Para",
-      noLocation: "No linked clause",
-      clauseCount: "Clauses",
-      lineCount: "Lines",
-      riskFilter: "Risk Filter",
-      riskAll: "All",
-      riskHigh: "High",
-      riskMedium: "Medium",
-      riskLow: "Low",
-      riskShown: "Showing",
-      viewArticle: "View Full Article",
-      collapseArticle: "Collapse Full Article",
-      articleSummary: "Summary"
-    }
-  }
-  const t = i18n[uiLang] || i18n.zh
+  const t = appI18n[uiLang] || appI18n.zh
   const fileInputRef = useRef(null)
   const citationList = Array.isArray(contractResult?.citations) ? contractResult.citations : []
   const citationMap = citationList.reduce((acc, c) => {
@@ -253,7 +124,6 @@ export default function App() {
     const titlePart = lawTitle ? `《${lawTitle}》` : ""
     return `${titlePart}${articleNo}`.trim()
   }
-  const getCitationSummary = (citation) => String(citation?.excerpt || "").trim()
   const getCitationContent = (citation) => String(citation?.content || citation?.excerpt || "").trim()
   const toContractTitle = (filename) => {
     const name = String(filename || "").trim()
@@ -304,7 +174,7 @@ export default function App() {
   }, [previewPageUrls])
 
   useEffect(() => {
-    if (previewMode !== "visual") return
+    if (previewMode !== "visual" || previewContinuous) return
     const bbox = Array.isArray(activePreviewHighlight?.bbox) ? activePreviewHighlight.bbox : null
     if (!bbox || bbox.length !== 4) return
     const box = previewMainRef.current
@@ -312,7 +182,80 @@ export default function App() {
     const y = (Number(bbox[1]) || 0) + (Number(bbox[3]) || 0) / 2
     const target = Math.max(0, box.scrollHeight * y - box.clientHeight / 2)
     box.scrollTo({ top: target, behavior: "smooth" })
-  }, [previewMode, activePreviewPage, activePreviewHighlight])
+  }, [previewMode, previewContinuous, activePreviewPage, activePreviewHighlight])
+
+  useEffect(() => {
+    if (previewMode !== "visual" || !previewContinuous) return
+    const root = previewMainRef.current
+    if (!root) return
+    if (previewPageObserverRef.current) {
+      previewPageObserverRef.current.disconnect()
+      previewPageObserverRef.current = null
+    }
+    const obs = new IntersectionObserver((entries) => {
+      let topPage = 0
+      let topRatio = 0
+      const incoming = {}
+      entries.forEach((entry) => {
+        const el = entry.target
+        const pageNo = Number(el?.dataset?.pageNo || 0)
+        if (pageNo <= 0 || !entry.isIntersecting) return
+        incoming[String(pageNo)] = true
+        if (entry.intersectionRatio > topRatio) {
+          topRatio = entry.intersectionRatio
+          topPage = pageNo
+        }
+      })
+      if (Object.keys(incoming).length > 0) {
+        setStreamVisiblePages((prev) => ({ ...prev, ...incoming }))
+      }
+      if (topPage > 0) {
+        setActivePreviewPage((prev) => (prev === topPage ? prev : topPage))
+        ensurePreviewPageRange(documentId, topPage, 2)
+      }
+    }, { root, threshold: [0.4, 0.6, 0.85] })
+    previewPageObserverRef.current = obs
+    Object.values(previewPageRefs.current || {}).forEach((el) => {
+      if (el) obs.observe(el)
+    })
+    return () => {
+      obs.disconnect()
+      previewPageObserverRef.current = null
+    }
+  }, [previewMode, previewContinuous, documentId, previewPages])
+
+  useEffect(() => {
+    if (previewMode !== "visual" || !previewContinuous || !documentId) return
+    if (activePreviewPage > 0) ensurePreviewPageRange(documentId, activePreviewPage, 2)
+    Object.keys(streamVisiblePages || {}).forEach((key) => {
+      const pageNo = Number(key || 0)
+      if (pageNo > 0) ensurePreviewPageRange(documentId, pageNo, 1)
+    })
+  }, [previewMode, previewContinuous, documentId, activePreviewPage, streamVisiblePages])
+
+  useEffect(() => {
+    if (previewMode !== "visual" || !previewContinuous) return
+    const box = previewMainRef.current
+    if (!box) return
+    const onScroll = () => {
+      const max = Math.max(1, box.scrollHeight - box.clientHeight)
+      const ratio = box.scrollTop / max
+      setPreviewScrollPercent(Math.max(0, Math.min(100, Math.round(ratio * 100))))
+    }
+    onScroll()
+    box.addEventListener("scroll", onScroll, { passive: true })
+    return () => box.removeEventListener("scroll", onScroll)
+  }, [previewMode, previewContinuous, previewPages, previewZoom])
+
+  useEffect(() => {
+    if (previewMode !== "visual" || !previewContinuous) return
+    const box = previewMainRef.current
+    if (!box) return
+    const max = Math.max(1, box.scrollHeight - box.clientHeight)
+    const ratio = Math.max(0, Math.min(1, Number(previewScrollRatioRef.current || 0)))
+    const top = ratio * max
+    box.scrollTo({ top, behavior: "auto" })
+  }, [previewZoom, previewMode, previewContinuous])
 
   useEffect(() => () => {
     Object.values(previewPageUrlsRef.current || {}).forEach((u) => {
@@ -362,10 +305,13 @@ export default function App() {
       try {
         const data = await getUIConfig()
         const serverTheme = normalizeTheme(data?.default_theme)
+        const allowContinuous = !!data.preview_continuous_enabled
         setUiConfig({
           showCitationSource: !!data.show_citation_source,
-          defaultTheme: serverTheme
+          defaultTheme: serverTheme,
+          previewContinuousEnabled: allowContinuous
         })
+        setPreviewContinuous(allowContinuous)
         const stored = getStoredTheme()
         if (!stored) setTheme(serverTheme)
       } catch {
@@ -459,7 +405,7 @@ export default function App() {
   const ensurePreviewPageUrl = async (nextDocumentId, pageNo) => {
     const key = String(pageNo)
     if (!nextDocumentId || !key) return ""
-    if (previewPageUrls[key]) return previewPageUrls[key]
+    if (previewPageUrlsRef.current[key]) return previewPageUrlsRef.current[key]
     const blob = await getContractPreviewPageImage(nextDocumentId, pageNo)
     const objectUrl = URL.createObjectURL(blob)
     setPreviewPageUrls((prev) => {
@@ -470,17 +416,44 @@ export default function App() {
     return objectUrl
   }
 
+  const ensurePreviewPageRange = (nextDocumentId, centerPageNo, radius = 1) => {
+    const c = Number(centerPageNo || 0)
+    if (!nextDocumentId || c <= 0) return
+    const r = Math.max(0, Number(radius || 0))
+    for (let i = c - r; i <= c + r; i += 1) {
+      if (i > 0) ensurePreviewPageUrl(nextDocumentId, i)
+    }
+  }
+
+  const onPreviewZoom = (value) => {
+    const next = Math.max(0.6, Math.min(1.8, Number(value || 1)))
+    const box = previewMainRef.current
+    if (box && previewContinuous) {
+      const max = Math.max(1, box.scrollHeight - box.clientHeight)
+      previewScrollRatioRef.current = box.scrollTop / max
+    }
+    setPreviewZoom(next)
+  }
+
   const loadContractPreview = async (nextDocumentId) => {
     if (!nextDocumentId) {
       clearPreviewUrls()
       previewLastBlockByPageRef.current = {}
+      setStreamVisiblePages({})
       setPreviewMode("text")
       setPreviewPages([])
+      setStreamVisiblePages({})
       setActivePreviewPage(1)
       setActivePreviewHighlight(null)
       setPreviewText("")
       setPreviewMeta(null)
       setPreviewError("")
+      setPreviewZoom(1)
+      setPreviewScrollPercent(0)
+      setPreviewThumbsOpen(false)
+      setPreviewZoom(1)
+      setPreviewScrollPercent(0)
+      setPreviewThumbsOpen(false)
       return
     }
     setPreviewLoading(true)
@@ -493,17 +466,21 @@ export default function App() {
       previewLastBlockByPageRef.current = {}
       setPreviewMode(mode)
       setPreviewPages(pages)
+      setStreamVisiblePages({})
       setActivePreviewPage(1)
       setActivePreviewHighlight(null)
       setPreviewText(String(manifest?.text || ""))
       setPreviewMeta(manifest?.meta || null)
+      setPreviewZoom(1)
+      setPreviewScrollPercent(0)
+      setPreviewThumbsOpen(false)
       if (mode === "visual" && pages.length > 0) {
         const first = Number(pages[0]?.page_no || 1)
         setActivePreviewPage(first)
         await ensurePreviewPageUrl(nextDocumentId, first)
       }
       if (mode !== "visual") return
-      const preload = pages.slice(1, 4)
+      const preload = previewContinuous ? pages.slice(1, 7) : pages.slice(1, 4)
       preload.forEach((p) => {
         const no = Number(p?.page_no || 0)
         if (no > 0) ensurePreviewPageUrl(nextDocumentId, no)
@@ -515,14 +492,19 @@ export default function App() {
         previewLastBlockByPageRef.current = {}
         setPreviewMode("text")
         setPreviewPages([])
+        setStreamVisiblePages({})
         setActivePreviewPage(1)
         setActivePreviewHighlight(null)
         setPreviewText(String(preview?.text || ""))
         setPreviewMeta(preview?.meta || null)
+        setPreviewZoom(1)
+        setPreviewScrollPercent(0)
+        setPreviewThumbsOpen(false)
       } catch (err) {
         setPreviewError(String(err?.message || err || "Preview failed"))
         setPreviewMode("text")
         setPreviewPages([])
+        setStreamVisiblePages({})
         setActivePreviewHighlight(null)
         setPreviewText("")
         setPreviewMeta(null)
@@ -537,7 +519,7 @@ export default function App() {
     const pageNo = Number(risk?.location?.page_no || 0)
     if (previewMode === "visual" && pageNo > 0) {
       setActivePreviewPage(pageNo)
-      ensurePreviewPageUrl(documentId, pageNo)
+      ensurePreviewPageRange(documentId, pageNo, previewContinuous ? 2 : 0)
       const page = previewPages.find((p) => Number(p?.page_no || 0) === pageNo)
       const blocks = Array.isArray(page?.blocks) ? page.blocks : []
       const picked = pickPreviewHighlight(risk, blocks, pageNo)
@@ -553,9 +535,15 @@ export default function App() {
       } else {
         setActivePreviewHighlight(null)
       }
-      const el = previewThumbRefs.current[String(pageNo)]
-      if (el && typeof el.scrollIntoView === "function") {
-        el.scrollIntoView({ behavior: "smooth", block: "nearest" })
+      const thumb = previewThumbRefs.current[String(pageNo)]
+      if (thumb && typeof thumb.scrollIntoView === "function") {
+        thumb.scrollIntoView({ behavior: "smooth", block: "nearest" })
+      }
+      if (previewContinuous) {
+        const pageEl = previewPageRefs.current[String(pageNo)]
+        if (pageEl && typeof pageEl.scrollIntoView === "function") {
+          pageEl.scrollIntoView({ behavior: "smooth", block: "center" })
+        }
       }
       return
     }
@@ -767,6 +755,22 @@ export default function App() {
         <section className="card contract-preview">
           <div className="preview-head">
             <div className="panel-title">{t.contractPreview}</div>
+            {previewMode === "visual" && previewPages.length > 0 && (
+              <div className="preview-toolbar">
+                <div className="preview-layout-toggle">
+                  <span>{t.previewLayout}</span>
+                  <button type="button" className={!previewContinuous ? "is-active" : ""} onClick={() => setPreviewContinuous(false)}>{t.previewPaged}</button>
+                  <button type="button" className={previewContinuous ? "is-active" : ""} onClick={() => setPreviewContinuous(true)}>{t.previewContinuous}</button>
+                </div>
+                <div className="preview-layout-toggle">
+                  <span>{t.previewZoom}</span>
+                  <button type="button" className={previewZoom === 0.75 ? "is-active" : ""} onClick={() => onPreviewZoom(0.75)}>75%</button>
+                  <button type="button" className={previewZoom === 1 ? "is-active" : ""} onClick={() => onPreviewZoom(1)}>100%</button>
+                  <button type="button" className={previewZoom === 1.25 ? "is-active" : ""} onClick={() => onPreviewZoom(1.25)}>125%</button>
+                </div>
+                <button type="button" className={`preview-thumb-toggle${previewThumbsOpen ? " is-active" : ""}`} onClick={() => setPreviewThumbsOpen((v) => !v)}>{t.previewThumbs}</button>
+              </div>
+            )}
             {previewMeta && (
               <div className="preview-meta">
                 <span>{t.pageMeta}: {previewMeta.page_count ?? previewPages.length ?? "-"}</span>
@@ -787,7 +791,7 @@ export default function App() {
             </div>
           )}
           {!previewLoading && !previewError && previewMode === "visual" && previewPages.length > 0 && (
-            <div className="preview-visual">
+            <div className={`preview-visual${previewThumbsOpen ? " is-thumbs-open" : ""}`}>
               <aside className="preview-thumbs" ref={previewScrollRef}>
                 {previewPages.map((p) => {
                   const pageNo = Number(p?.page_no || 0)
@@ -814,15 +818,56 @@ export default function App() {
                   )
                 })}
               </aside>
-              <div className="preview-main" ref={previewMainRef}>
-                {(() => {
+              <div className={`preview-main${previewContinuous ? " preview-main-scroll" : ""}`} ref={previewMainRef}>
+                {previewMode === "visual" && (
+                  <div className="preview-float-indicator">P{activePreviewPage} / {previewMeta?.page_count ?? previewPages.length} · {t.previewProgress} {previewScrollPercent}%</div>
+                )}
+                {previewContinuous ? (
+                  <div className="preview-stream">
+                    {previewPages.map((p) => {
+                      const pageNo = Number(p?.page_no || 0)
+                      const key = String(pageNo)
+                      const active = pageNo === activePreviewPage
+                      const url = previewPageUrls[key] || ""
+                      return (
+                        <article
+                          key={`stream-${key}`}
+                          data-page-no={key}
+                          ref={(el) => {
+                            previewPageRefs.current[key] = el
+                            if (el && previewPageObserverRef.current) previewPageObserverRef.current.observe(el)
+                          }}
+                          className={`preview-main-media preview-stream-page${active ? " is-active" : ""}`}
+                          onMouseEnter={() => {
+                            setActivePreviewPage(pageNo)
+                            ensurePreviewPageRange(documentId, pageNo, 2)
+                          }}
+                        >
+                          {url ? <img loading="lazy" decoding="async" style={{ width: `${Math.round(previewZoom * 100)}%` }} src={url} alt={`page-${pageNo}`} /> : <div className="preview-main-loading">{t.previewLoading}</div>}
+                          {Array.isArray(activePreviewHighlight?.bbox) && activePreviewHighlight.bbox.length === 4 && Number(activePreviewHighlight?.pageNo || 0) === pageNo ? (
+                            <div
+                              key={`hl-${activePreviewHighlight.seq || 0}`}
+                              className="preview-highlight"
+                              style={{
+                                left: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[0]) || 0)) * 100}%`,
+                                top: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[1]) || 0)) * 100}%`,
+                                width: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[2]) || 0)) * 100}%`,
+                                height: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[3]) || 0)) * 100}%`,
+                              }}
+                            />
+                          ) : null}
+                        </article>
+                      )
+                    })}
+                  </div>
+                ) : (() => {
                   const key = String(activePreviewPage)
                   const url = previewPageUrls[key] || ""
                   return (
                     <div className="preview-main-media">
                       {url ? (
                         <>
-                          <img src={url} alt={`page-${activePreviewPage}`} />
+                          <img style={{ width: `${Math.round(previewZoom * 100)}%` }} src={url} alt={`page-${activePreviewPage}`} />
                           {Array.isArray(activePreviewHighlight?.bbox) && activePreviewHighlight.bbox.length === 4 && Number(activePreviewHighlight?.pageNo || 0) === activePreviewPage ? (
                             <div
                               key={`hl-${activePreviewHighlight.seq || 0}`}

@@ -1,0 +1,52 @@
+@media (min-width: 1440px) {
+  .workbench-grid {
+    grid-template-columns: minmax(0, 1.4fr) minmax(380px, 0.9fr);
+  }
+}
+
+@media (min-width: 1920px) {
+  .workbench-grid {
+    grid-template-columns: minmax(0, 1.55fr) minmax(420px, 0.85fr);
+  }
+  .preview-scroll {
+    max-height: 74vh;
+  }
+}
+
+@media (max-width: 1200px) {
+  .workbench-grid {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 0.95fr);
+  }
+}
+
+@media (max-width: 960px) {
+  .contract-grid {
+    grid-template-columns: 1fr;
+  }
+  .workbench-grid {
+    grid-template-columns: 1fr;
+  }
+  .contract-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .contract-actions {
+    flex-wrap: wrap;
+  }
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+  .preview-visual {
+    grid-template-columns: 1fr;
+  }
+  .preview-thumbs {
+    display: none;
+  }
+  .preview-visual.is-thumbs-open .preview-thumbs {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 110px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+}

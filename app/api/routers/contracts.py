@@ -213,6 +213,7 @@ def build_router(cfg, llm, embedder=None, reranker=None):
         return {
             "show_citation_source": bool(ui_cfg.get("show_citation_source", False)),
             "default_theme": _normalize_theme(ui_cfg.get("default_theme")),
+            "preview_continuous_enabled": bool(ui_cfg.get("preview_continuous_enabled", False)),
         }
 
     @router.get("/contracts/{document_id}/preview-manifest")

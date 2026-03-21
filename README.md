@@ -110,6 +110,15 @@ npm run dev
 
 前端默认运行在 `http://localhost:5173`
 
+前端质量与测试命令：
+
+```bash
+cd web
+npm run lint
+npm run test
+npm run storybook
+```
+
 ### 6. 访问系统
 
 打开浏览器访问 http://localhost:5173 即可使用。

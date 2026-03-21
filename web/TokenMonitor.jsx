@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { adminGetTokenStats, adminExportTokenStats } from "./api"
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from "recharts"
 
 export default function TokenMonitor({ lang }) {
@@ -14,6 +14,13 @@ export default function TokenMonitor({ lang }) {
   const [rankBy, setRankBy] = useState("file_path") // file_path, stage, model
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
+  const [startDateInput, setStartDateInput] = useState("")
+  const [endDateInput, setEndDateInput] = useState("")
+  const [activePicker, setActivePicker] = useState("")
+  const [calendarMonth, setCalendarMonth] = useState(() => {
+    const d = new Date()
+    return new Date(d.getFullYear(), d.getMonth(), 1)
+  })
   
   const i18n = {
     zh: {
@@ -48,6 +55,11 @@ export default function TokenMonitor({ lang }) {
       error: "加载失败",
       noData: "暂无数据",
       lastUpdated: "最后更新",
+      datePlaceholder: "YYYY-MM-DD",
+      calendarOpen: "打开日历",
+      calendarClose: "关闭",
+      calendarPrevMonth: "上一月",
+      calendarNextMonth: "下一月"
     },
     en: {
       title: "Token Usage Monitor",
@@ -81,10 +93,144 @@ export default function TokenMonitor({ lang }) {
       error: "Error loading data",
       noData: "No data available",
       lastUpdated: "Last updated",
+      datePlaceholder: "YYYY-MM-DD",
+      calendarOpen: "Open calendar",
+      calendarClose: "Close",
+      calendarPrevMonth: "Previous month",
+      calendarNextMonth: "Next month"
     }
   }
   
   const t = i18n[lang] || i18n.zh
+  const locale = lang === "en" ? "en-US" : "zh-CN"
+
+  const weekdayLabels = useMemo(() => {
+    const formatter = new Intl.DateTimeFormat(locale, { weekday: "short" })
+    const base = new Date(Date.UTC(2024, 0, 1))
+    return Array.from({ length: 7 }, (_, i) => {
+      const day = new Date(base)
+      day.setUTCDate(base.getUTCDate() + i)
+      return formatter.format(day)
+    })
+  }, [locale])
+
+  const normalizeDateInput = (value) => {
+    const normalized = String(value || "")
+      .trim()
+      .replace(/[./]/g, "-")
+      .replace(/年/g, "-")
+      .replace(/月/g, "-")
+      .replace(/日/g, "")
+      .replace(/\s+/g, "")
+    const match = normalized.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+    if (!match) return ""
+    const year = match[1]
+    const month = match[2].padStart(2, "0")
+    const day = match[3].padStart(2, "0")
+    return `${year}-${month}-${day}`
+  }
+
+  const handleDateInputChange = (rawValue, type) => {
+    if (type === "start") {
+      setStartDateInput(rawValue)
+      const normalized = normalizeDateInput(rawValue)
+      if (!rawValue.trim()) {
+        setStartDate("")
+      } else if (normalized) {
+        setStartDate(normalized)
+      }
+      return
+    }
+
+    setEndDateInput(rawValue)
+    const normalized = normalizeDateInput(rawValue)
+    if (!rawValue.trim()) {
+      setEndDate("")
+    } else if (normalized) {
+      setEndDate(normalized)
+    }
+  }
+
+  const handleDateInputBlur = (type) => {
+    if (type === "start") {
+      const normalized = normalizeDateInput(startDateInput)
+      if (normalized) {
+        setStartDateInput(normalized)
+        setStartDate(normalized)
+      }
+      return
+    }
+
+    const normalized = normalizeDateInput(endDateInput)
+    if (normalized) {
+      setEndDateInput(normalized)
+      setEndDate(normalized)
+    }
+  }
+
+  const parseDate = (value) => {
+    const normalized = normalizeDateInput(value)
+    if (!normalized) return null
+    const [y, m, d] = normalized.split("-").map(Number)
+    return new Date(y, m - 1, d)
+  }
+
+  const formatDate = (dateObj) => {
+    const y = dateObj.getFullYear()
+    const m = String(dateObj.getMonth() + 1).padStart(2, "0")
+    const d = String(dateObj.getDate()).padStart(2, "0")
+    return `${y}-${m}-${d}`
+  }
+
+  const openDatePicker = (type) => {
+    const source = type === "start" ? startDate : endDate
+    const parsed = parseDate(source)
+    const base = parsed || new Date()
+    setCalendarMonth(new Date(base.getFullYear(), base.getMonth(), 1))
+    setActivePicker(type)
+  }
+
+  const selectDate = (dateObj) => {
+    const value = formatDate(dateObj)
+    if (activePicker === "start") {
+      setStartDate(value)
+      setStartDateInput(value)
+      if (endDate && value > endDate) {
+        setEndDate(value)
+        setEndDateInput(value)
+      }
+    }
+    if (activePicker === "end") {
+      setEndDate(value)
+      setEndDateInput(value)
+      if (startDate && value < startDate) {
+        setStartDate(value)
+        setStartDateInput(value)
+      }
+    }
+    setActivePicker("")
+  }
+
+  const monthTitle = useMemo(() => {
+    return new Intl.DateTimeFormat(locale, { year: "numeric", month: "long" }).format(calendarMonth)
+  }, [calendarMonth, locale])
+
+  const calendarDays = useMemo(() => {
+    const first = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1)
+    const startWeekDay = (first.getDay() + 6) % 7
+    const start = new Date(first)
+    start.setDate(first.getDate() - startWeekDay)
+    const minDate = activePicker === "end" ? parseDate(startDate) : null
+    const maxDate = activePicker === "start" ? parseDate(endDate) : null
+    return Array.from({ length: 42 }, (_, i) => {
+      const d = new Date(start)
+      d.setDate(start.getDate() + i)
+      const iso = formatDate(d)
+      const disabled = (minDate && d < minDate) || (maxDate && d > maxDate)
+      const selected = (activePicker === "start" && iso === startDate) || (activePicker === "end" && iso === endDate)
+      return { date: d, iso, day: d.getDate(), inMonth: d.getMonth() === calendarMonth.getMonth(), disabled, selected }
+    })
+  }, [calendarMonth, activePicker, startDate, endDate])
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -162,13 +308,107 @@ export default function TokenMonitor({ lang }) {
             <option value="model">{t.rankModel}</option>
           </select>
         </div>
-        <div className="row" style={{ flex: "1 1 200px" }}>
+        <div className="row" style={{ flex: "1 1 200px", position: "relative" }}>
           <label>{t.startDate}</label>
-          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, alignItems: "center", width: "100%" }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder={t.datePlaceholder}
+              value={startDateInput}
+              onChange={e => handleDateInputChange(e.target.value, "start")}
+              onBlur={() => handleDateInputBlur("start")}
+            />
+            <button type="button" onClick={() => openDatePicker("start")} aria-label={t.calendarOpen} title={t.calendarOpen} style={{ padding: "10px 12px", minWidth: 44 }}>
+              📅
+            </button>
+          </div>
+          {activePicker === "start" && (
+            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 20, width: 320, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 12, boxShadow: "0 10px 24px rgba(0,0,0,0.25)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <button type="button" onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} aria-label={t.calendarPrevMonth}>‹</button>
+                <strong>{monthTitle}</strong>
+                <button type="button" onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} aria-label={t.calendarNextMonth}>›</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 8 }}>
+                {weekdayLabels.map(label => <div key={label} style={{ textAlign: "center", color: "var(--muted)", fontSize: 12 }}>{label}</div>)}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+                {calendarDays.map(day => (
+                  <button
+                    key={day.iso}
+                    type="button"
+                    disabled={day.disabled}
+                    onClick={() => selectDate(day.date)}
+                    style={{
+                      padding: "8px 0",
+                      borderRadius: 8,
+                      border: day.selected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                      background: day.selected ? "var(--accent)" : "var(--panel-2)",
+                      color: day.selected ? "var(--tab-active-text)" : day.inMonth ? "var(--text)" : "var(--muted)",
+                      opacity: day.disabled ? 0.35 : 1
+                    }}
+                  >
+                    {day.day}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                <button type="button" onClick={() => setActivePicker("")}>{t.calendarClose}</button>
+              </div>
+            </div>
+          )}
         </div>
-        <div className="row" style={{ flex: "1 1 200px" }}>
+        <div className="row" style={{ flex: "1 1 200px", position: "relative" }}>
           <label>{t.endDate}</label>
-          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} />
+          <div style={{ display: "flex", gap: 8, alignItems: "center", width: "100%" }}>
+            <input
+              type="text"
+              inputMode="numeric"
+              placeholder={t.datePlaceholder}
+              value={endDateInput}
+              onChange={e => handleDateInputChange(e.target.value, "end")}
+              onBlur={() => handleDateInputBlur("end")}
+            />
+            <button type="button" onClick={() => openDatePicker("end")} aria-label={t.calendarOpen} title={t.calendarOpen} style={{ padding: "10px 12px", minWidth: 44 }}>
+              📅
+            </button>
+          </div>
+          {activePicker === "end" && (
+            <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 20, width: 320, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 12, padding: 12, boxShadow: "0 10px 24px rgba(0,0,0,0.25)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                <button type="button" onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))} aria-label={t.calendarPrevMonth}>‹</button>
+                <strong>{monthTitle}</strong>
+                <button type="button" onClick={() => setCalendarMonth(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))} aria-label={t.calendarNextMonth}>›</button>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6, marginBottom: 8 }}>
+                {weekdayLabels.map(label => <div key={label} style={{ textAlign: "center", color: "var(--muted)", fontSize: 12 }}>{label}</div>)}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 6 }}>
+                {calendarDays.map(day => (
+                  <button
+                    key={day.iso}
+                    type="button"
+                    disabled={day.disabled}
+                    onClick={() => selectDate(day.date)}
+                    style={{
+                      padding: "8px 0",
+                      borderRadius: 8,
+                      border: day.selected ? "1px solid var(--accent)" : "1px solid var(--border)",
+                      background: day.selected ? "var(--accent)" : "var(--panel-2)",
+                      color: day.selected ? "var(--tab-active-text)" : day.inMonth ? "var(--text)" : "var(--muted)",
+                      opacity: day.disabled ? 0.35 : 1
+                    }}
+                  >
+                    {day.day}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 10 }}>
+                <button type="button" onClick={() => setActivePicker("")}>{t.calendarClose}</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

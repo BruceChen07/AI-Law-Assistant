@@ -169,10 +169,9 @@ def format_global_tax_context(context: Dict[str, Any], per_topic_limit: int = 3)
             continue
         lines.append(f"{topic}:")
         for it in items[:per_topic_limit]:
-            cid = str(it.get("clause_id") or "")
             cpath = str(it.get("clause_path") or "")
             quote = str(it.get("quote") or "")
-            lines.append(f"- {cid} {cpath} | {quote}")
+            lines.append(f"- 【{cpath}】 | {quote}")
     return "\n".join(lines)
 
 def reconcile_cross_clause_conflicts(

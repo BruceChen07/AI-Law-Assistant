@@ -1,7 +1,7 @@
 import React from "react"
 import ReactDOM from "react-dom/client"
 import App from "./App.jsx"
-import "./styles.css"
+import "./styles/index.css"
 
 const storedTheme = String(localStorage.getItem("ui_theme") || "").toLowerCase()
 if (storedTheme === "light" || storedTheme === "dark") {
