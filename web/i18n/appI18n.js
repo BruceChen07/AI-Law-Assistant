@@ -96,6 +96,7 @@ export const appI18n = {
     articleSummary: "摘要",
     exportDocx: "导出DOCX",
     exportJson: "导出JSON",
+    exportCommentedDocx: "导出批注版原件",
     exporting: "导出中...",
     exportFailed: "导出失败",
     exportNotReady: "导出任务尚未完成"
@@ -197,6 +198,7 @@ export const appI18n = {
     articleSummary: "Summary",
     exportDocx: "Export DOCX",
     exportJson: "Export JSON",
+    exportCommentedDocx: "Export Commented DOCX",
     exporting: "Exporting...",
     exportFailed: "Export failed",
     exportNotReady: "Export job is not completed"

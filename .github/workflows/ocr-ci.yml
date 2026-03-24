@@ -7,6 +7,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -23,4 +26,4 @@ jobs:
           python -m pytest -q
       - name: verify-ocr
         run: |
-          python bin/verify_ocr_env.py --pdf data/contracts/软件服务协议-红客厅（中智股份）.pdf --output reports/ocr_report.json
+          python bin/verify_ocr_env.py --pdf "data/contracts/软件服务协议-红客厅（中智股份）.pdf" --output reports/ocr_report.json

@@ -1078,7 +1078,7 @@ export default function App() {
                   onClick={() => onExportReport("docx", "comments")}
                   disabled={!!exportingFormat}
                 >
-                  {exportingFormat === "docx_comments" ? t.exporting : "导出批注版原件"}
+                  {exportingFormat === "docx_comments" ? t.exporting : t.exportCommentedDocx}
                 </button>
               </div>
             )}
