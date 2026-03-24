@@ -1,9 +1,13 @@
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import get_conn
 
 logger = logging.getLogger("law_assistant")
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def upsert_job(cfg, job_id, status, error=None, finished_at=None):
@@ -19,7 +23,7 @@ def insert_job(cfg, job_id):
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute("INSERT INTO ingest_job(id,status,created_at) VALUES(?,?,?)",
-                (job_id, "running", datetime.utcnow().isoformat()))
+                (job_id, "running", _utc_now_iso()))
     conn.commit()
     conn.close()
 
@@ -32,7 +36,7 @@ def create_regulation(cfg, title, doc_no, issuer, reg_type, status):
     cur.execute("""
         INSERT INTO regulation(id,title,doc_no,issuer,reg_type,status,version_group_id,created_at)
         VALUES(?,?,?,?,?,?,?,?)
-    """, (rid, title, doc_no, issuer, reg_type, status, version_group_id, datetime.utcnow().isoformat()))
+    """, (rid, title, doc_no, issuer, reg_type, status, version_group_id, _utc_now_iso()))
     conn.commit()
     conn.close()
     return rid
@@ -45,7 +49,7 @@ def create_version(cfg, regulation_id, effective_date, expiry_date, region, indu
     cur.execute("""
         INSERT INTO regulation_version(id,regulation_id,effective_date,expiry_date,is_current,region,industry,source_file,created_at)
         VALUES(?,?,?,?,?,?,?,?,?)
-    """, (vid, regulation_id, effective_date, expiry_date, 1, region, industry, source_file, datetime.utcnow().isoformat()))
+    """, (vid, regulation_id, effective_date, expiry_date, 1, region, industry, source_file, _utc_now_iso()))
     conn.commit()
     conn.close()
     return vid
@@ -90,6 +94,24 @@ def insert_contract_audit(cfg, audit_id, document_id, status, result_json, model
     conn.close()
 
 
+def get_latest_contract_audit_by_document(cfg, document_id, status="done"):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, document_id, status, result_json, model_provider, model_name, created_at
+        FROM contract_audit
+        WHERE document_id=? AND status=?
+        ORDER BY created_at DESC
+        LIMIT 1
+        """,
+        (document_id, status),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def insert_document(cfg, doc_id, filename, original_filename, file_path, file_size, mime_type, user_id,
                     title=None, category=None, status="active"):
     conn = get_conn(cfg)
@@ -109,7 +131,7 @@ def insert_document(cfg, doc_id, filename, original_filename, file_path, file_si
                 title=?, category=?, created_at=?
             WHERE id=?
         """, (filename, file_path, int(file_size), mime_type, user_id,
-              title, category, datetime.utcnow().isoformat(), existing_id))
+              title, category, _utc_now_iso(), existing_id))
         doc_id = existing_id
     else:
         cur.execute(
@@ -128,7 +150,7 @@ def insert_document(cfg, doc_id, filename, original_filename, file_path, file_si
                 title,
                 category,
                 status,
-                datetime.utcnow().isoformat(),
+                _utc_now_iso(),
             ),
         )
     conn.commit()
@@ -185,7 +207,7 @@ def create_tax_regulation_document(
     checksum=None,
     parse_status="pending",
 ):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -224,7 +246,7 @@ def create_tax_contract_document(
     parse_status="pending",
     ocr_used=0,
 ):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -297,7 +319,7 @@ def get_tax_regulation_document(cfg, document_id):
 
 
 def update_tax_regulation_document_status(cfg, document_id, parse_status):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -309,7 +331,7 @@ def update_tax_regulation_document_status(cfg, document_id, parse_status):
 
 
 def replace_tax_rules_for_document(cfg, document_id, rules, created_by):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -372,7 +394,7 @@ def get_tax_contract_document(cfg, contract_id):
 
 
 def update_tax_contract_document_status(cfg, contract_id, parse_status, ocr_used=None):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     if ocr_used is None:
@@ -390,7 +412,7 @@ def update_tax_contract_document_status(cfg, contract_id, parse_status, ocr_used
 
 
 def replace_contract_clauses(cfg, contract_id, clauses, created_by):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -501,7 +523,7 @@ def clear_clause_rule_matches_by_contract(cfg, contract_id):
 
 
 def create_clause_rule_matches(cfg, matches, created_by):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     for m in matches:
@@ -592,7 +614,7 @@ def clear_audit_issues_by_contract(cfg, contract_id):
 
 
 def create_audit_issues(cfg, issues, created_by):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     for x in issues:
@@ -633,7 +655,7 @@ def get_audit_issue(cfg, issue_id):
 
 
 def update_audit_issue_review(cfg, issue_id, reviewer_status, reviewer_note, risk_level=None):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     if risk_level:
@@ -659,7 +681,7 @@ def update_audit_issue_review(cfg, issue_id, reviewer_status, reviewer_note, ris
 
 
 def insert_audit_trace(cfg, issue_id, action_type, operator, payload_json, created_by):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -722,7 +744,7 @@ def list_audit_trace_by_contract(cfg, contract_id, limit=500):
 
 
 def create_tax_cleanup_job(cfg, retention_days, created_by):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     job_id = str(uuid.uuid4())
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -754,7 +776,7 @@ def create_tax_cleanup_job(cfg, retention_days, created_by):
 
 
 def finish_tax_cleanup_job(cfg, job_id, status, archived_contracts, deleted_files, details_json="", error=""):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute(
@@ -823,7 +845,7 @@ def list_contract_documents_for_archive(cfg):
 
 
 def create_tax_archive_record(cfg, contract_document_id, archive_path, archived_by="", source_job_id=""):
-    now = datetime.utcnow().isoformat()
+    now = _utc_now_iso()
     record_id = str(uuid.uuid4())
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -870,3 +892,206 @@ def list_tax_archive_records(cfg, limit=200):
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+
+def create_export_job(
+    cfg,
+    export_id,
+    contract_document_id,
+    requester,
+    export_format,
+    template_version,
+    locale,
+    include_appendix,
+    idempotency_key,
+    created_by,
+):
+    now = _utc_now_iso()
+    row_id = str(uuid.uuid4())
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO export_job(
+            id, export_id, contract_document_id, requester, export_format, template_version,
+            locale, include_appendix, idempotency_key, status, progress, error_message,
+            output_path, output_sha256, created_by, created_at, started_at, finished_at, updated_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            row_id,
+            export_id,
+            contract_document_id,
+            requester,
+            export_format,
+            template_version,
+            locale,
+            int(bool(include_appendix)),
+            idempotency_key,
+            "queued",
+            0,
+            "",
+            "",
+            "",
+            created_by,
+            now,
+            "",
+            "",
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return row_id
+
+
+def get_export_job_by_export_id(cfg, export_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM export_job WHERE export_id=?", (export_id,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_export_job_by_idempotency_key(cfg, idempotency_key):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM export_job WHERE idempotency_key=?",
+                (idempotency_key,))
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def update_export_job_status(
+    cfg,
+    export_id,
+    status,
+    progress=None,
+    error_message=None,
+    output_path=None,
+    output_sha256=None,
+):
+    now = _utc_now_iso()
+    job = get_export_job_by_export_id(cfg, export_id)
+    if not job:
+        return
+    started_at = job.get("started_at") or ""
+    finished_at = job.get("finished_at") or ""
+    if status == "processing" and not started_at:
+        started_at = now
+    if status in {"done", "failed"}:
+        finished_at = now
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE export_job
+        SET status=?, progress=?, error_message=?, output_path=?, output_sha256=?,
+            started_at=?, finished_at=?, updated_at=?
+        WHERE export_id=?
+        """,
+        (
+            status,
+            int(progress if progress is not None else job.get("progress") or 0),
+            error_message if error_message is not None else (
+                job.get("error_message") or ""),
+            output_path if output_path is not None else (
+                job.get("output_path") or ""),
+            output_sha256 if output_sha256 is not None else (
+                job.get("output_sha256") or ""),
+            started_at,
+            finished_at,
+            now,
+            export_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def create_export_snapshot(cfg, export_job_id, snapshot_hash, data_manifest_json, created_by):
+    now = _utc_now_iso()
+    snapshot_id = str(uuid.uuid4())
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO export_snapshot(
+            id, export_job_id, snapshot_hash, data_manifest_json, created_by, created_at, updated_at
+        )
+        VALUES(?,?,?,?,?,?,?)
+        """,
+        (
+            snapshot_id,
+            export_job_id,
+            snapshot_hash,
+            data_manifest_json,
+            created_by,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return snapshot_id
+
+
+def create_evidence_anchor(
+    cfg,
+    contract_document_id,
+    issue_id,
+    snapshot_hash,
+    locator_type,
+    quote_text,
+    created_by,
+    start_offset=None,
+    end_offset=None,
+    page_no=None,
+    paragraph_no=None,
+    clause_id=None,
+    clause_path=None,
+    context_before=None,
+    context_after=None,
+    confidence=0.0,
+):
+    now = _utc_now_iso()
+    anchor_id = str(uuid.uuid4())
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO evidence_anchor(
+            id, contract_document_id, issue_id, snapshot_hash, locator_type, start_offset, end_offset,
+            page_no, paragraph_no, clause_id, clause_path, quote_text, context_before, context_after,
+            confidence, is_stale, created_by, created_at, updated_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            anchor_id,
+            contract_document_id,
+            issue_id if issue_id else None,
+            snapshot_hash,
+            locator_type,
+            start_offset if start_offset is not None else None,
+            end_offset if end_offset is not None else None,
+            page_no if page_no is not None else None,
+            paragraph_no if paragraph_no is not None else None,
+            clause_id if clause_id else None,
+            clause_path if clause_path is not None else None,
+            quote_text or "",
+            context_before if context_before is not None else None,
+            context_after if context_after is not None else None,
+            float(confidence or 0),
+            0,
+            created_by,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return anchor_id

@@ -10,10 +10,25 @@ from app.core.utils import extract_text_with_config
 from app.services.audit_utils import _safe_int, _normalize_citation_item
 from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve_regulation_evidence
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
+from app.services.contract_audit_modules import memory_pipeline as memory_pipeline_module
 from app.services.contract_audit_modules.memory_pipeline import execute_memory_audit
+from app.services.contract_audit_modules.result_assembler import attach_risk_locations
 from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip
+from app.memory_system.search import HybridSearcher
 
 logger = structlog.get_logger(__name__)
+
+
+def _build_preview_clauses(text: str):
+    return build_preview_clauses(text)
+
+
+def _attach_risk_locations(audit, clauses):
+    return attach_risk_locations(audit, clauses)
+
+
+def _get_memory_embedder():
+    return None
 
 
 def audit_contract(
@@ -95,6 +110,12 @@ def audit_contract(
     )
     logger.info("audit_memory_enabled", file=file_path,
                 clauses=len(preview_clauses))
+    custom_embedder = _get_memory_embedder() if callable(
+        _get_memory_embedder) else None
+    if custom_embedder is not None and hasattr(custom_embedder, "encode"):
+        memory_pipeline_module.get_memory_embedder = lambda: custom_embedder
+    if HybridSearcher is not None:
+        memory_pipeline_module.HybridSearcher = HybridSearcher
     _report("auditing", 70, "auditing clauses")
     memory_result = execute_memory_audit(
         cfg=cfg,

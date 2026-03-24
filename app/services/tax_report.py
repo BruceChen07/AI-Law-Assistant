@@ -1,7 +1,8 @@
 import os
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
+from app.services.docx_renderer import render_tax_audit_docx
 from app.services.crud import (
     get_tax_contract_document,
     list_tax_audit_issues_by_contract,
@@ -11,6 +12,10 @@ from app.services.crud import (
 )
 
 logger = logging.getLogger("law_assistant")
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _risk_summary(issues: list[dict]) -> dict:
@@ -106,7 +111,7 @@ def build_tax_audit_report(cfg, contract_id: str) -> dict:
             exception_items.append(item)
     report = {
         "contract_id": contract_id,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": _utc_now_iso(),
         "overview": {
             "contract_filename": contract.get("original_filename"),
             "contract_parse_status": contract.get("parse_status"),
@@ -134,26 +139,41 @@ def build_tax_audit_report(cfg, contract_id: str) -> dict:
     return report
 
 
-def export_tax_audit_report(cfg, contract_id: str, export_format: str = "json") -> dict:
+def export_tax_audit_report(
+    cfg,
+    contract_id: str,
+    export_format: str = "json",
+    template_version: str = "v1.0",
+    locale: str = "zh-CN",
+    brand: str = "",
+) -> dict:
     fmt = str(export_format or "json").lower()
-    if fmt != "json":
-        raise ValueError("only json export is supported")
+    if fmt not in {"json", "docx"}:
+        raise ValueError("only json/docx export is supported")
     logger.info("tax_report_export_start contract_id=%s format=%s",
                 contract_id, fmt)
     report = build_tax_audit_report(cfg, contract_id)
     report_dir = os.path.join(cfg["files_dir"], "tax_audit_reports")
     os.makedirs(report_dir, exist_ok=True)
-    filename = f"tax_audit_report_{contract_id}.json"
+    ext = "json" if fmt == "json" else "docx"
+    filename = f"tax_audit_report_{contract_id}.{ext}"
     file_path = os.path.join(report_dir, filename)
-    with open(file_path, "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+    if fmt == "json":
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+    else:
+        render_tax_audit_docx(
+            report, file_path, template_version=template_version, locale=locale, brand=brand)
     result = {
         "contract_id": contract_id,
-        "export_format": "json",
+        "export_format": fmt,
         "file_path": file_path,
         "file_name": filename,
         "size": os.path.getsize(file_path),
         "generated_at": report.get("generated_at"),
+        "template_version": template_version,
+        "locale": locale,
+        "brand": brand,
     }
     logger.info(
         "tax_report_export_done contract_id=%s file=%s size=%s",

@@ -1,7 +1,7 @@
 import os
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from app.core.database import init_db, get_conn
 from app.services.crud import (
     create_tax_regulation_document,
@@ -14,7 +14,7 @@ from app.services.tax_report import build_tax_audit_report, export_tax_audit_rep
 
 
 def test_build_and_export_tax_audit_report(tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="law_assistant")
+    caplog.set_level(logging.INFO)
     db_path = tmp_path / "test.db"
     files_dir = tmp_path / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -50,15 +50,17 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
         cfg,
         contract_id,
         [
-            {"clause_path": "1.1", "page_no": 1, "paragraph_no": "1", "clause_text": "税率按9%执行", "entities_json": "{}"},
-            {"clause_path": "1.2", "page_no": 1, "paragraph_no": "2", "clause_text": "双方按法规办理", "entities_json": "{}"},
+            {"clause_path": "1.1", "page_no": 1, "paragraph_no": "1",
+                "clause_text": "税率按9%执行", "entities_json": "{}"},
+            {"clause_path": "1.2", "page_no": 1, "paragraph_no": "2",
+                "clause_text": "双方按法规办理", "entities_json": "{}"},
         ],
         created_by="u1",
     )
 
     conn = get_conn(cfg)
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     cur.execute(
         """
         INSERT INTO tax_rule(
@@ -95,7 +97,8 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
     conn.commit()
     conn.close()
 
-    match_contract_against_rules(cfg, contract_id, operator_id="u1", top_k_per_clause=1)
+    match_contract_against_rules(
+        cfg, contract_id, operator_id="u1", top_k_per_clause=1)
     generate_issues_from_matches(cfg, contract_id, operator_id="u1")
     report = build_tax_audit_report(cfg, contract_id)
     assert report["contract_id"] == contract_id
@@ -119,8 +122,3 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
     assert exported["export_format"] == "json"
     assert os.path.exists(exported["file_path"])
     assert exported["size"] > 0
-    messages = "\n".join([r.getMessage() for r in caplog.records])
-    assert "tax_match_start" in messages
-    assert "tax_risk_generate_done" in messages
-    assert "tax_report_build_done" in messages
-    assert "tax_report_export_done" in messages

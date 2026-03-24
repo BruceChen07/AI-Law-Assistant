@@ -1,7 +1,7 @@
 import re
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from app.services.crud import (
     get_tax_contract_document,
     list_contract_clauses,
@@ -11,6 +11,10 @@ from app.services.crud import (
 )
 
 logger = logging.getLogger("law_assistant")
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _extract_percent(text: str) -> str:
@@ -107,7 +111,7 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
         "rule_excerpt": str(rule.get("source_text") or "")[:300],
         "rule_type": rule.get("rule_type", ""),
         "rule_article_no": rule.get("article_no", ""),
-        "evaluated_at": datetime.utcnow().isoformat(),
+        "evaluated_at": _utc_now_iso(),
     }
     return {
         "clause_id": clause.get("id", ""),

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { auditContract, exportContractReport, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import { appI18n } from "./i18n/appI18n"
@@ -49,26 +49,28 @@ export default function App() {
   const [contractResult, setContractResult] = useState(null)
   const [contractMeta, setContractMeta] = useState(null)
   const [documentId, setDocumentId] = useState("")
-  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: false })
+  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: true })
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState("")
   const [previewText, setPreviewText] = useState("")
   const [previewMeta, setPreviewMeta] = useState(null)
   const [previewMode, setPreviewMode] = useState("text")
-  const [previewContinuous, setPreviewContinuous] = useState(false)
+  const [previewContinuous, setPreviewContinuous] = useState(true)
   const [previewPages, setPreviewPages] = useState([])
   const [previewPageUrls, setPreviewPageUrls] = useState({})
   const [streamVisiblePages, setStreamVisiblePages] = useState({})
   const [previewZoom, setPreviewZoom] = useState(1)
   const [previewScrollPercent, setPreviewScrollPercent] = useState(0)
-  const [previewThumbsOpen, setPreviewThumbsOpen] = useState(false)
   const [activePreviewPage, setActivePreviewPage] = useState(1)
   const [activePreviewHighlight, setActivePreviewHighlight] = useState(null)
+  const [riskLocateMeta, setRiskLocateMeta] = useState({})
   const [activeRiskIndex, setActiveRiskIndex] = useState(-1)
   const [riskFilter, setRiskFilter] = useState("all")
   const [expandedEvidence, setExpandedEvidence] = useState({})
   const [contractProgress, setContractProgress] = useState(0)
   const [contractProgressStage, setContractProgressStage] = useState("working")
+  const [exportingFormat, setExportingFormat] = useState("")
+  const [exportError, setExportError] = useState("")
   const previewScrollRef = useRef(null)
   const previewMainRef = useRef(null)
   const previewThumbRefs = useRef({})
@@ -78,6 +80,8 @@ export default function App() {
   const previewScrollRatioRef = useRef(0)
   const previewLocateSeqRef = useRef(0)
   const previewLastBlockByPageRef = useRef({})
+  const previewFailedPagesRef = useRef({})
+  const previewLoadingPagesRef = useRef({})
 
   const t = appI18n[uiLang] || appI18n.zh
   const fileInputRef = useRef(null)
@@ -157,6 +161,34 @@ export default function App() {
     failed: t.progressFailed,
     working: t.progressWorking
   }[contractProgressStage] || t.progressWorking
+  const previewSource = String(previewMeta?.source || "").toLowerCase()
+  const previewCoordProvider = String(previewMeta?.coord_provider || "").toLowerCase()
+  const previewConversion = previewMeta?.docx_pdf_conversion && typeof previewMeta.docx_pdf_conversion === "object"
+    ? previewMeta.docx_pdf_conversion
+    : null
+  const previewQuality = previewConversion?.quality && typeof previewConversion.quality === "object"
+    ? previewConversion.quality
+    : null
+  const previewCoordProviderLabel = ({
+    mineru: t.previewProviderMineru,
+    docx_layout: t.previewProviderDocxLayout,
+    text_fallback: t.previewProviderTextFallback,
+    ratio_estimate: t.previewProviderRatioEstimate
+  })[previewCoordProvider] || (previewCoordProvider || "-")
+  const previewPipelineLabel = ({
+    docx_pdf_mineru: t.previewPipelineDocxPdfMineru,
+    docx_raster: t.previewPipelineDocxRaster,
+    pdf_raster_mineru: t.previewPipelinePdfMineru,
+    pdf_raster: t.previewPipelinePdfRaster,
+    text_fallback: t.previewPipelineTextFallback
+  })[previewSource] || (previewSource || "-")
+  const previewGateLabel = !previewConversion
+    ? "-"
+    : previewConversion.fallback
+      ? t.previewGateFallback
+      : t.previewGatePassed
+  const previewGateRatio = previewQuality ? Number(previewQuality.text_ratio || 0) : 0
+  const previewGateRatioLabel = previewQuality ? `${Math.max(0, Math.round(previewGateRatio * 1000) / 10)}%` : "-"
   const bumpProgress = (percent, stage) => {
     const next = Math.max(0, Math.min(100, Number(percent) || 0))
     setContractProgress((p) => Math.max(p, next))
@@ -167,6 +199,7 @@ export default function App() {
     setActiveRiskIndex(-1)
     setExpandedEvidence({})
     setActivePreviewHighlight(null)
+    setRiskLocateMeta({})
   }, [riskFilter, documentId])
 
   useEffect(() => {
@@ -305,7 +338,7 @@ export default function App() {
       try {
         const data = await getUIConfig()
         const serverTheme = normalizeTheme(data?.default_theme)
-        const allowContinuous = !!data.preview_continuous_enabled
+        const allowContinuous = true
         setUiConfig({
           showCitationSource: !!data.show_citation_source,
           defaultTheme: serverTheme,
@@ -330,6 +363,14 @@ export default function App() {
     return t.noLocation
   }
 
+  const formatAnchorStrategy = (value) => {
+    if (value === "quote_exact") return t.locateExact
+    if (value === "quote_fuzzy") return t.locateFuzzy
+    if (value === "semantic") return t.locateSemantic
+    if (value === "clause_fallback") return t.locateClauseFallback
+    return t.locateUnknown
+  }
+
   const normalizeMatchText = (value) => String(value || "")
     .toLowerCase()
     .replace(/[\s\r\n\t，。；：、“”‘’"'（）()【】\[\]{}<>《》,.!?;:|\\/]+/g, "")
@@ -341,6 +382,29 @@ export default function App() {
     return Array.from(new Set(matched)).slice(0, 28)
   }
 
+  const isLikelyHeadingLine = (value) => {
+    const text = String(value || "").trim()
+    if (!text) return false
+    if (text.length <= 40 && /^第[一二三四五六七八九十百千万0-9]+[章节条款]/.test(text)) return true
+    const numbered = text.match(/^([一二三四五六七八九十]+[、.．]|[0-9]+(?:\.[0-9]+){0,3}[、.．]?)(.*)$/)
+    if (numbered) {
+      const tail = String(numbered[2] || "").trim()
+      if (!tail) return true
+      if (tail.length <= 12 && !/[：:，,。；;]/.test(tail)) return true
+      return false
+    }
+    if (
+      text.length <= 28
+      && /^[（(]?[一二三四五六七八九十0-9]+[)）][^。；;，,:：]{0,24}$/.test(text)
+    ) return true
+    if (
+      text.length <= 24
+      && !/[。；;，,:：]/.test(text)
+      && /(合同|条款|价款|支付|期限|服务|违约|保密|发票|税率)/.test(text)
+    ) return true
+    return false
+  }
+
   const pickPreviewHighlight = (risk, blocks, pageNo) => {
     const list = Array.isArray(blocks) ? blocks : []
     if (list.length === 0) return null
@@ -348,49 +412,105 @@ export default function App() {
     const paraDigits = rawPara.match(/\d+/)
     const paraIndex = paraDigits ? (Number(paraDigits[0]) - 1) : -1
     const clausePath = String(risk?.location?.clause_path || "").trim()
-    const riskText = [risk?.issue, risk?.suggestion, risk?.evidence, risk?.basis, risk?.law_reference, clausePath].join(" ")
-    const riskNorm = normalizeMatchText(riskText)
-    const terms = extractMatchTerms(riskText)
+    const evidenceText = String(risk?.location?.quote || risk?.evidence || "").trim()
+    const weakText = [risk?.issue, risk?.suggestion, risk?.evidence, risk?.basis, risk?.law_reference].join(" ")
+    const evidenceNorm = normalizeMatchText(evidenceText)
+    const evidenceTerms = extractMatchTerms(evidenceText)
+    const weakNorm = normalizeMatchText(weakText)
+    const weakTerms = extractMatchTerms(weakText)
     const clausePathNorm = normalizeMatchText(clausePath)
     const recentIndex = Number(previewLastBlockByPageRef.current[String(pageNo)])
     let bestScore = -1
     let best = null
+    let bestBodyScore = -1
+    let bestBody = null
+    const candidatesByIndex = {}
     list.forEach((b, idx) => {
       const bbox = Array.isArray(b?.bbox) && b.bbox.length === 4 ? b.bbox : null
       if (!bbox) return
+      const lineRaw = String(b?.text || "")
       const lineNorm = normalizeMatchText(b?.text)
       if (!lineNorm) return
+      const lineIsHeading = typeof b?.is_heading === "boolean" ? b.is_heading : isLikelyHeadingLine(lineRaw)
       let score = 0
-      if (riskNorm) {
-        const headA = lineNorm.slice(0, Math.min(28, lineNorm.length))
-        const headB = riskNorm.slice(0, Math.min(28, riskNorm.length))
-        if (headA && riskNorm.includes(headA)) score += 4
-        if (headB && lineNorm.includes(headB)) score += 3
-      }
-      if (terms.length > 0) {
-        const hit = terms.reduce((n, term) => n + (lineNorm.includes(term) ? 1 : 0), 0)
-        const ratio = hit / Math.max(terms.length, 1)
-        score += hit * 1.2 + ratio * 2.4
-      }
-      if (clausePathNorm && lineNorm.includes(clausePathNorm)) {
-        score += 5.5
-      }
-      if (paraIndex >= 0) {
-        score += Math.max(0, 0.9 - Math.abs(idx - paraIndex) * 0.08)
-      }
-      if (Number.isFinite(recentIndex)) {
-        score += Math.max(0, 1.2 - Math.abs(idx - recentIndex) * 0.18)
-      }
-      if (score > bestScore) {
-        bestScore = score
-        best = {
-          bbox,
-          blockId: String(b?.block_id || `p${pageNo}-b${idx + 1}`),
-          blockIndex: idx,
+      let strongHit = 0
+      if (evidenceNorm) {
+        const headA = lineNorm.slice(0, Math.min(36, lineNorm.length))
+        const headB = evidenceNorm.slice(0, Math.min(36, evidenceNorm.length))
+        if (lineNorm.includes(evidenceNorm)) score += 30
+        if (evidenceNorm.includes(lineNorm) && lineNorm.length >= 12) score += 13
+        if (headA && evidenceNorm.includes(headA)) score += 6
+        if (headB && lineNorm.includes(headB)) score += 5
+        if (evidenceTerms.length > 0) {
+          strongHit = evidenceTerms.reduce((n, term) => n + (lineNorm.includes(term) ? 1 : 0), 0)
+          const strongRatio = strongHit / Math.max(evidenceTerms.length, 1)
+          score += strongHit * 2.4 + strongRatio * 8.4
         }
       }
+      if (weakNorm) {
+        const headA = lineNorm.slice(0, Math.min(24, lineNorm.length))
+        const headB = weakNorm.slice(0, Math.min(24, weakNorm.length))
+        if (headA && weakNorm.includes(headA)) score += 2.6
+        if (headB && lineNorm.includes(headB)) score += 2
+      }
+      if (weakTerms.length > 0) {
+        const hit = weakTerms.reduce((n, term) => n + (lineNorm.includes(term) ? 1 : 0), 0)
+        const ratio = hit / Math.max(weakTerms.length, 1)
+        score += hit * 0.9 + ratio * 2.2
+      }
+      if (clausePathNorm && lineNorm.includes(clausePathNorm)) score += 0.4
+      if (lineNorm.length >= 14) score += 0.8
+      if (/[。；;，,:：]/.test(lineRaw)) score += 0.6
+      if (lineIsHeading) {
+        score -= evidenceNorm ? 7.6 : 6.0
+        if (clausePathNorm && (lineNorm === clausePathNorm || clausePathNorm.includes(lineNorm))) score -= 6.4
+        if (evidenceNorm && strongHit === 0) score -= 4.0
+      }
+      if (paraIndex >= 0) score += Math.max(0, 0.9 - Math.abs(idx - paraIndex) * 0.08)
+      if (Number.isFinite(recentIndex)) score += Math.max(0, 1.2 - Math.abs(idx - recentIndex) * 0.18)
+      const exactContain = evidenceNorm && lineNorm.includes(evidenceNorm)
+      const fuzzyContain = evidenceNorm && !exactContain && ((evidenceNorm.includes(lineNorm) && lineNorm.length >= 12) || strongHit >= Math.max(2, Math.ceil(evidenceTerms.length * 0.5)))
+      const strategy = exactContain ? "quote_exact" : (fuzzyContain ? "quote_fuzzy" : "semantic")
+      const confidenceRaw = exactContain ? 0.96 : (fuzzyContain ? 0.8 : Math.max(0.36, Math.min(0.78, score / 24)))
+      const candidate = {
+        bbox,
+        blockId: String(b?.block_id || `p${pageNo}-b${idx + 1}`),
+        blockIndex: idx,
+        strategy,
+        confidence: Number(confidenceRaw.toFixed(2)),
+        score,
+        isHeading: lineIsHeading,
+      }
+      candidatesByIndex[idx] = candidate
+      if (score > bestScore) {
+        bestScore = score
+        best = candidate
+      }
+      if (!lineIsHeading && score > bestBodyScore) {
+        bestBodyScore = score
+        bestBody = candidate
+      }
     })
-    return bestScore > 0 ? best : null
+    if (best && best.isHeading) {
+      const nextCandidates = [1, 2, 3]
+        .map((step) => candidatesByIndex[best.blockIndex + step])
+        .filter((c) => c && !c.isHeading)
+      const nearbyBody = nextCandidates.find((c) => c.score >= best.score - 8 && c.blockIndex === best.blockIndex + 1)
+        || nextCandidates.find((c) => c.score >= best.score - 4.5)
+      if (nearbyBody) best = nearbyBody
+    }
+    if (best && best.isHeading && bestBody) {
+      const bodyCloseEnough = bestBody.score >= best.score - 3.2
+      const bodyClearlyStronger = bestBody.score >= best.score - 1.2
+      if (bodyCloseEnough || bodyClearlyStronger) best = bestBody
+    }
+    if (best && best.score > 0) {
+      const picked = { ...best }
+      delete picked.score
+      delete picked.isHeading
+      return picked
+    }
+    return null
   }
 
   const clearPreviewUrls = () => {
@@ -400,39 +520,52 @@ export default function App() {
       })
       return {}
     })
+    previewFailedPagesRef.current = {}
+    previewLoadingPagesRef.current = {}
+  }
+
+  const getAvailablePreviewPageNos = () => {
+    const out = []
+    ;(previewPages || []).forEach((p) => {
+      const no = Number(p?.page_no || 0)
+      if (no > 0) out.push(no)
+    })
+    return out
   }
 
   const ensurePreviewPageUrl = async (nextDocumentId, pageNo) => {
-    const key = String(pageNo)
-    if (!nextDocumentId || !key) return ""
+    const no = Number(pageNo || 0)
+    const key = String(no)
+    if (!nextDocumentId || no <= 0) return ""
     if (previewPageUrlsRef.current[key]) return previewPageUrlsRef.current[key]
-    const blob = await getContractPreviewPageImage(nextDocumentId, pageNo)
-    const objectUrl = URL.createObjectURL(blob)
-    setPreviewPageUrls((prev) => {
-      const old = prev[key]
-      if (old && old !== objectUrl) URL.revokeObjectURL(old)
-      return { ...prev, [key]: objectUrl }
-    })
-    return objectUrl
+    if (previewFailedPagesRef.current[key]) return ""
+    if (previewLoadingPagesRef.current[key]) return ""
+    previewLoadingPagesRef.current[key] = true
+    try {
+      const blob = await getContractPreviewPageImage(nextDocumentId, no)
+      const objectUrl = URL.createObjectURL(blob)
+      setPreviewPageUrls((prev) => {
+        const old = prev[key]
+        if (old && old !== objectUrl) URL.revokeObjectURL(old)
+        return { ...prev, [key]: objectUrl }
+      })
+      return objectUrl
+    } catch {
+      previewFailedPagesRef.current[key] = true
+      return ""
+    } finally {
+      delete previewLoadingPagesRef.current[key]
+    }
   }
 
   const ensurePreviewPageRange = (nextDocumentId, centerPageNo, radius = 1) => {
     const c = Number(centerPageNo || 0)
     if (!nextDocumentId || c <= 0) return
+    const available = new Set(getAvailablePreviewPageNos())
     const r = Math.max(0, Number(radius || 0))
     for (let i = c - r; i <= c + r; i += 1) {
-      if (i > 0) ensurePreviewPageUrl(nextDocumentId, i)
+      if (i > 0 && available.has(i)) ensurePreviewPageUrl(nextDocumentId, i)
     }
-  }
-
-  const onPreviewZoom = (value) => {
-    const next = Math.max(0.6, Math.min(1.8, Number(value || 1)))
-    const box = previewMainRef.current
-    if (box && previewContinuous) {
-      const max = Math.max(1, box.scrollHeight - box.clientHeight)
-      previewScrollRatioRef.current = box.scrollTop / max
-    }
-    setPreviewZoom(next)
   }
 
   const loadContractPreview = async (nextDocumentId) => {
@@ -450,10 +583,8 @@ export default function App() {
       setPreviewError("")
       setPreviewZoom(1)
       setPreviewScrollPercent(0)
-      setPreviewThumbsOpen(false)
       setPreviewZoom(1)
       setPreviewScrollPercent(0)
-      setPreviewThumbsOpen(false)
       return
     }
     setPreviewLoading(true)
@@ -470,10 +601,10 @@ export default function App() {
       setActivePreviewPage(1)
       setActivePreviewHighlight(null)
       setPreviewText(String(manifest?.text || ""))
-      setPreviewMeta(manifest?.meta || null)
+      const meta = manifest?.meta && typeof manifest.meta === "object" ? manifest.meta : {}
+      setPreviewMeta({ ...meta, source: String(manifest?.source || "") })
       setPreviewZoom(1)
       setPreviewScrollPercent(0)
-      setPreviewThumbsOpen(false)
       if (mode === "visual" && pages.length > 0) {
         const first = Number(pages[0]?.page_no || 1)
         setActivePreviewPage(first)
@@ -499,7 +630,6 @@ export default function App() {
         setPreviewMeta(preview?.meta || null)
         setPreviewZoom(1)
         setPreviewScrollPercent(0)
-        setPreviewThumbsOpen(false)
       } catch (err) {
         setPreviewError(String(err?.message || err || "Preview failed"))
         setPreviewMode("text")
@@ -516,31 +646,51 @@ export default function App() {
 
   const onRiskLocate = (risk, idx) => {
     setActiveRiskIndex(idx)
-    const pageNo = Number(risk?.location?.page_no || 0)
+    const requestedPageNo = Number(risk?.location?.page_no || 0)
+    const available = getAvailablePreviewPageNos()
+    const availableSet = new Set(available)
+    const pageNo = availableSet.has(requestedPageNo) ? requestedPageNo : (available[0] || 0)
+    setRiskLocateMeta((prev) => {
+      const next = { ...prev }
+      next[String(idx)] = {
+        strategy: "clause_fallback",
+        confidence: pageNo > 0 ? 0.35 : 0,
+      }
+      return next
+    })
     if (previewMode === "visual" && pageNo > 0) {
       setActivePreviewPage(pageNo)
       ensurePreviewPageRange(documentId, pageNo, previewContinuous ? 2 : 0)
-      const page = previewPages.find((p) => Number(p?.page_no || 0) === pageNo)
-      const blocks = Array.isArray(page?.blocks) ? page.blocks : []
-      const picked = pickPreviewHighlight(risk, blocks, pageNo)
-      if (picked) {
-        previewLastBlockByPageRef.current[String(pageNo)] = picked.blockIndex
+      const candidates = requestedPageNo > 0 && availableSet.has(requestedPageNo) ? [requestedPageNo] : available
+      let best = null
+      let bestPageNo = pageNo
+      candidates.forEach((no) => {
+        const page = previewPages.find((p) => Number(p?.page_no || 0) === no)
+        const blocks = Array.isArray(page?.blocks) ? page.blocks : []
+        const picked = pickPreviewHighlight(risk, blocks, no)
+        if (!picked) return
+        const conf = Math.max(0, Math.min(1, Number(picked.confidence || 0)))
+        if (!best || conf > Number(best.confidence || 0)) {
+          best = picked
+          bestPageNo = no
+        }
+      })
+      if (best) {
+        setActivePreviewPage(bestPageNo)
+        ensurePreviewPageRange(documentId, bestPageNo, previewContinuous ? 2 : 0)
+        previewLastBlockByPageRef.current[String(bestPageNo)] = best.blockIndex
         previewLocateSeqRef.current += 1
-        setActivePreviewHighlight({
-          pageNo,
-          bbox: picked.bbox,
-          blockId: picked.blockId,
-          seq: previewLocateSeqRef.current,
-        })
+        setActivePreviewHighlight({ pageNo: bestPageNo, bbox: best.bbox, blockId: best.blockId, seq: previewLocateSeqRef.current })
+        setRiskLocateMeta((prev) => ({ ...prev, [String(idx)]: { strategy: String(best.strategy || "semantic"), confidence: Math.max(0, Math.min(1, Number(best.confidence || 0))) } }))
       } else {
         setActivePreviewHighlight(null)
       }
-      const thumb = previewThumbRefs.current[String(pageNo)]
+      const thumb = previewThumbRefs.current[String(bestPageNo)]
       if (thumb && typeof thumb.scrollIntoView === "function") {
         thumb.scrollIntoView({ behavior: "smooth", block: "nearest" })
       }
       if (previewContinuous) {
-        const pageEl = previewPageRefs.current[String(pageNo)]
+        const pageEl = previewPageRefs.current[String(bestPageNo)]
         if (pageEl && typeof pageEl.scrollIntoView === "function") {
           pageEl.scrollIntoView({ behavior: "smooth", block: "center" })
         }
@@ -567,6 +717,8 @@ export default function App() {
       return
     }
     setContractError("")
+    setExportError("")
+    setExportingFormat("")
     setContractLoading(true)
     setRiskFilter("all")
     setActiveRiskIndex(-1)
@@ -606,6 +758,37 @@ export default function App() {
       setPreviewError("")
     } finally {
       setContractLoading(false)
+    }
+  }
+
+  const onExportReport = async (format, mode = "report") => {
+    if (!documentId || !contractResult) return
+    const fmt = String(format || "json").toLowerCase() === "docx" ? "docx" : "json"
+    setExportError("")
+    setExportingFormat(`${fmt}_${mode}`)
+    try {
+      const blob = await exportContractReport(documentId, {
+        export_format: fmt,
+        export_mode: mode,
+        locale: uiLang === "zh" ? "zh-CN" : "en-US",
+        template_version: "v1.0",
+        include_appendix: true,
+      })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      const ext = fmt === "docx" ? "docx" : "json"
+      const prefix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
+      const fileName = `${prefix}_${documentId}.${ext}`
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setExportError(String(err?.message || err || t.exportFailed))
+    } finally {
+      setExportingFormat("")
     }
   }
 
@@ -756,26 +939,19 @@ export default function App() {
           <div className="preview-head">
             <div className="panel-title">{t.contractPreview}</div>
             {previewMode === "visual" && previewPages.length > 0 && (
-              <div className="preview-toolbar">
-                <div className="preview-layout-toggle">
-                  <span>{t.previewLayout}</span>
-                  <button type="button" className={!previewContinuous ? "is-active" : ""} onClick={() => setPreviewContinuous(false)}>{t.previewPaged}</button>
-                  <button type="button" className={previewContinuous ? "is-active" : ""} onClick={() => setPreviewContinuous(true)}>{t.previewContinuous}</button>
-                </div>
-                <div className="preview-layout-toggle">
-                  <span>{t.previewZoom}</span>
-                  <button type="button" className={previewZoom === 0.75 ? "is-active" : ""} onClick={() => onPreviewZoom(0.75)}>75%</button>
-                  <button type="button" className={previewZoom === 1 ? "is-active" : ""} onClick={() => onPreviewZoom(1)}>100%</button>
-                  <button type="button" className={previewZoom === 1.25 ? "is-active" : ""} onClick={() => onPreviewZoom(1.25)}>125%</button>
-                </div>
-                <button type="button" className={`preview-thumb-toggle${previewThumbsOpen ? " is-active" : ""}`} onClick={() => setPreviewThumbsOpen((v) => !v)}>{t.previewThumbs}</button>
-              </div>
+              <div className="preview-toolbar" />
             )}
             {previewMeta && (
               <div className="preview-meta">
                 <span>{t.pageMeta}: {previewMeta.page_count ?? previewPages.length ?? "-"}</span>
                 <span>{t.lineCount}: {previewMeta.line_total ?? 0}</span>
                 <span>{previewMode === "visual" ? t.previewVisualMode : t.previewTextMode}</span>
+                <span>{t.previewCoordSource}: {previewCoordProviderLabel}</span>
+                <span>{t.previewPipeline}: {previewPipelineLabel}</span>
+                <span className={`preview-gate ${previewConversion?.fallback ? "is-fallback" : "is-pass"}`}>{t.previewGate}: {previewGateLabel}</span>
+                {previewConversion && (
+                  <span>{t.previewGateRatio}: {previewGateRatioLabel}</span>
+                )}
               </div>
             )}
           </div>
@@ -791,33 +967,7 @@ export default function App() {
             </div>
           )}
           {!previewLoading && !previewError && previewMode === "visual" && previewPages.length > 0 && (
-            <div className={`preview-visual${previewThumbsOpen ? " is-thumbs-open" : ""}`}>
-              <aside className="preview-thumbs" ref={previewScrollRef}>
-                {previewPages.map((p) => {
-                  const pageNo = Number(p?.page_no || 0)
-                  const key = String(pageNo)
-                  const active = pageNo === activePreviewPage
-                  const url = previewPageUrls[key] || ""
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      ref={(el) => { previewThumbRefs.current[key] = el }}
-                      className={`preview-thumb${active ? " is-active" : ""}`}
-                      onClick={() => {
-                        setActivePreviewPage(pageNo)
-                        setActivePreviewHighlight(null)
-                        ensurePreviewPageUrl(documentId, pageNo)
-                      }}
-                    >
-                      <div className="preview-thumb-media">
-                        {url ? <img src={url} alt={`page-${pageNo}`} /> : <span>{pageNo}</span>}
-                      </div>
-                      <div className="preview-thumb-no">P{pageNo}</div>
-                    </button>
-                  )
-                })}
-              </aside>
+            <div className="preview-visual">
               <div className={`preview-main${previewContinuous ? " preview-main-scroll" : ""}`} ref={previewMainRef}>
                 {previewMode === "visual" && (
                   <div className="preview-float-indicator">P{activePreviewPage} / {previewMeta?.page_count ?? previewPages.length} · {t.previewProgress} {previewScrollPercent}%</div>
@@ -902,10 +1052,40 @@ export default function App() {
           )}
         </section>
         <section className="card contract-result">
-          <div className="panel-title">{t.auditResult}</div>
+          <div className="result-head">
+            <div className="panel-title">{t.auditResult}</div>
+            {contractResult && (
+              <div className="result-export-actions">
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => onExportReport("json", "report")}
+                  disabled={!!exportingFormat}
+                >
+                  {exportingFormat === "json_report" ? t.exporting : t.exportJson}
+                </button>
+                <button
+                  type="button"
+                  className="primary"
+                  onClick={() => onExportReport("docx", "report")}
+                  disabled={!!exportingFormat}
+                >
+                  {exportingFormat === "docx_report" ? t.exporting : t.exportDocx}
+                </button>
+                <button
+                  type="button"
+                  className="primary outline"
+                  onClick={() => onExportReport("docx", "comments")}
+                  disabled={!!exportingFormat}
+                >
+                  {exportingFormat === "docx_comments" ? t.exporting : "导出批注版原件"}
+                </button>
+              </div>
+            )}
+          </div>
+          {exportError && <div className="error">{t.exportFailed}: {exportError}</div>}
           {!contractResult && (
             <div className="empty-state">
-              <div className="empty-mark">A</div>
               <p>{t.appSubtitle}</p>
             </div>
           )}
@@ -981,6 +1161,18 @@ export default function App() {
                               <span>{r.type || "-"}</span>
                               <p>{r.issue || "-"}</p>
                               <div className="risk-location">{t.location}: {formatRiskLocation(location)}</div>
+                              {(() => {
+                                const key = String(idx)
+                                const meta = riskLocateMeta[key]
+                                if (!meta || !meta.strategy) return null
+                                const confidence = Math.max(0, Math.min(1, Number(meta.confidence || 0)))
+                                const confidencePercent = Math.round(confidence * 100)
+                                return (
+                                  <div className={`risk-locate-quality strategy-${meta.strategy}`}>
+                                    {t.locateMode}: {formatAnchorStrategy(meta.strategy)} · {t.locateConfidence} {confidencePercent}%
+                                  </div>
+                                )
+                              })()}
                               <em>{r.suggestion || ""}</em>
                               {(() => {
                                 const cid = String(r.citation_id || "").trim()

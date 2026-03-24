@@ -90,9 +90,16 @@
         "docx_margin": 72,
         "docx_line_height": 36,
         "docx_chars_per_line": 44,
-        "docx_paragraph_spacing": 14
+        "docx_paragraph_spacing": 14,
+        "coord_provider": "mineru",
+        "docx_coord_from_pdf": true,
+        "docx_pdf_min_text_ratio": 0.35,
+        "docx_pdf_gate_min_chars": 120,
+        "docx_pdf_keep_file": false
     },
     "memory_use_long_hits": true,
+    "memory_filter_unverifiable_risks": true,
+    "memory_filtered_risk_log_limit": 30,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

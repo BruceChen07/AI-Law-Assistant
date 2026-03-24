@@ -120,6 +120,43 @@ class LLMService:
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(payload, ensure_ascii=False) + "\n")
 
+    def _build_chat_kwargs(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        extra_body: Dict[str, Any] = {}
+        if "enable_thinking" in cfg:
+            extra_body["enable_thinking"] = bool(cfg.get("enable_thinking"))
+        thinking_budget = cfg.get("thinking_budget_tokens")
+        if thinking_budget is not None:
+            try:
+                extra_body["thinking_budget_tokens"] = max(0, int(thinking_budget))
+            except Exception:
+                pass
+        reasoning_effort = str(cfg.get("reasoning_effort") or "").strip().lower()
+        if reasoning_effort in {"low", "medium", "high"}:
+            kwargs["reasoning_effort"] = reasoning_effort
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        return kwargs
+
+    def _create_chat_completion(self, client: OpenAI, kwargs: Dict[str, Any]):
+        try:
+            return client.chat.completions.create(**kwargs)
+        except Exception as e:
+            msg = str(e).lower()
+            if ("unsupported" in msg or "unknown" in msg or "unrecognized" in msg or "invalid" in msg) and (
+                "extra_body" in kwargs or "reasoning_effort" in kwargs
+            ):
+                fallback_kwargs = dict(kwargs)
+                fallback_kwargs.pop("extra_body", None)
+                fallback_kwargs.pop("reasoning_effort", None)
+                return client.chat.completions.create(**fallback_kwargs)
+            raise
+
     def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         cfg = dict(self._get_llm_config())
         trace_meta = {}
@@ -166,17 +203,13 @@ class LLMService:
             max_retries=max(0, retries - 1),
             default_headers=extra_headers or None
         )
+        request_kwargs = self._build_chat_kwargs(model, messages, temperature, max_tokens, cfg)
         try:
-            resp = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens
-            )
+            resp = self._create_chat_completion(client, request_kwargs)
         except APITimeoutError as e:
             fallback_model = self._clean_text(cfg.get("fallback_model", ""))
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
-            retry_max_tokens = max_tokens
+            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
             retry_model = fallback_model or model
             logger.warning(
                 "llm_request_timeout_retry base_url=%s model=%s retry_model=%s timeout=%s->%s max_tokens=%s->%s",
@@ -195,13 +228,10 @@ class LLMService:
                 max_retries=0,
                 default_headers=extra_headers or None,
             )
+            retry_cfg = dict(cfg)
+            retry_request_kwargs = self._build_chat_kwargs(retry_model, messages, temperature, retry_max_tokens, retry_cfg)
             try:
-                resp = retry_client.chat.completions.create(
-                    model=retry_model,
-                    messages=messages,
-                    temperature=temperature,
-                    max_tokens=retry_max_tokens,
-                )
+                resp = self._create_chat_completion(retry_client, retry_request_kwargs)
             except Exception as e2:
                 logger.exception(
                     "llm_request_failed_after_retry api_base=%s base_url=%s model=%s retry_model=%s timeout=%s retry_timeout=%s raw_api_base=%r api_key=%s headers=%s",

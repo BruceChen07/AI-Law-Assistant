@@ -312,6 +312,80 @@ def init_db(cfg):
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_audit_trace_issue_id ON audit_trace(issue_id)")
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS evidence_anchor(
+        id TEXT PRIMARY KEY,
+        contract_document_id TEXT NOT NULL,
+        issue_id TEXT,
+        snapshot_hash TEXT NOT NULL,
+        locator_type TEXT NOT NULL,
+        start_offset INTEGER,
+        end_offset INTEGER,
+        page_no INTEGER,
+        paragraph_no TEXT,
+        clause_id TEXT,
+        clause_path TEXT,
+        quote_text TEXT NOT NULL,
+        context_before TEXT,
+        context_after TEXT,
+        confidence REAL NOT NULL DEFAULT 0,
+        is_stale INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (contract_document_id) REFERENCES contract_document(id),
+        FOREIGN KEY (issue_id) REFERENCES audit_issue(id),
+        FOREIGN KEY (clause_id) REFERENCES contract_clause(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_anchor_contract_issue ON evidence_anchor(contract_document_id, issue_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_anchor_snapshot ON evidence_anchor(snapshot_hash)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_evidence_anchor_page_para ON evidence_anchor(page_no, paragraph_no)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS export_job(
+        id TEXT PRIMARY KEY,
+        export_id TEXT NOT NULL UNIQUE,
+        contract_document_id TEXT NOT NULL,
+        requester TEXT NOT NULL,
+        export_format TEXT NOT NULL,
+        template_version TEXT NOT NULL,
+        locale TEXT NOT NULL DEFAULT 'zh-CN',
+        include_appendix INTEGER NOT NULL DEFAULT 1,
+        idempotency_key TEXT NOT NULL UNIQUE,
+        status TEXT NOT NULL,
+        progress INTEGER NOT NULL DEFAULT 0,
+        error_message TEXT,
+        output_path TEXT,
+        output_sha256 TEXT,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        started_at TEXT,
+        finished_at TEXT,
+        updated_at TEXT,
+        FOREIGN KEY (contract_document_id) REFERENCES contract_document(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_export_job_contract_status ON export_job(contract_document_id, status)")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS export_snapshot(
+        id TEXT PRIMARY KEY,
+        export_job_id TEXT NOT NULL,
+        snapshot_hash TEXT NOT NULL,
+        data_manifest_json TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (export_job_id) REFERENCES export_job(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_export_snapshot_job ON export_snapshot(export_job_id)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_export_snapshot_hash ON export_snapshot(snapshot_hash)")
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS tax_audit_archive_record(
         id TEXT PRIMARY KEY,
         contract_document_id TEXT NOT NULL UNIQUE,

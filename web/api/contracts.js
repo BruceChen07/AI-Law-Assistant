@@ -38,3 +38,11 @@ export async function getContractPreviewPageImage(documentId, pageNo) {
     headers: { ...getAuthHeaders() }
   })
 }
+
+export async function exportContractReport(documentId, payload) {
+  return requestBlob(`${API_BASE}/contracts/${documentId}/report/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload || {})
+  })
+}

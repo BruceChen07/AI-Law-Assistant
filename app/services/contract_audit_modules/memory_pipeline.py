@@ -20,11 +20,13 @@ from app.services.contract_audit_modules.risk_suppression import (
     build_global_tax_context,
     format_global_tax_context,
     should_suppress_missing_risk,
-    reconcile_cross_clause_conflicts
+    reconcile_cross_clause_conflicts,
+    detect_zero_risk_fallback_hit,
 )
 
 logger = structlog.get_logger(__name__)
 _MEMORY_EMBEDDER = None
+
 
 def _estimate_text_tokens(text: str) -> int:
     s = str(text or "")
@@ -34,10 +36,12 @@ def _estimate_text_tokens(text: str) -> int:
     non_cjk = max(0, len(s) - cjk)
     return max(1, int(cjk * 1.1 + non_cjk / 3.8))
 
+
 def _safe_ratio(numerator: int, denominator: int) -> float:
     if int(denominator or 0) <= 0:
         return 0.0
     return round(float(numerator or 0) / float(denominator), 6)
+
 
 def _tail_by_chars(text: str, max_chars: int) -> str:
     s = str(text or "")
@@ -50,18 +54,19 @@ def _tail_by_chars(text: str, max_chars: int) -> str:
         return trimmed[idx + 1:]
     return trimmed
 
+
 def _dedupe_long_memory_hits(text: str, max_blocks: int, max_chars: int) -> str:
     s = str(text or "").strip()
     if not s:
         return ""
-    chunks = re.split(r"(?=## Clause Review )", s)
+    chunks = re.split(r"(?=## Clause (?:Review|Facts) )", s)
     seen = set()
     kept = []
     for c in chunks:
         chunk = str(c or "").strip()
         if not chunk:
             continue
-        m = re.search(r"## Clause Review\s+([^\[]+)\[", chunk)
+        m = re.search(r"## Clause (?:Review|Facts)\s+([^\[]+)\[", chunk)
         key = str(m.group(1)).strip().lower() if m else ""
         if key and key in seen:
             continue
@@ -75,6 +80,28 @@ def _dedupe_long_memory_hits(text: str, max_blocks: int, max_chars: int) -> str:
     if limit > 0 and len(out) > limit:
         out = out[:limit]
     return out
+
+
+def _build_compact_whitelist(evidence_items: List[Dict[str, Any]], limit: int = 40):
+    lines: List[str] = []
+    alias_to_cid: Dict[str, str] = {}
+    n = 0
+    for it in evidence_items:
+        cid = str(it.get("citation_id") or "").strip()
+        if not cid:
+            continue
+        law = str(it.get("law_title") or it.get("title") or "").strip()
+        article = str(it.get("article_no") or "").strip()
+        if not law or not article:
+            continue
+        n += 1
+        alias = f"C{n}"
+        alias_to_cid[alias] = cid
+        lines.append(f"- {alias}: {law} {article}")
+        if n >= max(1, int(limit or 1)):
+            break
+    return "\n".join(lines), alias_to_cid
+
 
 def get_memory_embedder():
     global _MEMORY_EMBEDDER
@@ -101,6 +128,7 @@ def get_memory_embedder():
         _MEMORY_EMBEDDER = _FallbackEmbedder()
         return _MEMORY_EMBEDDER
 
+
 def execute_memory_audit(
     cfg: Dict[str, Any],
     llm,
@@ -114,37 +142,48 @@ def execute_memory_audit(
     """执行带记忆库的条款级审计。"""
     memory_dir, memory_db = memory_paths(cfg)
     memory_use_long_hits = bool(cfg.get("memory_use_long_hits", True))
-    logger.info("memory_pipeline_start", memory_dir=memory_dir, memory_db=memory_db, evidence=len(evidence_items))
-    
+    logger.info("memory_pipeline_start", memory_dir=memory_dir,
+                memory_db=memory_db, evidence=len(evidence_items))
+
     embedder = get_memory_embedder()
     indexer = MemoryIndexer(
         IndexerConfig(memory_root=Path(memory_dir), db_path=Path(memory_db)),
         embedder
     )
     indexer.reindex_all()
-    searcher = HybridSearcher(indexer, Path(memory_db), HybridSearchConfig(vector_weight=0.7, keyword_weight=0.3))
-    
-    timeout_sec = min(10.0, max(3.0, float((cfg.get("llm_config") or {}).get("timeout", 8))))
-    risk_detection_mode = str(retrieval_opts.get("risk_detection_mode", "relaxed"))
+    searcher = HybridSearcher(indexer, Path(memory_db), HybridSearchConfig(
+        vector_weight=0.7, keyword_weight=0.3))
+
+    timeout_sec = min(10.0, max(3.0, float(
+        (cfg.get("llm_config") or {}).get("timeout", 8))))
+    risk_detection_mode = str(retrieval_opts.get(
+        "risk_detection_mode", "relaxed"))
     is_relaxed = risk_detection_mode == "relaxed"
-    
+
     memory_cfg = MemoryManagerConfig(
-        short_memory_token_limit=int(cfg.get("memory_short_token_limit") or (3200 if is_relaxed else 2200)),
-        flush_soft_threshold=int(cfg.get("memory_flush_token_threshold") or (3200 if is_relaxed else 2200)),
+        short_memory_token_limit=int(
+            cfg.get("memory_short_token_limit") or (1800 if is_relaxed else 1600)),
+        flush_soft_threshold=int(
+            cfg.get("memory_flush_token_threshold") or (1600 if is_relaxed else 1400)),
         llm_timeout_sec=timeout_sec,
-        retrieval_top_k=int(cfg.get("memory_retrieval_top_k") or (6 if is_relaxed else 4)),
+        retrieval_top_k=int(cfg.get("memory_retrieval_top_k")
+                            or (3 if is_relaxed else 3)),
         risk_dedup_similarity_threshold=0.93 if is_relaxed else 0.86,
         risk_dedup_enabled=False,
-        max_rounds=int(cfg.get("memory_max_rounds") or 16),
-        clause_query_max_chars=int(cfg.get("memory_clause_query_max_chars") or 520),
-        hit_item_max_chars=int(cfg.get("memory_hit_item_max_chars") or 240),
-        short_ctx_turns=int(cfg.get("memory_short_ctx_turns") or 4),
-        short_store_clause_chars=int(cfg.get("memory_short_store_clause_chars") or 320),
-        short_store_risks_chars=int(cfg.get("memory_short_store_risks_chars") or 600),
+        max_rounds=max(8, min(int(cfg.get("memory_max_rounds") or 28), 30)),
+        clause_query_max_chars=int(
+            cfg.get("memory_clause_query_max_chars") or 520),
+        hit_item_max_chars=int(cfg.get("memory_hit_item_max_chars") or 200),
+        short_ctx_turns=int(cfg.get("memory_short_ctx_turns") or 3),
+        short_store_clause_chars=int(
+            cfg.get("memory_short_store_clause_chars") or 240),
+        short_store_risks_chars=int(
+            cfg.get("memory_short_store_risks_chars") or 420),
     )
-    
-    manager = MemoryLifecycleManager(Path(memory_dir), indexer, searcher, memory_cfg)
-    
+
+    manager = MemoryLifecycleManager(
+        Path(memory_dir), indexer, searcher, memory_cfg)
+
     legal_catalog = build_legal_catalog(evidence_items)
     citation_lookup = build_citation_lookup(evidence_items)
     allowed_citation_ids = {
@@ -152,13 +191,22 @@ def execute_memory_audit(
         for it in evidence_items
         if str(it.get("citation_id") or "").strip()
     }
-    evidence_whitelist_text = build_evidence_whitelist_text(evidence_items)
+    evidence_by_cid = {
+        str(it.get("citation_id") or "").strip(): it
+        for it in evidence_items
+        if str(it.get("citation_id") or "").strip()
+    }
+    filter_unverifiable_risks = bool(cfg.get("memory_filter_unverifiable_risks", True))
+    filtered_risk_log_limit = max(1, int(cfg.get("memory_filtered_risk_log_limit") or 30))
+    evidence_whitelist_text = build_evidence_whitelist_text(
+        evidence_items, limit=int(cfg.get("memory_whitelist_limit") or 36))
+    citation_alias_map: Dict[str, str] = {}
     global_tax_context = build_global_tax_context(preview_clauses)
-    global_tax_context_text = format_global_tax_context(global_tax_context)
-    
+    global_tax_context_text = format_global_tax_context(global_tax_context, per_topic_limit=2)
+
     clause_parse_state = {"count": 0, "clause_ids": []}
     base_trace_meta = dict(trace_context or {})
-    
+
     write_audit_trace(
         cfg,
         "memory_pipeline_start",
@@ -170,9 +218,11 @@ def execute_memory_audit(
             "risk_detection_mode": risk_detection_mode,
             "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
             "evidence_count": len(evidence_items),
+            "zero_risk_fallback_enabled": bool(cfg.get("memory_zero_risk_fallback_enabled", True)),
             "global_tax_context_topics": len([k for k, v in global_tax_context.items() if isinstance(v, list) and v]),
             "global_tax_context_items": sum(len(v) for v in global_tax_context.values() if isinstance(v, list)),
             "memory_cfg": memory_cfg.model_dump(),
+            "memory_filter_unverifiable_risks": filter_unverifiable_risks,
         },
         memory_dir=memory_dir,
     )
@@ -180,28 +230,36 @@ def execute_memory_audit(
     async def _clause_cb(payload: Dict[str, Any]) -> Dict[str, Any]:
         clause = payload.get("clause") or {}
         short_memory_full = str(payload.get("short_memory") or "")
-        long_memory_hits_full = str(payload.get("long_memory_hits") or "").strip()
+        long_memory_hits_full = str(
+            payload.get("long_memory_hits") or "").strip()
         clause_text = str(clause.get("text") or "")
         clause_title = str(clause.get("title") or "")
-        short_prompt_max_chars = int(cfg.get("memory_prompt_short_max_chars") or (2200 if is_relaxed else 1400))
-        long_prompt_max_chars = int(cfg.get("memory_prompt_long_max_chars") or (2200 if is_relaxed else 1400))
-        long_prompt_max_blocks = int(cfg.get("memory_prompt_long_max_blocks") or (6 if is_relaxed else 4))
-        short_memory = _tail_by_chars(short_memory_full, short_prompt_max_chars)
-        long_memory_hits = _dedupe_long_memory_hits(long_memory_hits_full, long_prompt_max_blocks, long_prompt_max_chars)
-        
+        short_prompt_max_chars = int(
+            cfg.get("memory_prompt_short_max_chars") or (900 if is_relaxed else 760))
+        long_prompt_max_chars = int(
+            cfg.get("memory_prompt_long_max_chars") or (700 if is_relaxed else 560))
+        long_prompt_max_blocks = int(
+            cfg.get("memory_prompt_long_max_blocks") or 2)
+        short_memory = _tail_by_chars(
+            short_memory_full, short_prompt_max_chars)
+        long_memory_hits = _dedupe_long_memory_hits(
+            long_memory_hits_full, long_prompt_max_blocks, long_prompt_max_chars)
+
         long_memory_block = ""
         if memory_use_long_hits and long_memory_hits:
             long_memory_block = f"长期记忆命中:\n{long_memory_hits}\n\n"
         global_context_block = ""
         if global_tax_context_text:
             global_context_block = f"全局涉税事实画像(来自整份合同):\n{global_tax_context_text}\n\n"
-            
+
         system = "你是资深合同审计律师。请只输出JSON。"
         user = (
             f"语言:{lang}\n"
-            "仅根据输入审计；仅可使用白名单法条；输出必须是JSON。\n"
-            "每条风险必须包含 citation_id 且在白名单内。\n"
-            "若要输出‘未明确/未约定/未提及/缺失’风险，先核查短记忆、长期命中、当前条款；任一处已明确则禁止输出该缺失风险。\n"
+            "仅根据输入审计；优先参考白名单法条；输出必须是JSON。\n"
+            "短记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n"
+            "风险项优先填写白名单 citation_id；如无法确定 citation_id，可留空，但必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
+            "若要输出‘未明确/未约定/未提及/缺失’风险，可参考短记忆、长期命中与当前条款；仅在同一要素已被明确且可执行约定覆盖时才抑制该风险。\n"
+            "禁止输出推理过程、分析过程与额外解释，只输出最终JSON。\n"
             f"白名单:\n{evidence_whitelist_text}\n\n"
             f"短记忆:\n{short_memory}\n\n"
             f"{global_context_block}"
@@ -240,12 +298,44 @@ def execute_memory_audit(
             },
             memory_dir=memory_dir,
         )
-        result_text, llm_raw = llm.chat([{"role": "system", "content": system}, {
-                                       "role": "user", "content": user}], overrides={"max_tokens": 1800 if is_relaxed else 1200, "_trace_meta": clause_trace_meta})
-        usage = llm_raw.get("usage") if isinstance(llm_raw.get("usage"), dict) else {}
+        try:
+            result_text, llm_raw = llm.chat([{"role": "system", "content": system}, {
+                "role": "user", "content": user}], overrides={"max_tokens": 600 if is_relaxed else 600, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": clause_trace_meta})
+        except Exception as e:
+            clause_parse_state["count"] += 1
+            clause_parse_state["clause_ids"].append(
+                str(clause.get("clause_id") or ""))
+            write_audit_trace(
+                cfg,
+                "clause_round_result",
+                {
+                    **clause_trace_meta,
+                    "ok": False,
+                    "reason": "llm_call_failed",
+                    "error": str(e),
+                    "raw_len": 0,
+                    "llm_response": "",
+                    "token_usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                },
+                memory_dir=memory_dir,
+            )
+            logger.warning(
+                "memory_clause_call_failed",
+                round=payload.get("round"),
+                clause_id=str(clause.get("clause_id") or ""),
+                error=str(e),
+            )
+            return {"summary": "", "risks": []}
+        usage = llm_raw.get("usage") if isinstance(
+            llm_raw.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
-        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        total_tokens = int(usage.get("total_tokens") or (
+            prompt_tokens + completion_tokens))
         segment_est_tokens = {
             "short_memory": _estimate_text_tokens(short_memory),
             "long_memory_hits": _estimate_text_tokens(long_memory_hits),
@@ -260,8 +350,10 @@ def execute_memory_audit(
                 + _estimate_text_tokens(clause_text)
             ),
         }
-        segment_est_tokens["instruction_scaffold"] = max(0, int(segment_est_tokens["instruction_scaffold"] or 0))
-        prompt_est_total = sum(int(v or 0) for v in segment_est_tokens.values())
+        segment_est_tokens["instruction_scaffold"] = max(
+            0, int(segment_est_tokens["instruction_scaffold"] or 0))
+        prompt_est_total = sum(int(v or 0)
+                               for v in segment_est_tokens.values())
         token_share_analysis = {
             "prompt_side": {
                 k: {
@@ -281,7 +373,8 @@ def execute_memory_audit(
             parsed = json.loads(result_text)
             if not isinstance(parsed, dict):
                 clause_parse_state["count"] += 1
-                clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+                clause_parse_state["clause_ids"].append(
+                    str(clause.get("clause_id") or ""))
                 write_audit_trace(
                     cfg,
                     "clause_round_result",
@@ -307,7 +400,14 @@ def execute_memory_audit(
                     reason="non_dict_json"
                 )
                 return {"summary": "", "risks": []}
-            risks_out = parsed.get("risks") if isinstance(parsed.get("risks"), list) else []
+            risks_out = parsed.get("risks") if isinstance(
+                parsed.get("risks"), list) else []
+            for r in risks_out:
+                if not isinstance(r, dict):
+                    continue
+                cid_raw = str(r.get("citation_id") or "").strip()
+                if cid_raw in citation_alias_map:
+                    r["citation_id"] = citation_alias_map[cid_raw]
             write_audit_trace(
                 cfg,
                 "clause_round_result",
@@ -330,7 +430,8 @@ def execute_memory_audit(
             return parsed
         except Exception as e:
             clause_parse_state["count"] += 1
-            clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+            clause_parse_state["clause_ids"].append(
+                str(clause.get("clause_id") or ""))
             write_audit_trace(
                 cfg,
                 "clause_round_result",
@@ -371,29 +472,40 @@ def execute_memory_audit(
         write_audit_trace(
             cfg,
             "memory_flush_prompt",
-            {**flush_trace_meta, "prompt_len": len(prompt), "prompt_preview": trace_clip(prompt, 260)},
+            {**flush_trace_meta,
+                "prompt_len": len(prompt), "prompt_preview": trace_clip(prompt, 260)},
             memory_dir=memory_dir,
         )
         result_text, _ = llm.chat([{"role": "system", "content": "你是记忆压缩助手。"}, {
-                                  "role": "user", "content": content}], overrides={"max_tokens": 600, "_trace_meta": flush_trace_meta})
+                                  "role": "user", "content": content}], overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": flush_trace_meta})
         out = str(result_text or "").strip()
         write_audit_trace(
             cfg,
             "memory_flush_result",
-            {**flush_trace_meta, "result_len": len(out), "result_preview": trace_clip(out, 260)},
+            {**flush_trace_meta,
+                "result_len": len(out), "result_preview": trace_clip(out, 260)},
             memory_dir=memory_dir,
         )
         return out
 
-    report = run_coro_sync(manager.audit_contract(text, _clause_cb, _flush_cb, legal_catalog))
-    
-    risks = report.get("risks") if isinstance(report.get("risks"), list) else []
+    report = run_coro_sync(manager.audit_contract(
+        text, _clause_cb, _flush_cb, legal_catalog))
+
+    risks = report.get("risks") if isinstance(
+        report.get("risks"), list) else []
     clause_map = {str(c.get("clause_id")): c for c in preview_clauses}
     normalized_risks = []
     dropped_non_whitelist = 0
+    retained_unmapped_risks = 0
+    retained_unmapped_risk_hits: List[Dict[str, Any]] = []
     suppressed_missing_risks = 0
     suppressed_missing_risk_hits: List[Dict[str, Any]] = []
-    
+    fallback_generated_risks = 0
+    fallback_generated_risk_hits: List[Dict[str, Any]] = []
+    filtered_unverifiable_risks = 0
+    filtered_unverifiable_risk_hits: List[Dict[str, Any]] = []
+    from app.services.utils.contract_audit_utils import citation_match_key
+
     for r in risks:
         if not isinstance(r, dict):
             continue
@@ -402,12 +514,23 @@ def execute_memory_audit(
         law_title = str(r.get("law_title") or "")
         article_no = str(r.get("article_no") or "")
         citation_id = str(r.get("citation_id") or "").strip()
-        if not citation_id:
-            from app.services.utils.contract_audit_utils import citation_match_key
-            citation_id = citation_lookup.get(citation_match_key(law_title, article_no), "")
-        if not citation_id or citation_id not in allowed_citation_ids:
+        if citation_id and citation_id not in allowed_citation_ids:
             dropped_non_whitelist += 1
-            continue
+            citation_id = ""
+        if not citation_id:
+            citation_id = citation_lookup.get(
+                citation_match_key(law_title, article_no), "")
+        has_mapping = bool(citation_id and citation_id in allowed_citation_ids)
+        if not has_mapping:
+            retained_unmapped_risks += 1
+            retained_unmapped_risk_hits.append(
+                {
+                    "risk_id": str(r.get("risk_id") or ""),
+                    "clause_id": cid,
+                    "law_title": law_title,
+                    "article_no": article_no,
+                }
+            )
         basis = f"{law_title} {article_no}".strip()
         risk_item = {
             "level": _normalize_risk_level(r.get("level")),
@@ -415,7 +538,8 @@ def execute_memory_audit(
             "suggestion": str(r.get("suggestion") or ""),
             "basis": basis,
             "law_reference": basis,
-            "citation_id": citation_id,
+            "citation_id": citation_id if has_mapping else "",
+            "citation_status": "mapped" if has_mapping else "unmapped",
             "evidence": str(r.get("evidence") or ""),
             "law_title": law_title,
             "article_no": article_no,
@@ -452,7 +576,7 @@ def execute_memory_audit(
             )
             continue
         normalized_risks.append(risk_item)
-        
+
     reconciled_removed_hits: List[Dict[str, Any]] = []
     normalized_risks, reconciled_removed_hits = reconcile_cross_clause_conflicts(
         normalized_risks,
@@ -460,29 +584,98 @@ def execute_memory_audit(
         global_tax_context,
     )
     reconciled_suppressed_risks = len(reconciled_removed_hits)
-    
+    fallback_enabled = bool(cfg.get("memory_zero_risk_fallback_enabled", True))
+    if fallback_enabled and not normalized_risks:
+        fallback_hit, hit_info = detect_zero_risk_fallback_hit(
+            preview_clauses, global_tax_context)
+        if fallback_hit:
+            fallback_generated_risks = 1
+            fallback_generated_risk_hits.append(hit_info)
+            fallback_law_title = "中华人民共和国增值税法"
+            fallback_article_no = "第三条"
+            mapped_fallback_citation_id = citation_lookup.get(
+                citation_match_key(fallback_law_title, fallback_article_no), ""
+            )
+            mapped_ok = bool(
+                mapped_fallback_citation_id and mapped_fallback_citation_id in allowed_citation_ids)
+            fallback_quote = str(hit_info.get("quote") or "")
+            fallback_clause_id = str(hit_info.get("clause_id") or "")
+            fallback_clause = clause_map.get(fallback_clause_id) or {}
+            normalized_risks.append(
+                {
+                    "level": "medium",
+                    "issue": "合同存在免税/税率与服务场景组合，适用条件和计税依据需进一步复核。",
+                    "suggestion": "补充免税适用依据、计税口径和留存资料要求，并确认开票与纳税义务安排。",
+                    "basis": f"{fallback_law_title} {fallback_article_no}",
+                    "law_reference": f"{fallback_law_title} {fallback_article_no}",
+                    "citation_id": mapped_fallback_citation_id if mapped_ok else "",
+                    "citation_status": "mapped" if mapped_ok else "unmapped",
+                    "evidence": fallback_quote,
+                    "law_title": fallback_law_title,
+                    "article_no": fallback_article_no,
+                    "location": {
+                        "risk_id": "fallback-r1",
+                        "clause_id": fallback_clause_id,
+                        "anchor_id": str(fallback_clause.get("anchor_id") or ""),
+                        "page_no": int(hit_info.get("page_no") or fallback_clause.get("page_no") or 0),
+                        "paragraph_no": str(hit_info.get("paragraph_no") or fallback_clause.get("paragraph_no") or ""),
+                        "clause_path": str(hit_info.get("clause_path") or fallback_clause.get("clause_path") or ""),
+                        "quote": fallback_quote,
+                        "score": 0.6,
+                    },
+                }
+            )
+
+    if filter_unverifiable_risks and normalized_risks:
+        display_risks: List[Dict[str, Any]] = []
+        for item in normalized_risks:
+            cid = str(item.get("citation_id") or "").strip()
+            mapped_ok = bool(cid and cid in allowed_citation_ids)
+            ev = evidence_by_cid.get(cid) if mapped_ok else {}
+            full_text = str((ev or {}).get("content") or (ev or {}).get("excerpt") or "").strip()
+            if mapped_ok and full_text:
+                display_risks.append(item)
+                continue
+            filtered_unverifiable_risks += 1
+            if len(filtered_unverifiable_risk_hits) < filtered_risk_log_limit:
+                filtered_unverifiable_risk_hits.append(
+                    {
+                        "risk_id": str(((item.get("location") or {}).get("risk_id") or "")),
+                        "clause_id": str(((item.get("location") or {}).get("clause_id") or "")),
+                        "citation_id": cid,
+                        "citation_status": str(item.get("citation_status") or ""),
+                        "reason": "unmapped_or_no_fulltext",
+                        "law_title": str(item.get("law_title") or ""),
+                        "article_no": str(item.get("article_no") or ""),
+                    }
+                )
+        normalized_risks = display_risks
+
     risk_summary = {"high": 0, "medium": 0, "low": 0}
     for r in normalized_risks:
         risk_summary[r.get("level", "low")] += 1
-        
+
     parse_failed_count = int(clause_parse_state.get("count") or 0)
     if parse_failed_count > 0 and not normalized_risks:
-        raise RuntimeError("memory audit degraded: llm json parse failed and no risks produced")
-        
-    legal_validation = report.get("legal_validation") if isinstance(report.get("legal_validation"), dict) else {"ok": True, "issues": []}
+        raise RuntimeError(
+            "memory audit degraded: llm json parse failed and no risks produced")
+
+    legal_validation = report.get("legal_validation") if isinstance(
+        report.get("legal_validation"), dict) else {"ok": True, "issues": []}
     if parse_failed_count > 0:
-        issues = legal_validation.get("issues") if isinstance(legal_validation.get("issues"), list) else []
+        issues = legal_validation.get("issues") if isinstance(
+            legal_validation.get("issues"), list) else []
         issues = list(issues)
         issues.append({
             "risk_id": "pipeline",
             "message": f"LLM JSON parse failed in {parse_failed_count} clause(s): {','.join([x for x in clause_parse_state.get('clause_ids', []) if x])}"
         })
         legal_validation = {"ok": False, "issues": issues}
-        
+
     report_summary = str(report.get("summary") or "").strip()
     if not report_summary:
         report_summary = f"条款级长短记忆审核完成，共发现 {len(normalized_risks)} 项风险"
-        
+
     audit = {
         "summary": report_summary,
         "executive_opinion": [],
@@ -491,7 +684,7 @@ def execute_memory_audit(
         "citations": _enrich_citations(evidence_items, evidence_items),
         "legal_validation": legal_validation,
     }
-    
+
     write_audit_trace(
         cfg,
         "memory_pipeline_done",
@@ -502,8 +695,22 @@ def execute_memory_audit(
             "parse_failed_count": parse_failed_count,
             "parse_failed_clause_ids": clause_parse_state.get("clause_ids", []),
             "dropped_non_whitelist_risks": dropped_non_whitelist,
+            "retained_unmapped_risks": retained_unmapped_risks,
+            "unmapped_citation_risks": retained_unmapped_risks,
             "suppressed_missing_risks": suppressed_missing_risks,
             "reconciled_suppressed_risks": reconciled_suppressed_risks,
+            "fallback_generated_risks": fallback_generated_risks,
+            "zero_risk_fallback_enabled": fallback_enabled,
+            "zero_risk_fallback_triggered": fallback_generated_risks > 0,
+            "risk_origin_breakdown": {
+                "llm_risks_kept": max(0, len(normalized_risks) - fallback_generated_risks),
+                "fallback_generated_risks": fallback_generated_risks,
+            },
+            "retained_unmapped_risk_hits": retained_unmapped_risk_hits[:20],
+            "unmapped_citation_risk_hits": retained_unmapped_risk_hits[:20],
+            "fallback_generated_risk_hits": fallback_generated_risk_hits[:20],
+            "filtered_unverifiable_risks": filtered_unverifiable_risks,
+            "filtered_unverifiable_risk_hits": filtered_unverifiable_risk_hits[:20],
             "suppressed_missing_risk_hits": suppressed_missing_risk_hits[:20],
             "reconciled_suppressed_risk_hits": reconciled_removed_hits[:20],
         },
@@ -527,9 +734,24 @@ def execute_memory_audit(
             "global_tax_context_topics": len([k for k, v in global_tax_context.items() if isinstance(v, list) and v]),
             "global_tax_context_items": sum(len(v) for v in global_tax_context.values() if isinstance(v, list)),
             "memory_report_risk_count": len(normalized_risks),
+            "memory_filter_unverifiable_risks": filter_unverifiable_risks,
             "memory_validation_ok": bool(legal_validation.get("ok", False)),
             "risk_dedup_enabled": False,
             "dropped_non_whitelist_risks": dropped_non_whitelist,
+            "retained_unmapped_risks": retained_unmapped_risks,
+            "unmapped_citation_risks": retained_unmapped_risks,
+            "retained_unmapped_risk_hits": retained_unmapped_risk_hits[:20],
+            "unmapped_citation_risk_hits": retained_unmapped_risk_hits[:20],
+            "fallback_generated_risks": fallback_generated_risks,
+            "fallback_generated_risk_hits": fallback_generated_risk_hits[:20],
+            "filtered_unverifiable_risks": filtered_unverifiable_risks,
+            "filtered_unverifiable_risk_hits": filtered_unverifiable_risk_hits[:20],
+            "zero_risk_fallback_enabled": fallback_enabled,
+            "zero_risk_fallback_triggered": fallback_generated_risks > 0,
+            "risk_origin_breakdown": {
+                "llm_risks_kept": max(0, len(normalized_risks) - fallback_generated_risks),
+                "fallback_generated_risks": fallback_generated_risks,
+            },
             "suppressed_missing_risks": suppressed_missing_risks,
             "suppressed_missing_risk_hits": suppressed_missing_risk_hits[:20],
             "reconciled_suppressed_risks": reconciled_suppressed_risks,

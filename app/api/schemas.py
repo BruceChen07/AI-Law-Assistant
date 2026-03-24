@@ -220,15 +220,41 @@ class TaxAuditReportResponse(BaseModel):
 
 class TaxAuditReportExportRequest(BaseModel):
     export_format: Optional[str] = "json"
+    template_version: Optional[str] = "v1.0"
+    locale: Optional[str] = "zh-CN"
+    include_appendix: Optional[bool] = True
+    brand: Optional[str] = ""
 
 
 class TaxAuditReportExportResponse(BaseModel):
+    export_id: Optional[str] = None
+    status: Optional[str] = None
+    progress: Optional[int] = 0
     contract_id: str
     export_format: str
     file_path: str
     file_name: str
     size: int
     generated_at: str
+    template_version: Optional[str] = None
+    locale: Optional[str] = None
+    brand: Optional[str] = ""
+
+
+class TaxAuditExportJobStatusResponse(BaseModel):
+    export_id: str
+    contract_id: str
+    status: str
+    progress: int
+    export_format: str
+    template_version: str
+    locale: str
+    include_appendix: bool
+    file_path: Optional[str] = None
+    error_message: Optional[str] = None
+    created_at: Optional[str] = None
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
 
 
 class TaxAuditCleanupRunRequest(BaseModel):

@@ -21,6 +21,14 @@ RISK_TOPIC_KEYWORDS = {
     "withholding": ["代扣", "代缴", "代扣代缴", "withholding"],
 }
 
+FALLBACK_SERVICE_KEYWORDS = [
+    "餐饮", "外卖", "平台服务", "补贴", "服务费", "供应", "service", "platform"
+]
+
+FALLBACK_TAX_RATE_KEYWORDS = [
+    "税率", "税点", "免税", "vat", "tax rate"
+]
+
 def contains_any(text: str, keywords: List[str]) -> bool:
     """检查文本是否包含关键词列表中的任一词。"""
     t = str(text or "").lower()
@@ -208,3 +216,59 @@ def reconcile_cross_clause_conflicts(
             continue
         kept.append(risk)
     return kept, removed
+
+
+def detect_zero_risk_fallback_hit(
+    clauses: List[Dict[str, Any]],
+    global_tax_context: Dict[str, Any],
+) -> Tuple[bool, Dict[str, Any]]:
+    has_tax_rate = False
+    has_service = False
+    best_hit: Dict[str, Any] = {}
+    tax_items = global_tax_context.get("tax_rate") if isinstance(global_tax_context, dict) else []
+    if isinstance(tax_items, list) and tax_items:
+        has_tax_rate = True
+        first = tax_items[0] if isinstance(tax_items[0], dict) else {}
+        best_hit = {
+            "topic": "tax_rate",
+            "clause_id": str(first.get("clause_id") or ""),
+            "clause_path": str(first.get("clause_path") or ""),
+            "page_no": int(first.get("page_no") or 0),
+            "paragraph_no": str(first.get("paragraph_no") or ""),
+            "quote": str(first.get("quote") or ""),
+            "source": "global_tax_context",
+        }
+    for clause in clauses or []:
+        if not isinstance(clause, dict):
+            continue
+        ctext = str(clause.get("clause_text") or clause.get("text") or "")
+        if not ctext:
+            continue
+        if contains_any(ctext, FALLBACK_TAX_RATE_KEYWORDS):
+            has_tax_rate = True
+            if not best_hit:
+                best_hit = {
+                    "topic": "tax_rate",
+                    "clause_id": str(clause.get("clause_id") or ""),
+                    "clause_path": str(clause.get("clause_path") or ""),
+                    "page_no": int(clause.get("page_no") or 0),
+                    "paragraph_no": str(clause.get("paragraph_no") or ""),
+                    "quote": ctext[:220],
+                    "source": "clause_scan",
+                }
+        if contains_any(ctext, FALLBACK_SERVICE_KEYWORDS):
+            has_service = True
+            if not best_hit:
+                best_hit = {
+                    "topic": "service",
+                    "clause_id": str(clause.get("clause_id") or ""),
+                    "clause_path": str(clause.get("clause_path") or ""),
+                    "page_no": int(clause.get("page_no") or 0),
+                    "paragraph_no": str(clause.get("paragraph_no") or ""),
+                    "quote": ctext[:220],
+                    "source": "clause_scan",
+                }
+    if has_tax_rate and has_service:
+        best_hit["topic"] = "tax_rate_service_combo"
+        return True, best_hit
+    return False, {}

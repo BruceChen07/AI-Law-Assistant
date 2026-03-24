@@ -78,6 +78,23 @@
   color: var(--muted);
   font-size: 12px;
   font-family: "JetBrains Mono", monospace;
+  flex-wrap: wrap;
+}
+
+.preview-gate {
+  padding-inline: 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+}
+
+.preview-gate.is-pass {
+  color: color-mix(in srgb, var(--accent-2) 86%, white);
+  border-color: color-mix(in srgb, var(--accent-2) 55%, var(--border));
+}
+
+.preview-gate.is-fallback {
+  color: #f0b76a;
+  border-color: color-mix(in srgb, #f0b76a 65%, var(--border));
 }
 
 .preview-scroll {
@@ -100,7 +117,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 140px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 12px;
 }
 

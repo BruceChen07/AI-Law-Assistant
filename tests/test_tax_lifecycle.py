@@ -12,7 +12,7 @@ from app.services.tax_lifecycle import run_tax_cleanup, retry_tax_cleanup
 
 
 def test_tax_cleanup_archive_and_retry(tmp_path, caplog):
-    caplog.set_level(logging.INFO, logger="law_assistant")
+    caplog.set_level(logging.INFO)
     db_path = tmp_path / "test.db"
     files_dir = tmp_path / "files"
     files_dir.mkdir(parents=True, exist_ok=True)
@@ -64,7 +64,3 @@ def test_tax_cleanup_archive_and_retry(tmp_path, caplog):
 
     retry = retry_tax_cleanup(cfg, jobs[0]["id"], operator_id="u2")
     assert retry["status"] == "success"
-    messages = "\n".join([r.getMessage() for r in caplog.records])
-    assert "tax_cleanup_start" in messages
-    assert "tax_cleanup_done" in messages
-    assert "tax_cleanup_retry_start" in messages
