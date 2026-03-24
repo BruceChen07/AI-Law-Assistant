@@ -1,5 +1,8 @@
 # AI Law Assistant
 
+- [English (英文版)](README.en-US.md)
+- [简体中文 (Simplified Chinese)](README.zh-CN.md)
+
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.8+-blue.svg" alt="Python">
   <img src="https://img.shields.io/badge/FastAPI-0.115.0-blue.svg" alt="FastAPI">
@@ -37,24 +40,24 @@ Models (Embedding + Reranker + LLM)
 
 ### 技术栈
 
-| 层级 | 技术 |
-|------|------|
-| 后端框架 | FastAPI, Uvicorn |
-| 数据库 | SQLite + FTS5 |
+| 层级    | 技术                                |
+| ----- | --------------------------------- |
+| 后端框架  | FastAPI, Uvicorn                  |
+| 数据库   | SQLite + FTS5                     |
 | 向量/重排 | ONNX Runtime, Transformers, Torch |
-| 模型 | BGE-small-zh/en, BGE-reranker |
-| 前端框架 | React 18, Vite 5 |
-| 鉴权 | PyJWT, bcrypt, passlib |
-| 文件解析 | python-docx, pypdf |
+| 模型    | BGE-small-zh/en, BGE-reranker     |
+| 前端框架  | React 18, Vite 5                  |
+| 鉴权    | PyJWT, bcrypt, passlib            |
+| 文件解析  | python-docx, pypdf                |
 
 ## 快速开始
 
 ### 环境要求
 
-- Python 3.8+
-- Node.js 18+
+- Python 3.12+
+- Node.js 22+
 - Windows / Linux / macOS
-- OCR 依赖：tesseract、poppler（用于扫描 PDF）
+- OCR 依赖：tesseract、poppler, mineru（用于扫描 PDF）
 
 ### 1. 克隆项目
 
@@ -121,7 +124,7 @@ npm run storybook
 
 ### 6. 访问系统
 
-打开浏览器访问 http://localhost:5173 即可使用。
+打开浏览器访问 <http://localhost:5173> 即可使用。
 
 ## 使用指南
 
@@ -133,7 +136,7 @@ npm run storybook
 4. 风险项下展示法规证据，格式为《法规文档名称》第X条（摘要：……）
 5. 支持一键下载**带批注的 Word 版本**，所有检测到的风险点都会精准定位并作为批注附着在对应条款正文旁。
 
-审计结果中的 citations 字段包含 citation_id、law_title、article_no、excerpt，前端会优先展示这些字段并保留证据溯源能力。
+审计结果中的 citations 字段包含 citation\_id、law\_title、article\_no、excerpt，前端会优先展示这些字段并保留证据溯源能力。
 
 ### 法规导入与检索（Admin 页面）
 
@@ -143,6 +146,7 @@ npm run storybook
 4. 在「检索」区域输入关键词并调整权重
 
 支持字段：
+
 - **标题 (Title)**：法规文件标题
 - **Tag**：法规文号/标签
 - **发布机构 (Issuer)**：发布该法规的机构
@@ -193,19 +197,19 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 ### API 接口
 
-| 方法 | 路径 | 描述 |
-|------|------|------|
-| GET | `/health` | 健康检查 |
-| GET | `/docs` | API 文档 |
-| POST | `/contracts/audit` | 合同审计 |
-| POST | `/regulations/import` | 导入法规 |
-| GET | `/regulations/import/{job_id}` | 查询导入任务 |
-| GET | `/regulations` | 获取法规列表 |
-| GET | `/regulations/{id}/articles` | 获取法规条款 |
-| POST | `/regulations/search` | 检索法规 |
-| POST | `/embedding/compute` | 计算向量 |
-| GET | `/api/admin/llm-config` | 获取 LLM 配置 |
-| PUT | `/api/admin/llm-config` | 更新 LLM 配置 |
+| 方法   | 路径                             | 描述        |
+| ---- | ------------------------------ | --------- |
+| GET  | `/health`                      | 健康检查      |
+| GET  | `/docs`                        | API 文档    |
+| POST | `/contracts/audit`             | 合同审计      |
+| POST | `/regulations/import`          | 导入法规      |
+| GET  | `/regulations/import/{job_id}` | 查询导入任务    |
+| GET  | `/regulations`                 | 获取法规列表    |
+| GET  | `/regulations/{id}/articles`   | 获取法规条款    |
+| POST | `/regulations/search`          | 检索法规      |
+| POST | `/embedding/compute`           | 计算向量      |
+| GET  | `/api/admin/llm-config`        | 获取 LLM 配置 |
+| PUT  | `/api/admin/llm-config`        | 更新 LLM 配置 |
 
 ## 配置说明
 
@@ -253,43 +257,41 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 ### 配置项说明
 
-| 配置项 | 类型 | 说明 |
-|--------|------|------|
-| `data_dir` | string | 数据目录路径 |
-| `db_path` | string | SQLite 数据库路径 |
-| `files_dir` | string | 上传文件存储目录 |
-| `static_dir` | string | 前端静态资源目录 |
-| `default_language` | string | 默认语言 (zh/en) |
-| `ocr_enabled` | boolean | 是否启用 OCR 回退 |
-| `ocr_languages` | string | OCR 语言包配置 |
-| `ocr_min_text_length` | int | 触发 OCR 的文本长度阈值 |
-| `ocr_dpi` | int | OCR 转换 DPI |
-| `ocr_engine` | string | OCR 引擎（auto/tesseract/其他） |
-| `ocr_engine_order` | array | OCR 引擎优先级 |
-| `llm_config` | object | LLM 参数配置 |
-| `reranker_enabled` | boolean | 是否启用重排 |
-| `reranker_model_path` | string | 默认重排模型路径 |
-| `reranker_profiles` | object | 重排模型多语言路径 |
-| `rerank_batch_size` | int | 重排 batch 大小 |
-| `rerank_max_len` | int | 重排最大长度 |
-| `rerank_fallback` | boolean | 重排失败是否回退 |
-| `rerank_score_threshold` | float | 重排分数阈值 |
-| `embedding_profiles` | object | 向量模型配置 |
-| `log_dir` | string | 日志目录 |
-| `log_max_bytes` | int | 单文件最大大小 |
-| `log_backup_count` | int | 日志备份数量 |
-| `log_level` | string | 日志级别 |
-| `cors_allow_origins` | array | 允许的跨域来源 |
+| 配置项                      | 类型      | 说明                        |
+| ------------------------ | ------- | ------------------------- |
+| `data_dir`               | string  | 数据目录路径                    |
+| `db_path`                | string  | SQLite 数据库路径              |
+| `files_dir`              | string  | 上传文件存储目录                  |
+| `static_dir`             | string  | 前端静态资源目录                  |
+| `default_language`       | string  | 默认语言 (zh/en)              |
+| `ocr_enabled`            | boolean | 是否启用 OCR 回退               |
+| `ocr_languages`          | string  | OCR 语言包配置                 |
+| `ocr_min_text_length`    | int     | 触发 OCR 的文本长度阈值            |
+| `ocr_dpi`                | int     | OCR 转换 DPI                |
+| `ocr_engine`             | string  | OCR 引擎（auto/tesseract/其他） |
+| `ocr_engine_order`       | array   | OCR 引擎优先级                 |
+| `llm_config`             | object  | LLM 参数配置                  |
+| `reranker_enabled`       | boolean | 是否启用重排                    |
+| `reranker_model_path`    | string  | 默认重排模型路径                  |
+| `reranker_profiles`      | object  | 重排模型多语言路径                 |
+| `rerank_batch_size`      | int     | 重排 batch 大小               |
+| `rerank_max_len`         | int     | 重排最大长度                    |
+| `rerank_fallback`        | boolean | 重排失败是否回退                  |
+| `rerank_score_threshold` | float   | 重排分数阈值                    |
+| `embedding_profiles`     | object  | 向量模型配置                    |
+| `log_dir`                | string  | 日志目录                      |
+| `log_max_bytes`          | int     | 单文件最大大小                   |
+| `log_backup_count`       | int     | 日志备份数量                    |
+| `log_level`              | string  | 日志级别                      |
+| `cors_allow_origins`     | array   | 允许的跨域来源                   |
 
 ### 环境变量
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| `APP_PORT` | 8000 | 服务端口 |
-| `APP_CONFIG` | config.json | 配置文件路径 |
-| `APP_PORT_AUTO_SWITCH` | 1 | 端口冲突时自动漂移 |
-
-
+| 变量                     | 默认值         | 说明        |
+| ---------------------- | ----------- | --------- |
+| `APP_PORT`             | 8000        | 服务端口      |
+| `APP_CONFIG`           | config.json | 配置文件路径    |
+| `APP_PORT_AUTO_SWITCH` | 1           | 端口冲突时自动漂移 |
 
 ### 运行测试
 
@@ -314,13 +316,3 @@ python app/download_embedding_model.py
 ## 许可证
 
 MIT License
-
-## 贡献指南
-
-欢迎提交 Issue 和 Pull Request！
-
-## 致谢
-
-- [BGE](https://github.com/FlagOpen/FlagEmbedding) - 向量模型
-- [FastAPI](https://fastapi.tiangolo.com/) - Web 框架
-- [React](https://react.dev/) - UI 框架
