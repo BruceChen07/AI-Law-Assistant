@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
@@ -46,6 +46,8 @@ export default function Admin({ onBack, lang }) {
   const [regSearchError, setRegSearchError] = useState("")
   const [regShowAdvanced, setRegShowAdvanced] = useState(false)
   
+  const fileInputRef = useRef(null)
+
   const user = getCurrentUser()
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
@@ -604,16 +606,21 @@ export default function Admin({ onBack, lang }) {
             <input placeholder={lang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={regUpload.expiry_date} onChange={e => setRegUpload({ ...regUpload, expiry_date: e.target.value })} />
             <input placeholder={lang === "zh" ? "地区" : "Region"} value={regUpload.region} onChange={e => setRegUpload({ ...regUpload, region: e.target.value })} />
             <input placeholder={lang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={regUpload.industry} onChange={e => setRegUpload({ ...regUpload, industry: e.target.value })} />
-            <div className="row">
+            <div className="row" style={{ alignItems: "center" }}>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".docx,.pdf"
+                style={{ display: "none" }}
                 onChange={e => {
                   const f = e.target.files?.[0] || null
                   setRegFile(f)
                   setRegFileError("")
                 }}
               />
+              <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{ marginRight: '12px' }}>
+                {t.chooseFile}
+              </button>
               <span className="meta">{regFile ? regFile.name : t.noFileChosen}</span>
             </div>
             {regFileError && <span className="error">{regFileError}</span>}
