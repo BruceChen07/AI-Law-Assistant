@@ -176,6 +176,19 @@ def update_user_role(user_id: str, role: str) -> bool:
     return affected > 0
 
 
+def delete_user(user_id: str) -> bool:
+    from app.core.config import get_config
+    
+    cfg = get_config()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    return affected > 0
+
+
 def log_audit(user_id: str, action: str, resource_type: str = None, resource_id: str = None, 
               ip_address: str = None, user_agent: str = None, details: str = None):
     from app.core.config import get_config

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
@@ -283,6 +283,16 @@ export default function Admin({ onBack, lang }) {
   const handleRoleChange = async (userId, newRole) => {
     try {
       await adminUpdateUserRole(userId, newRole)
+      loadUsers()
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
+  const handleUserDelete = async (userId) => {
+    try {
+      await adminDeleteUser(userId)
+      setDeleteConfirm(null)
       loadUsers()
     } catch (err) {
       alert(err.message)
@@ -586,7 +596,19 @@ export default function Admin({ onBack, lang }) {
                       </select>
                     </td>
                     <td>{formatDate(u.created_at)}</td>
-                    <td>{u.role}</td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px", alignItems: "center", justifyContent: "space-between" }}>
+                        <span>{u.role}</span>
+                        {deleteConfirm === `user_${u.id}` ? (
+                          <span style={{ display: "flex", gap: "4px" }}>
+                            <button onClick={() => handleUserDelete(u.id)}>{t.confirm}</button>
+                            <button onClick={() => setDeleteConfirm(null)}>{t.cancel}</button>
+                          </span>
+                        ) : (
+                          <button onClick={() => setDeleteConfirm(`user_${u.id}`)}>{t.delete}</button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

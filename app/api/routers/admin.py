@@ -393,6 +393,28 @@ def update_role(
     return {"message": f"Role updated to {role}"}
 
 
+@router.delete("/users/{user_id}")
+def delete_user_endpoint(
+    user_id: str,
+    request: Request,
+    current_user: dict = Depends(require_admin)
+):
+    from app.core.auth import delete_user
+
+    success = delete_user(user_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"], "delete", "user", user_id,
+        ip_address, user_agent, "Deleted user"
+    )
+
+    return {"message": "User deleted successfully", "deleted_id": user_id}
+
+
 # ============ Statistics ============
 @router.get("/stats", response_model=StatsResponse)
 def get_stats(current_user: dict = Depends(require_admin)):

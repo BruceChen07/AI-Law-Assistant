@@ -27,6 +27,13 @@ export async function adminUpdateUserRole(userId, role) {
   })
 }
 
+export async function adminDeleteUser(userId) {
+  return requestJson(`${API_BASE}/api/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function adminGetStats() {
   return requestJson(`${API_BASE}/api/admin/stats`, {
     headers: { ...getAuthHeaders() }
