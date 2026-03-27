@@ -91,14 +91,22 @@ class MemoryLifecycleManager:
 
     def split_contract(self, text: str) -> List[Clause]:
         raw = split_contract_clauses(str(text or ""))
+        english_mode = self._is_english_text(text)
 
-        def _is_major_heading(path: str) -> bool:
+        def _is_major_heading(path: str, line: str) -> bool:
             p = str(path or "").strip()
+            s = str(line or "").strip()
             if not p or p.startswith("段"):
+                if re.match(r"^(?:article|section|chapter|part)\s+[0-9ivxlcdm]+(?:\.[0-9]+)*[a-z]?$", s, re.I):
+                    return True
                 return False
             if re.match(r"^[一二三四五六七八九十百千]+、$", p):
                 return True
             if re.match(r"^第[一二三四五六七八九十百千0-9]+[章节编部分篇]$", p):
+                return True
+            if re.match(r"^(?:article|section|chapter|part)\s+[0-9ivxlcdm]+(?:\.[0-9]+)*[a-z]?$", p, re.I):
+                return True
+            if re.match(r"^[ivxlcdm]+[.)]$", p, re.I):
                 return True
             return False
 
@@ -113,9 +121,17 @@ class MemoryLifecycleManager:
                 return True
             if s.startswith("、"):
                 return True
+            if re.match(r"^[\(\[]?[a-z][\)\].、]\s*", s, re.I):
+                return True
+            if re.match(r"^\(?[ivxlcdm]{1,6}[\)\].、]\s*", s, re.I):
+                return True
+            if re.match(r"^(?:article|section|clause)\s+[0-9ivxlcdm]+(?:\.[0-9]+)*[a-z]?\b", s, re.I):
+                return True
             if re.match(r"^[0-9]{1,3}(?:\.[0-9]{1,3}){1,3}$", p):
                 return True
             if re.match(r"^[0-9]{1,3}$", p):
+                return True
+            if re.match(r"^[ivxlcdm]+$", p, re.I):
                 return True
             return False
 
@@ -139,7 +155,8 @@ class MemoryLifecycleManager:
             if include_intro and section_intro:
                 body_lines.extend(section_intro)
             body_lines.extend(sub_lines)
-            out.append(Clause(clause_id=cid, title=title, text="\n".join([x for x in body_lines if x]).strip()))
+            out.append(Clause(clause_id=cid, title=title, text="\n".join(
+                [x for x in body_lines if x]).strip()))
             sub_start = 0
             sub_lines = []
 
@@ -151,9 +168,11 @@ class MemoryLifecycleManager:
                 _flush_sub(include_intro=bool(section_intro))
             elif section_title:
                 cid = f"c{max(1, int(section_start or 1))}"
-                body = "\n".join([x for x in [section_title, *section_intro] if x]).strip()
+                body = "\n".join(
+                    [x for x in [section_title, *section_intro] if x]).strip()
                 if body:
-                    out.append(Clause(clause_id=cid, title=section_title, text=body))
+                    out.append(
+                        Clause(clause_id=cid, title=section_title, text=body))
             section_title = ""
             section_start = 0
             section_intro = []
@@ -165,9 +184,10 @@ class MemoryLifecycleManager:
             if not clause_text:
                 continue
             clause_path = str(item.get("clause_path") or "").strip()
-            if _is_major_heading(clause_path):
+            if _is_major_heading(clause_path, clause_text):
                 if preamble_lines:
-                    out.append(Clause(clause_id=f"c{preamble_start}", title="导言", text="\n".join(preamble_lines).strip()))
+                    out.append(Clause(clause_id=f"c{preamble_start}", title=("Preamble" if english_mode else "导言"), text="\n".join(
+                        preamble_lines).strip()))
                     preamble_lines = []
                 _flush_section()
                 section_start = raw_idx
@@ -189,7 +209,8 @@ class MemoryLifecycleManager:
                 section_intro.append(clause_text)
 
         if preamble_lines:
-            out.append(Clause(clause_id=f"c{preamble_start}", title="导言", text="\n".join(preamble_lines).strip()))
+            out.append(Clause(clause_id=f"c{preamble_start}", title=("Preamble" if english_mode else "导言"), text="\n".join(
+                preamble_lines).strip()))
         _flush_section()
 
         if out:
@@ -251,7 +272,15 @@ class MemoryLifecycleManager:
                     tokens, self.cfg.flush_soft_threshold)
         context = "\n".join(x.get("content", "")
                             for x in self.short.export()[-10:])
-        prompt = f"请将以下上下文压缩为长期记忆，输出Markdown要点，仅保留客观事实、条款定位和关键税务要素，不输出风险结论：\n\n{context}"
+        if self._is_english_text(context):
+            prompt = (
+                "Compress the following context into long-term memory. "
+                "Output concise Markdown bullet points, keep only objective facts, clause locations, and key tax elements, "
+                "and do not output risk conclusions:\n\n"
+                f"{context}"
+            )
+        else:
+            prompt = f"请将以下上下文压缩为长期记忆，输出Markdown要点，仅保留客观事实、条款定位和关键税务要素，不输出风险结论：\n\n{context}"
         summary = await asyncio.wait_for(llm_flush_callback(prompt), timeout=self.cfg.llm_timeout_sec)
         await self.append_long_memory("Silent Flush", summary)
         self.short.clear()
@@ -307,6 +336,14 @@ class MemoryLifecycleManager:
             return s
         return s[:limit]
 
+    def _is_english_text(self, text: str) -> bool:
+        s = str(text or "")
+        latin = len(re.findall(r"[A-Za-z]", s))
+        cjk = len(re.findall(r"[\u4e00-\u9fff]", s))
+        if latin <= 0:
+            return False
+        return latin >= max(30, int(cjk * 1.2))
+
     def _fact_slot_summary(self, clause_text: str) -> Dict[str, Any]:
         text = str(clause_text or "")
         lowered = text.lower()
@@ -354,15 +391,18 @@ class MemoryLifecycleManager:
             best_score = None
             for i in range(len(items) - 1):
                 left, right = items[i], items[i + 1]
-                same_title = 0 if str(left.title or "") == str(right.title or "") else 1
-                pair_len = len(str(left.text or "")) + len(str(right.text or ""))
+                same_title = 0 if str(left.title or "") == str(
+                    right.title or "") else 1
+                pair_len = len(str(left.text or "")) + \
+                    len(str(right.text or ""))
                 score = (same_title, pair_len)
                 if best_score is None or score < best_score:
                     best_score = score
                     best_idx = i
             l = items[best_idx]
             r = items[best_idx + 1]
-            merged_title = l.title if str(l.title or "") == str(r.title or "") else f"{l.title} / {r.title}"
+            merged_title = l.title if str(l.title or "") == str(
+                r.title or "") else f"{l.title} / {r.title}"
             merged = Clause(
                 clause_id=str(l.clause_id or ""),
                 title=str(merged_title or ""),
@@ -379,7 +419,8 @@ class MemoryLifecycleManager:
         legal_catalog: Dict[str, List[str]],
     ) -> Dict[str, Any]:
         raw_clauses = self.split_contract(contract_text)
-        clauses = self._compact_clauses_for_budget(raw_clauses, self.cfg.max_rounds)
+        clauses = self._compact_clauses_for_budget(
+            raw_clauses, self.cfg.max_rounds)
         logger.info("memory_audit_start clauses=%s compacted=%s short_limit=%s top_k=%s", len(
             raw_clauses), max(0, len(raw_clauses) - len(clauses)), self.cfg.short_memory_token_limit, self.cfg.retrieval_top_k)
         try:

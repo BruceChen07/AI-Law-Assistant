@@ -56,6 +56,7 @@ def test_analyze_contract_document_end_to_end(tmp_path):
     )
     result = analyze_contract_document(cfg, contract_id, operator_id="u1")
     assert result["parse_status"] == "done"
+    assert result["language"] == "zh"
     assert result["clause_count"] >= 2
     assert count_contract_clauses(cfg, contract_id) >= 2
     clauses = list_contract_clauses(cfg, contract_id, limit=20)

@@ -1,8 +1,8 @@
 """
 Risk Suppression.
-职责: 识别缺失类风险（未明确/未提及等），并通过跨条款反证或全局涉税上下文进行风险抑制。
-输入输出: 接收单一风险项和全量条款，返回是否应抑制该风险及抑制命中详情。
-异常场景: 风险结构异常或缺失上下文时，默认不抑制。
+Responsibilities: Responsible for detecting missing-style risks (e.g., not specified/mentioned mentioned) and suppressing them.
+Input/Output: Accepts a single risk item and all contract clauses, and returns whether to suppress the risk and the suppression hit details.
+Exception Handling: Logs error messages if the risk structure is abnormal or the context is missing, and suppresses the risk by default.
 """
 import structlog
 from typing import Dict, Any, List, Set, Tuple, Optional
@@ -29,13 +29,15 @@ FALLBACK_TAX_RATE_KEYWORDS = [
     "税率", "税点", "免税", "vat", "tax rate"
 ]
 
+
 def contains_any(text: str, keywords: List[str]) -> bool:
-    """检查文本是否包含关键词列表中的任一词。"""
+    """Check if the text contains any of the keywords."""
     t = str(text or "").lower()
     return any(str(k or "").lower() in t for k in keywords)
 
+
 def is_missing_style_risk(risk: Dict[str, Any]) -> bool:
-    """判定风险是否属于“缺失类”。"""
+    """Check if the risk is a missing-style risk."""
     merged = " ".join([
         str(risk.get("issue", "") or ""),
         str(risk.get("suggestion", "") or ""),
@@ -43,8 +45,9 @@ def is_missing_style_risk(risk: Dict[str, Any]) -> bool:
     ])
     return contains_any(merged, MISSING_RISK_MARKERS)
 
+
 def detect_risk_topics(risk: Dict[str, Any]) -> Set[str]:
-    """检测风险关联的涉税主题。"""
+    """Detect tax topics associated with a missing-style risk."""
     merged = " ".join([
         str(risk.get("issue", "") or ""),
         str(risk.get("suggestion", "") or ""),
@@ -56,12 +59,13 @@ def detect_risk_topics(risk: Dict[str, Any]) -> Set[str]:
             topics.add(topic)
     return topics
 
+
 def find_counter_evidence_clause(
     topics: Set[str],
     clauses: List[Dict[str, Any]],
     skip_clause_id: str = "",
 ) -> Tuple[bool, Dict[str, Any]]:
-    """在全部条款中查找能推翻“缺失类风险”的反证条款。"""
+    """Find a clause that counters a "missing-style risk" in all clauses."""
     if not topics or not clauses:
         return False, {}
     for clause in clauses:
@@ -84,12 +88,13 @@ def find_counter_evidence_clause(
                 }
     return False, {}
 
+
 def find_counter_evidence_in_global_context(
     topics: Set[str],
     global_tax_context: Dict[str, Any],
     skip_clause_id: str = "",
 ) -> Tuple[bool, Dict[str, Any]]:
-    """在全局涉税上下文中查找反证。"""
+    """Find counter evidence in the global tax context."""
     if not topics or not isinstance(global_tax_context, dict):
         return False, {}
     for topic in topics:
@@ -111,27 +116,31 @@ def find_counter_evidence_in_global_context(
             }
     return False, {}
 
+
 def should_suppress_missing_risk(
     risk: Dict[str, Any],
     clauses: List[Dict[str, Any]],
     current_clause_id: str = "",
     global_tax_context: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Dict[str, Any]]:
-    """判断是否应抑制某条缺失类风险。"""
+    """Determine whether to suppress a missing-style risk."""
     if not isinstance(risk, dict) or not is_missing_style_risk(risk):
         return False, {}
     topics = detect_risk_topics(risk)
-    found, hit = find_counter_evidence_in_global_context(topics, global_tax_context or {}, current_clause_id)
+    found, hit = find_counter_evidence_in_global_context(
+        topics, global_tax_context or {}, current_clause_id)
     if found:
         return True, hit
-    found, hit = find_counter_evidence_clause(topics, clauses, current_clause_id)
+    found, hit = find_counter_evidence_clause(
+        topics, clauses, current_clause_id)
     if not found:
         return False, {}
     hit["source"] = "clause_scan"
     return True, hit
 
+
 def build_global_tax_context(clauses: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """构建合同全局的涉税事实画像。"""
+    """Build a global tax context for the contract."""
     context = {
         "invoice": [],
         "invoice_timing": [],
@@ -166,8 +175,9 @@ def build_global_tax_context(clauses: List[Dict[str, Any]]) -> Dict[str, Any]:
             )
     return context
 
+
 def format_global_tax_context(context: Dict[str, Any], per_topic_limit: int = 3) -> str:
-    """将全局涉税画像格式化为 Prompt 可用的文本。"""
+    """Format a global tax context as a Prompt usable text."""
     if not isinstance(context, dict):
         return ""
     lines: List[str] = []
@@ -182,12 +192,13 @@ def format_global_tax_context(context: Dict[str, Any], per_topic_limit: int = 3)
             lines.append(f"- 【{cpath}】 | {quote}")
     return "\n".join(lines)
 
+
 def reconcile_cross_clause_conflicts(
     risks: List[Dict[str, Any]],
     clauses: List[Dict[str, Any]],
     global_tax_context: Dict[str, Any],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """协调跨条款冲突，二次移除在其他条款中有说明的假阳性风险。"""
+    """Reconcile cross-clause conflicts."""
     if not risks:
         return risks, []
     kept: List[Dict[str, Any]] = []
@@ -195,7 +206,8 @@ def reconcile_cross_clause_conflicts(
     for risk in risks:
         if not isinstance(risk, dict):
             continue
-        loc = risk.get("location") if isinstance(risk.get("location"), dict) else {}
+        loc = risk.get("location") if isinstance(
+            risk.get("location"), dict) else {}
         cid = str(loc.get("clause_id") or "")
         suppress, hit = should_suppress_missing_risk(
             risk,
@@ -225,7 +237,8 @@ def detect_zero_risk_fallback_hit(
     has_tax_rate = False
     has_service = False
     best_hit: Dict[str, Any] = {}
-    tax_items = global_tax_context.get("tax_rate") if isinstance(global_tax_context, dict) else []
+    tax_items = global_tax_context.get("tax_rate") if isinstance(
+        global_tax_context, dict) else []
     if isinstance(tax_items, list) and tax_items:
         has_tax_rate = True
         first = tax_items[0] if isinstance(tax_items[0], dict) else {}

@@ -46,8 +46,10 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
         cfg,
         contract_id,
         [
-            {"clause_path": "1.1", "page_no": 1, "paragraph_no": "1", "clause_text": "税率按9%执行", "entities_json": "{}"},
-            {"clause_path": "1.2", "page_no": 1, "paragraph_no": "2", "clause_text": "双方按法规办理", "entities_json": "{}"},
+            {"clause_path": "1.1", "page_no": 1, "paragraph_no": "1",
+                "clause_text": "税率按9%执行", "entities_json": "{}"},
+            {"clause_path": "1.2", "page_no": 1, "paragraph_no": "2",
+                "clause_text": "双方按法规办理", "entities_json": "{}"},
         ],
         created_by="u1",
     )
@@ -91,7 +93,8 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
     conn.commit()
     conn.close()
 
-    match_contract_against_rules(cfg, contract_id, operator_id="u1", top_k_per_clause=1)
+    match_contract_against_rules(
+        cfg, contract_id, operator_id="u1", top_k_per_clause=1)
     gen = generate_issues_from_matches(cfg, contract_id, operator_id="u1")
     assert gen["total"] == 2
     assert gen["high"] >= 1

@@ -24,7 +24,8 @@ def _read_first_file(dir_path: str, suffix: str, stem: Optional[str] = None) -> 
     root = Path(dir_path)
     preferred = []
     if stem:
-        preferred = sorted([p for p in root.rglob(f"{stem}{suffix}") if p.is_file()])
+        preferred = sorted(
+            [p for p in root.rglob(f"{stem}{suffix}") if p.is_file()])
         if preferred:
             return str(preferred[0])
     files = sorted([p for p in root.rglob(f"*{suffix}") if p.is_file()])
@@ -73,11 +74,13 @@ def _run_mineru(path: str, out_dir: str) -> Dict[str, Any]:
         cmd += ["-f", "false"]
     if not table:
         cmd += ["-t", "false"]
-    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+    subprocess.run(cmd, check=True, capture_output=True,
+                   text=True, timeout=timeout)
     stem = os.path.splitext(os.path.basename(path))[0]
     md_path = _read_first_file(out_dir, ".md", stem=stem)
     middle_path = _read_first_file(out_dir, "_middle.json", stem=stem)
-    content_list_path = _read_first_file(out_dir, "_content_list.json", stem=stem)
+    content_list_path = _read_first_file(
+        out_dir, "_content_list.json", stem=stem)
     model_path = _read_first_file(out_dir, "_model.json", stem=stem)
     text = ""
     if md_path and os.path.exists(md_path):
@@ -113,7 +116,8 @@ def run_mineru_extract(path: str, output_dir: str = "") -> Dict[str, Any]:
         }
         for key, src in [("middle_path", middle_path), ("content_list_path", content_list_path), ("md_path", md_path), ("model_path", model_path)]:
             if src and os.path.exists(src):
-                dst = tempfile.mktemp(prefix="mineru_artifact_", suffix=os.path.splitext(src)[1])
+                dst = tempfile.mktemp(
+                    prefix="mineru_artifact_", suffix=os.path.splitext(src)[1])
                 with open(src, "rb") as rf:
                     blob = rf.read()
                 with open(dst, "wb") as wf:

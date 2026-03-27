@@ -17,7 +17,8 @@ class StubEngine(OCREngine):
 
 def test_select_engine_order():
     cfg = {"ocr_engine": "auto", "ocr_engine_order": ["a", "b"]}
-    engines = [StubEngine("a", available=False), StubEngine("b", available=True)]
+    engines = [StubEngine("a", available=False),
+               StubEngine("b", available=True)]
     manager = OCREngineManager(cfg, engines=engines)
     assert manager.select_engine("pdf") == "b"
 

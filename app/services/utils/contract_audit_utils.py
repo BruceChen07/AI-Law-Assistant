@@ -1,8 +1,8 @@
 """
 Contract Audit Utilities.
-职责: 提供合同审计过程中的纯文本处理、正则匹配、文章编号归一化等无状态工具函数。
-输入输出: 接收字符串或基础数据类型，返回处理后的字符串。
-异常场景: 输入为空或类型不匹配时，通常返回空字符串或进行安全转换，不抛出异常。
+Responsibilities: Provides stateless utility functions for plain text processing, regex matching, and article number normalization during the contract audit process.
+Input/Output: Accepts strings or basic data types, and returns processed strings.
+Exception Handling: When input is empty or type mismatches occur, typically returns an empty string or performs a safe conversion without throwing exceptions.
 """
 import re
 import structlog

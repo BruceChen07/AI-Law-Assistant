@@ -6,7 +6,8 @@ import jwt
 from passlib.context import CryptContext
 from app.core.database import get_conn
 
-SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "your-secret-key-change-in-production")
+SECRET_KEY = os.environ.get(
+    "JWT_SECRET_KEY", "your-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
@@ -66,11 +67,11 @@ def require_admin(token: str) -> dict:
 
 def create_user(username: str, email: str, password: str, role: str = "user") -> str:
     from app.core.config import get_config
-    
+
     user_id = str(uuid.uuid4())
     password_hash = hash_password(password)
     now = datetime.utcnow().isoformat()
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -89,7 +90,7 @@ def create_user(username: str, email: str, password: str, role: str = "user") ->
 
 def get_user_by_username(username: str) -> Optional[dict]:
     from app.core.config import get_config
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -101,11 +102,12 @@ def get_user_by_username(username: str) -> Optional[dict]:
 
 def get_user_by_id(user_id: str) -> Optional[dict]:
     from app.core.config import get_config
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
-    cur.execute("SELECT id, username, email, role, created_at, is_active FROM users WHERE id = ?", (user_id,))
+    cur.execute(
+        "SELECT id, username, email, role, created_at, is_active FROM users WHERE id = ?", (user_id,))
     row = cur.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -122,11 +124,12 @@ def authenticate_user(username: str, password: str) -> Optional[dict]:
 
 def create_session(user_id: str, token: str, ip_address: str = None, user_agent: str = None):
     from app.core.config import get_config
-    
+
     session_id = str(uuid.uuid4())
-    expires_at = (datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).isoformat()
+    expires_at = (datetime.utcnow() +
+                  timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).isoformat()
     now = datetime.utcnow().isoformat()
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -141,7 +144,7 @@ def create_session(user_id: str, token: str, ip_address: str = None, user_agent:
 
 def delete_session(token: str):
     from app.core.config import get_config
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -152,11 +155,12 @@ def delete_session(token: str):
 
 def get_all_users() -> list:
     from app.core.config import get_config
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
-    cur.execute("SELECT id, username, email, role, created_at, is_active FROM users ORDER BY created_at DESC")
+    cur.execute(
+        "SELECT id, username, email, role, created_at, is_active FROM users ORDER BY created_at DESC")
     rows = cur.fetchall()
     conn.close()
     return [dict(r) for r in rows]
@@ -164,11 +168,11 @@ def get_all_users() -> list:
 
 def update_user_role(user_id: str, role: str) -> bool:
     from app.core.config import get_config
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
-    cur.execute("UPDATE users SET role = ?, updated_at = ? WHERE id = ?", 
+    cur.execute("UPDATE users SET role = ?, updated_at = ? WHERE id = ?",
                 (role, datetime.utcnow().isoformat(), user_id))
     conn.commit()
     affected = cur.rowcount
@@ -176,13 +180,13 @@ def update_user_role(user_id: str, role: str) -> bool:
     return affected > 0
 
 
-def log_audit(user_id: str, action: str, resource_type: str = None, resource_id: str = None, 
+def log_audit(user_id: str, action: str, resource_type: str = None, resource_id: str = None,
               ip_address: str = None, user_agent: str = None, details: str = None):
     from app.core.config import get_config
-    
+
     log_id = str(uuid.uuid4())
     now = datetime.utcnow().isoformat()
-    
+
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()

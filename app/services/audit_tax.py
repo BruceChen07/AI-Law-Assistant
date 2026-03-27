@@ -1,5 +1,5 @@
 from typing import Dict, Any, List
-from app.services.audit_utils import _safe_int, _normalize_risk_level
+from app.services.audit_utils import _safe_int, _normalize_risk_level, _normalize_lang
 
 TAX_KEYWORDS = [
     "税",
@@ -34,7 +34,7 @@ def _tax_relevance_score(item: Dict[str, Any]) -> int:
     return sum(1 for kw in TAX_KEYWORDS if kw.lower() in text)
 
 def _tax_query_prefix(lang: str) -> str:
-    if lang.lower() == "en":
+    if _normalize_lang(lang, default="zh") == "en":
         return "tax compliance tax law vat withholding invoice"
     return "财税 税务 税收 增值税 所得税 发票 代扣代缴"
 
@@ -83,6 +83,7 @@ def _filter_tax_audit_result(
     citations: List[Any],
     lang: str
 ) -> Dict[str, Any]:
+    norm_lang = _normalize_lang(lang, default="zh")
     safe_citations = [c for c in citations if isinstance(c, dict)]
     citation_tax_map = _build_tax_citation_map(safe_citations)
     tax_risks = [
@@ -119,7 +120,7 @@ def _filter_tax_audit_result(
         risk_summary[_normalize_risk_level(r.get("level"))] += 1
     tax_summary = summary
     if not _is_tax_related_text(summary):
-        if lang.lower() == "en":
+        if norm_lang == "en":
             tax_summary = "No explicit tax-related risks identified. Non-tax items are filtered out."
         else:
             tax_summary = "未识别到明确涉税风险，非税务内容已过滤。"

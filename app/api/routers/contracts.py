@@ -12,6 +12,7 @@ from app.services.crud import insert_document, insert_contract_audit, get_docume
 from app.services.contract_audit import audit_contract
 from app.services.contract_preview_assets import build_contract_preview_manifest, find_preview_page
 from app.services.docx_renderer import render_tax_audit_docx
+from app.services.audit_utils import _normalize_lang
 from app.core.utils import extract_text_with_config
 from app.core.config import get_config
 
@@ -73,6 +74,7 @@ def build_router(cfg, llm, embedder=None, reranker=None):
         per_chunk_top_k: Optional[str] = Form(None),
         current_user: dict = Depends(get_current_user),
     ):
+        language = _normalize_lang(language, default="zh")
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".docx", ".pdf"]:
             raise HTTPException(
@@ -357,8 +359,7 @@ def build_router(cfg, llm, embedder=None, reranker=None):
             audit.get("risks"), list) else []
         citations = audit.get("citations") if isinstance(
             audit.get("citations"), list) else []
-        citation_map = {str(c.get("citation_id") or "")
-                            : c for c in citations if isinstance(c, dict)}
+        citation_map = {str(c.get("citation_id") or "")                        : c for c in citations if isinstance(c, dict)}
         risk_summary = {"high": 0, "medium": 0, "low": 0}
         risk_items = []
         evidence_items = []
@@ -435,14 +436,16 @@ def build_router(cfg, llm, embedder=None, reranker=None):
                 json.dump(report, f, ensure_ascii=False, indent=2)
             media_type = "application/json"
         else:
-            export_mode = str((payload or {}).get("export_mode") or "report").lower()
+            export_mode = str((payload or {}).get(
+                "export_mode") or "report").lower()
             if export_mode == "comments":
                 # Export original contract with comments (M2)
                 from app.services.docx_modifier import insert_risk_comments
                 import shutil
                 original_file = str(doc.get("file_path") or "")
                 if not original_file or not os.path.exists(original_file):
-                    raise HTTPException(status_code=404, detail="original contract file not found")
+                    raise HTTPException(
+                        status_code=404, detail="original contract file not found")
                 # Insert comments into the original file
                 insert_risk_comments(original_file, output_path, risk_items)
                 filename = f"contract_with_comments_{document_id}.docx"
@@ -451,7 +454,7 @@ def build_router(cfg, llm, embedder=None, reranker=None):
                 render_tax_audit_docx(
                     report, output_path, template_version=template_version, locale=locale, brand=brand)
                 filename = f"contract_audit_report_{document_id}.docx"
-            
+
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         return FileResponse(output_path, media_type=media_type, filename=filename)
 

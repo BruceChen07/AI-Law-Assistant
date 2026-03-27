@@ -17,7 +17,8 @@ def process_import(cfg, embedder, job_id, file_path, title, doc_no, issuer, reg_
                 cfg, title, doc_no, issuer, reg_type, status)
         version_id = create_version(
             cfg, regulation_id, effective_date, expiry_date, region, industry, file_path)
-        insert_articles(cfg, version_id, articles, language=language, embedder=embedder)
+        insert_articles(cfg, version_id, articles,
+                        language=language, embedder=embedder)
         logger.info("import_embedding_lang job_id=%s language=%s",
                     job_id, language)
         upsert_job(cfg, job_id, "done", None, datetime.utcnow().isoformat())

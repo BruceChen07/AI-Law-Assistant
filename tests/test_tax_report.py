@@ -102,6 +102,7 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
     generate_issues_from_matches(cfg, contract_id, operator_id="u1")
     report = build_tax_audit_report(cfg, contract_id)
     assert report["contract_id"] == contract_id
+    assert report["language"] == "zh"
     assert report["risk_summary"]["total"] == 2
     assert len(report["risk_items"]) == 2
 

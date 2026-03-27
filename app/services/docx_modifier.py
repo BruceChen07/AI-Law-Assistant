@@ -219,11 +219,11 @@ def insert_risk_comments(input_path: str, output_path: str, risks: list):
                     if not p_text:
                         continue
                     norm_p_text = "".join(p_text.split())
-                    
+
                     if norm_evidence and norm_evidence in norm_p_text:
                         target_p = p
                         break
-                        
+
                     if norm_evidence and norm_p_text:
                         score = SequenceMatcher(
                             None, norm_evidence[:100], norm_p_text[:100]).ratio()

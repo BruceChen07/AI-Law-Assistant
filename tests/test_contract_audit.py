@@ -31,9 +31,11 @@ def test_should_suppress_missing_risk_when_counter_clause_exists():
     }
     clauses = [
         {"clause_id": "c2", "clause_text": "甲方联系人负责发送电子发票等事宜"},
-        {"clause_id": "c3", "clause_text": "乙方开具增值税普通发票，税率按国家政策执行", "clause_path": "三、合同价款及支付", "page_no": 2, "paragraph_no": "1"},
+        {"clause_id": "c3", "clause_text": "乙方开具增值税普通发票，税率按国家政策执行",
+            "clause_path": "三、合同价款及支付", "page_no": 2, "paragraph_no": "1"},
     ]
-    suppress, hit = _should_suppress_missing_risk(risk, clauses, current_clause_id="c2")
+    suppress, hit = _should_suppress_missing_risk(
+        risk, clauses, current_clause_id="c2")
     assert suppress is True
     assert hit["clause_id"] == "c3"
 
@@ -48,7 +50,8 @@ def test_should_not_suppress_missing_risk_without_counter_clause():
         {"clause_id": "c2", "clause_text": "甲方联系人负责发送电子发票等事宜"},
         {"clause_id": "c4", "clause_text": "双方应当诚信履约"},
     ]
-    suppress, hit = _should_suppress_missing_risk(risk, clauses, current_clause_id="c2")
+    suppress, hit = _should_suppress_missing_risk(
+        risk, clauses, current_clause_id="c2")
     assert suppress is False
     assert hit == {}
 
@@ -56,7 +59,8 @@ def test_should_not_suppress_missing_risk_without_counter_clause():
 def test_should_suppress_missing_risk_by_global_context_first():
     clauses = [
         {"clause_id": "c2", "clause_text": "甲方联系人负责发送电子发票等事宜"},
-        {"clause_id": "c3", "clause_text": "乙方开具增值税普通发票", "clause_path": "三、合同价款及支付", "page_no": 2, "paragraph_no": "1"},
+        {"clause_id": "c3", "clause_text": "乙方开具增值税普通发票",
+            "clause_path": "三、合同价款及支付", "page_no": 2, "paragraph_no": "1"},
     ]
     global_ctx = _build_global_tax_context(clauses)
     risk = {
@@ -77,7 +81,8 @@ def test_should_suppress_missing_risk_by_global_context_first():
 def test_reconcile_cross_clause_conflicts_removes_remaining_missing_risk():
     clauses = [
         {"clause_id": "c2", "clause_text": "甲方联系人负责发送电子发票等事宜"},
-        {"clause_id": "c3", "clause_text": "乙方开具增值税普通发票", "clause_path": "三、合同价款及支付", "page_no": 2, "paragraph_no": "1"},
+        {"clause_id": "c3", "clause_text": "乙方开具增值税普通发票",
+            "clause_path": "三、合同价款及支付", "page_no": 2, "paragraph_no": "1"},
     ]
     global_ctx = _build_global_tax_context(clauses)
     risks = [
@@ -96,7 +101,8 @@ def test_reconcile_cross_clause_conflicts_removes_remaining_missing_risk():
             "location": {"risk_id": "r2", "clause_id": "c4"},
         },
     ]
-    kept, removed = _reconcile_cross_clause_conflicts(risks, clauses, global_ctx)
+    kept, removed = _reconcile_cross_clause_conflicts(
+        risks, clauses, global_ctx)
     assert len(kept) == 1
     assert kept[0]["location"]["risk_id"] == "r2"
     assert len(removed) == 1

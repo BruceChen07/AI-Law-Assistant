@@ -1,8 +1,8 @@
 """
 Clause Builder.
-职责: 负责将完整的合同文本切分为结构化的条款预览列表。
-输入输出: 接收合同全文，返回包含 clause_id, anchor_id, clause_text 等字段的字典列表。
-异常场景: 文本为空时返回空列表。
+Responsibilities: Responsible for splitting the complete contract text into a structured list of preview clauses.
+Input/Output: Accepts the full contract text and returns a list of dictionaries containing fields such as clause_id, anchor_id, and clause_text.
+Exception Handling: Returns an empty list when the text is empty.
 """
 import structlog
 from typing import List, Dict, Any
@@ -11,7 +11,7 @@ from app.services.tax_contract_parser import split_contract_clauses
 logger = structlog.get_logger(__name__)
 
 def build_preview_clauses(text: str) -> List[Dict[str, Any]]:
-    """构建用于前端预览和审计的合同条款列表。"""
+    """Build a list of contract clauses for preview and audit."""
     clauses = split_contract_clauses(text)
     out: List[Dict[str, Any]] = []
     for idx, clause in enumerate(clauses, 1):
