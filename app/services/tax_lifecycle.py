@@ -62,8 +62,10 @@ def run_tax_cleanup(cfg, operator_id: str = "", retention_days: int = 30, retry_
     deleted_file_paths = []
     try:
         contracts = list_contract_documents_for_archive(cfg)
-        logger.info("tax_cleanup_candidates job_id=%s candidates=%s", job_id, len(contracts))
-        archive_root = os.path.join(cfg["files_dir"], "tax_audit_archive", cutoff.strftime("%Y%m"))
+        logger.info("tax_cleanup_candidates job_id=%s candidates=%s",
+                    job_id, len(contracts))
+        archive_root = os.path.join(
+            cfg["files_dir"], "tax_audit_archive", cutoff.strftime("%Y%m"))
         os.makedirs(archive_root, exist_ok=True)
         for contract in contracts:
             updated_at = _safe_iso_to_dt(contract.get("updated_at"))
@@ -113,7 +115,8 @@ def run_tax_cleanup(cfg, operator_id: str = "", retention_days: int = 30, retry_
                 deleted_files += 1
                 deleted_file_paths.append(path)
             except Exception:
-                logger.exception("tax_cleanup_delete_report_failed job_id=%s file=%s", job_id, path)
+                logger.exception(
+                    "tax_cleanup_delete_report_failed job_id=%s file=%s", job_id, path)
                 continue
 
         details = {
@@ -164,7 +167,8 @@ def run_tax_cleanup(cfg, operator_id: str = "", retention_days: int = 30, retry_
             ),
             error=str(e),
         )
-        logger.exception("tax_cleanup_failed job_id=%s error=%s", job_id, str(e))
+        logger.exception(
+            "tax_cleanup_failed job_id=%s error=%s", job_id, str(e))
         raise
 
 

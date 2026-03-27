@@ -13,6 +13,19 @@ from app.services.tax_parser import extract_regulation_text
 logger = logging.getLogger("law_assistant")
 
 
+def _is_english_text(text: str) -> bool:
+    s = str(text or "")
+    latin = len(re.findall(r"[A-Za-z]", s))
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", s))
+    if latin <= 0:
+        return False
+    return latin >= max(30, int(cjk * 1.2))
+
+
+def detect_text_language(text: str, default: str = "zh") -> str:
+    return "en" if _is_english_text(text) else str(default or "zh")
+
+
 def split_contract_clauses(text: str) -> list[dict]:
     normalized = re.sub(r"\r\n", "\n", str(text or ""))
     lines = [x.strip() for x in normalized.split("\n") if x.strip()]
@@ -20,9 +33,19 @@ def split_contract_clauses(text: str) -> list[dict]:
     current_path = ""
     page_no = 1
     paragraph_no = 1
+    english_mode = _is_english_text(normalized)
+    heading_pattern = (
+        r"^((?:"
+        r"第[一二三四五六七八九十百千0-9]+[章节条款]"
+        r"|[0-9]+(?:\.[0-9]+){0,3}"
+        r"|[一二三四五六七八九十]+、"
+        r"|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*"
+        r"|(?:Clause)\s+[0-9]+(?:\.[0-9]+)*"
+        r"|(?:\([a-zA-Z]\)|[a-zA-Z][\.\)])"
+        r"))\s*(.*)$"
+    )
     for ln in lines:
-        m = re.match(
-            r"^((?:第[一二三四五六七八九十百千0-9]+[章节条款]|[0-9]+(?:\.[0-9]+){0,3}|[一二三四五六七八九十]+、))\s*(.*)$", ln)
+        m = re.match(heading_pattern, ln, flags=re.IGNORECASE)
         if m:
             current_path = m.group(1).strip()
             body = m.group(2).strip()
@@ -31,7 +54,7 @@ def split_contract_clauses(text: str) -> list[dict]:
             text_value = ln
         clauses.append(
             {
-                "clause_path": current_path or f"段{paragraph_no}",
+                "clause_path": current_path or (f"Para {paragraph_no}" if english_mode else f"段{paragraph_no}"),
                 "page_no": page_no,
                 "paragraph_no": str(paragraph_no),
                 "clause_text": text_value[:4000],
@@ -50,11 +73,21 @@ def _extract_first(pattern: str, text: str) -> str:
 
 def extract_clause_entities(clause_text: str) -> dict:
     txt = str(clause_text or "")
+    low = txt.lower()
+    english_mode = _is_english_text(txt)
     amount = _extract_first(r"([0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元))", txt)
+    if not amount:
+        amount = _extract_first(
+            r"((?:rmb|cny|usd|\$)\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)", txt)
     tax_rate = _extract_first(r"([0-9]+(?:\.[0-9]+)?\s*%)", txt)
-    invoice_type = _extract_first(r"(专用发票|普通发票|电子发票|增值税专用发票)", txt)
+    invoice_type = _extract_first(
+        r"(专用发票|普通发票|电子发票|增值税专用发票|vat invoice|special vat invoice|ordinary invoice|electronic invoice)", txt)
     invoice_time = _extract_first(r"([0-9]{1,3}\s*(?:日内|个工作日内|天内))", txt)
-    withholding = "是" if ("代扣代缴" in txt or "代扣" in txt) else ""
+    if not invoice_time:
+        invoice_time = _extract_first(
+            r"(within\s*[0-9]{1,3}\s*(?:business\s*)?days?)", txt)
+    withholding = ("yes" if english_mode else "是") if (
+        "代扣代缴" in txt or "代扣" in txt or "withholding" in low or "withhold" in low) else ""
     entities = {
         "amount": amount,
         "tax_rate": tax_rate,
@@ -117,6 +150,7 @@ def analyze_contract_document(cfg, contract_id: str, operator_id: str = "") -> d
         return {
             "contract_id": contract_id,
             "parse_status": "done",
+            "language": detect_text_language(text, default="zh"),
             "clause_count": len(clauses),
             "ocr_used": bool(meta.get("ocr_used")),
             "started_at": started_at,

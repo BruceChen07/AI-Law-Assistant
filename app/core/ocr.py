@@ -113,17 +113,20 @@ class OCREngineManager:
     def ocr_pdf(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int, Optional[str]]:
         name = self.select_engine(doc_type)
         if not name:
-            logger.info("ocr_engine_missing file=%s doc_type=%s", path, doc_type)
+            logger.info("ocr_engine_missing file=%s doc_type=%s",
+                        path, doc_type)
             return "", 0, None
         engine = self.get_engine(name)
         if not engine:
             logger.info("ocr_engine_not_found file=%s engine=%s", path, name)
             return "", 0, None
-        logger.info("ocr_engine_start file=%s engine=%s lang=%s dpi=%s", path, name, lang, dpi)
+        logger.info(
+            "ocr_engine_start file=%s engine=%s lang=%s dpi=%s", path, name, lang, dpi)
         start = time.perf_counter()
         text, pages = engine.ocr_pdf(path, lang, dpi)
         elapsed = int((time.perf_counter() - start) * 1000)
-        logger.info("ocr_engine_done file=%s engine=%s pages=%s text_length=%s cost_ms=%s", path, name, pages, len(text), elapsed)
+        logger.info("ocr_engine_done file=%s engine=%s pages=%s text_length=%s cost_ms=%s",
+                    path, name, pages, len(text), elapsed)
         return text, pages, name
 
 
@@ -149,16 +152,19 @@ def benchmark_engines(cfg: Dict[str, Any], pdf_path: str, lang: Optional[str] = 
     for name in manager.list_engines():
         engine = manager.get_engine(name)
         if not engine or not engine.is_available():
-            results.append({"engine": name, "available": False, "elapsed_ms": None, "text_length": 0})
+            results.append({"engine": name, "available": False,
+                           "elapsed_ms": None, "text_length": 0})
             continue
         start = time.perf_counter()
         try:
             text, pages = engine.ocr_pdf(pdf_path, lang, dpi)
             elapsed = int((time.perf_counter() - start) * 1000)
-            results.append({"engine": name, "available": True, "elapsed_ms": elapsed, "text_length": len(text), "pages": pages})
+            results.append({"engine": name, "available": True,
+                           "elapsed_ms": elapsed, "text_length": len(text), "pages": pages})
         except Exception:
             elapsed = int((time.perf_counter() - start) * 1000)
-            results.append({"engine": name, "available": False, "elapsed_ms": elapsed, "text_length": 0})
+            results.append({"engine": name, "available": False,
+                           "elapsed_ms": elapsed, "text_length": 0})
     return results
 
 

@@ -66,9 +66,12 @@ def test_match_contract_against_rules_end_to_end(tmp_path):
         cfg,
         contract_id,
         [
-            {"clause_path": "1.1", "page_no": 1, "paragraph_no": "1", "clause_text": "税率13%", "entities_json": "{}"},
-            {"clause_path": "1.2", "page_no": 1, "paragraph_no": "2", "clause_text": "税率9%", "entities_json": "{}"},
-            {"clause_path": "1.3", "page_no": 1, "paragraph_no": "3", "clause_text": "双方按法规办理", "entities_json": "{}"},
+            {"clause_path": "1.1", "page_no": 1, "paragraph_no": "1",
+                "clause_text": "税率13%", "entities_json": "{}"},
+            {"clause_path": "1.2", "page_no": 1, "paragraph_no": "2",
+                "clause_text": "税率9%", "entities_json": "{}"},
+            {"clause_path": "1.3", "page_no": 1, "paragraph_no": "3",
+                "clause_text": "双方按法规办理", "entities_json": "{}"},
         ],
         created_by="u1",
     )
@@ -112,7 +115,8 @@ def test_match_contract_against_rules_end_to_end(tmp_path):
     conn.commit()
     conn.close()
 
-    result = match_contract_against_rules(cfg, contract_id, operator_id="u1", top_k_per_clause=1)
+    result = match_contract_against_rules(
+        cfg, contract_id, operator_id="u1", top_k_per_clause=1)
     assert result["total_matches"] == 3
     assert result["compliant_count"] >= 1
     assert result["non_compliant_count"] >= 1

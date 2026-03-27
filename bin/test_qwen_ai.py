@@ -2,15 +2,17 @@ import os
 import sys
 from openai import OpenAI
 
+
 def clean_text(v: str) -> str:
     s = str(v or "").strip()
     s = s.strip("`").strip('"').strip("'").strip()
     return s
 
+
 def main() -> int:
     # 测试模式：如果为True，直接使用硬编码的正确值，绕过环境变量
     TEST_MODE = False  # 设置为True可以测试是否是环境变量问题
-    
+
     if TEST_MODE:
         print("[debug] TEST_MODE enabled - using hardcoded values")
         api_key = "sk-458a55fe938a40e181f2b4578d98d609"
@@ -24,11 +26,14 @@ def main() -> int:
             if original_value:
                 cleaned_value = clean_text(original_value)
                 if cleaned_value != original_value:
-                    print(f"[warning] Cleaned contaminated {env_var}: {repr(original_value)} -> {repr(cleaned_value)}")
+                    print(
+                        f"[warning] Cleaned contaminated {env_var}: {repr(original_value)} -> {repr(cleaned_value)}")
                     os.environ[env_var] = cleaned_value
-        
-        api_key = clean_text(os.getenv("DASHSCOPE_API_KEY", "sk-458a55fe938a40e181f2b4578d98d609"))
-        base_url = clean_text(os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"))
+
+        api_key = clean_text(
+            os.getenv("DASHSCOPE_API_KEY", "sk-458a55fe938a40e181f2b4578d98d609"))
+        base_url = clean_text(os.getenv(
+            "DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"))
         model = clean_text(os.getenv("DASHSCOPE_MODEL", "qwen3.5-397b-a17b"))
         image_url = clean_text(
             os.getenv(
@@ -41,7 +46,8 @@ def main() -> int:
     print(f"[debug] model={model}")
     print(f"[debug] api_key_len={len(api_key)}")
 
-    client = OpenAI(api_key=api_key, base_url=base_url, timeout=60, max_retries=1)
+    client = OpenAI(api_key=api_key, base_url=base_url,
+                    timeout=60, max_retries=1)
 
     completion = client.chat.completions.create(
         model=model,
@@ -66,6 +72,7 @@ def main() -> int:
 
     print()
     return 0
+
 
 if __name__ == "__main__":
     try:

@@ -9,7 +9,8 @@ from logging.handlers import TimedRotatingFileHandler
 class SizeAndTimeRotatingFileHandler(TimedRotatingFileHandler):
     def __init__(self, filename, when="midnight", interval=1, backupCount=7, encoding=None, delay=False, utc=False, atTime=None, maxBytes=0):
         self.maxBytes = int(maxBytes) if maxBytes else 0
-        super().__init__(filename, when=when, interval=interval, backupCount=backupCount, encoding=encoding, delay=delay, utc=utc, atTime=atTime)
+        super().__init__(filename, when=when, interval=interval, backupCount=backupCount,
+                         encoding=encoding, delay=delay, utc=utc, atTime=atTime)
 
     def shouldRollover(self, record):
         if self.stream is None:
@@ -26,7 +27,8 @@ class SizeAndTimeRotatingFileHandler(TimedRotatingFileHandler):
 
 def _script_name():
     main_mod = sys.modules.get("__main__")
-    path = getattr(main_mod, "__file__", None) or (sys.argv[0] if sys.argv else "")
+    path = getattr(main_mod, "__file__", None) or (
+        sys.argv[0] if sys.argv else "")
     name = os.path.basename(path) if path else "app"
     base, _ = os.path.splitext(name)
     return base or "app"
@@ -42,7 +44,8 @@ def setup_logging(cfg):
     try:
         level_name = str(cfg.get("log_level", "INFO")).upper()
         level = getattr(logging, level_name, logging.INFO)
-        base_dir = str(cfg.get("log_base_dir") or cfg.get("log_dir") or _default_log_base_dir())
+        base_dir = str(cfg.get("log_base_dir") or cfg.get(
+            "log_dir") or _default_log_base_dir())
         base_dir = os.path.abspath(base_dir)
         date_dir = datetime.now().strftime("%Y-%m-%d")
         log_dir = os.path.join(base_dir, date_dir)
@@ -55,7 +58,8 @@ def setup_logging(cfg):
         logger = logging.getLogger("law_assistant")
         logger.setLevel(level)
         logger.handlers = []
-        fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
+        fmt = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
         stream = logging.StreamHandler()
         stream.setFormatter(fmt)
         logger.addHandler(stream)
@@ -84,7 +88,8 @@ def setup_logging(cfg):
         logger = logging.getLogger("law_assistant")
         logger.setLevel(logging.INFO)
         logger.handlers = []
-        fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
+        fmt = logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
         stream = logging.StreamHandler()
         stream.setFormatter(fmt)
         logger.addHandler(stream)

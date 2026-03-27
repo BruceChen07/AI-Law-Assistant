@@ -12,8 +12,19 @@ _embed_registry: Dict[str, Dict[str, Any]] = {}
 _default_embed_lang = "zh"
 
 
+def _normalize_lang(lang: Optional[str], default: str = "zh") -> str:
+    s = str(lang or "").strip().lower().replace("_", "-")
+    if not s:
+        return str(default or "zh").strip().lower()
+    if s.startswith("zh"):
+        return "zh"
+    if s.startswith("en"):
+        return "en"
+    return str(default or "zh").strip().lower()
+
+
 def _default_instruction(lang: str) -> str:
-    return "Represent this sentence for retrieving relevant passages:" if lang == "en" else "为这个句子生成表示以用于检索相关文章："
+    return "Represent this sentence for retrieving relevant passages:" if _normalize_lang(lang, default="zh") == "en" else "为这个句子生成表示以用于检索相关文章："
 
 
 def _mean_pool(last_hidden: np.ndarray, attention_mask: np.ndarray) -> np.ndarray:
@@ -62,7 +73,7 @@ def _load_one_embedder(lang: str, p: Dict[str, Any]) -> bool:
 def load_embedders(cfg):
     global _default_embed_lang
     _embed_registry.clear()
-    _default_embed_lang = str(cfg.get("default_language", "zh")).lower()
+    _default_embed_lang = _normalize_lang(str(cfg.get("default_language", "zh")), default="zh")
     profiles = cfg.get("embedding_profiles")
     if not isinstance(profiles, dict) or not profiles:
         profiles = {
@@ -79,13 +90,13 @@ def load_embedders(cfg):
         }
     ok = 0
     for lang, p in profiles.items():
-        if isinstance(p, dict) and _load_one_embedder(str(lang).lower(), p):
+        if isinstance(p, dict) and _load_one_embedder(_normalize_lang(str(lang), default=_default_embed_lang), p):
             ok += 1
     return ok
 
 
 def get_embed_profile(lang: Optional[str]):
-    k = (lang or _default_embed_lang or "zh").lower()
+    k = _normalize_lang(lang, default=_default_embed_lang or "zh")
     return _embed_registry.get(k) or _embed_registry.get(_default_embed_lang)
 
 
@@ -130,7 +141,7 @@ def compute_embedding(text: str, is_query: bool = False, lang: Optional[str] = N
 
 class EmbeddingService:
     def __init__(self, default_language: str = "zh"):
-        self._default_language = default_language
+        self._default_language = _normalize_lang(default_language, default="zh")
         self._registry: Dict[str, Dict[str, Any]] = {}
 
     def _load_one(self, lang: str, p: Dict[str, Any]) -> bool:
@@ -167,17 +178,17 @@ class EmbeddingService:
 
     def load_embedders(self, cfg):
         self._registry.clear()
-        self._default_language = str(cfg.get("default_language", "zh")).lower()
+        self._default_language = _normalize_lang(str(cfg.get("default_language", "zh")), default="zh")
         profiles = cfg.get("embedding_profiles") or {
             self._default_language: cfg}
         ok = 0
         for lang, p in profiles.items():
-            if isinstance(p, dict) and self._load_one(str(lang).lower(), p):
+            if isinstance(p, dict) and self._load_one(_normalize_lang(str(lang), default=self._default_language), p):
                 ok += 1
         return ok
 
     def get_embed_profile(self, lang: Optional[str]):
-        k = (lang or self._default_language or "zh").lower()
+        k = _normalize_lang(lang, default=self._default_language or "zh")
         return self._registry.get(k) or self._registry.get(self._default_language)
 
     def get_registry_status(self):

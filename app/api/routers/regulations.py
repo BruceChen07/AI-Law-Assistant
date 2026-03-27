@@ -34,7 +34,8 @@ def build_router(cfg, embedder, reranker=None):
         insert_job(cfg, job_id)
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".docx", ".pdf"]:
-            raise HTTPException(status_code=400, detail="unsupported file type, only docx and pdf are allowed")
+            raise HTTPException(
+                status_code=400, detail="unsupported file type, only docx and pdf are allowed")
         save_path = os.path.join(cfg["files_dir"], f"{job_id}{ext}")
         with open(save_path, "wb") as f:
             f.write(await file.read())
@@ -86,9 +87,11 @@ def build_router(cfg, embedder, reranker=None):
         conn = get_conn(cfg)
         cur = conn.cursor()
         if version_id:
-            cur.execute("SELECT a.* FROM article a WHERE a.regulation_version_id=? ORDER BY a.article_no", (version_id,))
+            cur.execute(
+                "SELECT a.* FROM article a WHERE a.regulation_version_id=? ORDER BY a.article_no", (version_id,))
         else:
-            cur.execute("SELECT a.* FROM article a JOIN regulation_version v ON v.id=a.regulation_version_id WHERE v.regulation_id=? ORDER BY a.article_no", (regulation_id,))
+            cur.execute(
+                "SELECT a.* FROM article a JOIN regulation_version v ON v.id=a.regulation_version_id WHERE v.regulation_id=? ORDER BY a.article_no", (regulation_id,))
         rows = [dict(r) for r in cur.fetchall()]
         conn.close()
         return rows

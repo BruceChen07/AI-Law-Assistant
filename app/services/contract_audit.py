@@ -140,6 +140,7 @@ def audit_contract(
     ]
     audit_duration_ms = int((time.perf_counter() - audit_started_at) * 1000)
     output_meta = {
+        "language": "en" if str(lang or "").lower() == "en" else "zh",
         "text_length": len(text),
         "ocr_used": meta.get("ocr_used"),
         "ocr_engine": meta.get("ocr_engine"),

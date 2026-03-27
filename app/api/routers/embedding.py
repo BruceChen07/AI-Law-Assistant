@@ -27,10 +27,12 @@ def build_router(embedder):
 
     @router.post("/embeddings/encode")
     def encode_embedding(req: EmbeddingRequest):
-        v = embedder.compute_embedding(req.text, is_query=req.is_query, lang=req.language)
+        v = embedder.compute_embedding(
+            req.text, is_query=req.is_query, lang=req.language)
         prof = embedder.get_embed_profile(req.language)
         if v is None or not prof:
-            raise HTTPException(status_code=503, detail=f"embedding model not ready for language={req.language}")
+            raise HTTPException(
+                status_code=503, detail=f"embedding model not ready for language={req.language}")
         return {
             "dim": int(v.shape[0]),
             "is_query": req.is_query,

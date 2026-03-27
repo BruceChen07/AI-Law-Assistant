@@ -5,10 +5,9 @@
     "static_dir": "../web/dist",
     "default_language": "zh",
     "reranker_enabled": true,
-    "reranker_model_path": "..\\models\\reranker\\en",
+    "reranker_model_path": "",
     "reranker_profiles": {
-        "zh": "..\\models\\reranker\\zh",
-        "en": "..\\models\\reranker\\en"
+        "en": "../models/reranker/en"
     },
     "rerank_batch_size": 8,
     "rerank_max_len": 512,
@@ -23,16 +22,6 @@
             "embedding_max_seq_len": 512,
             "embedding_pooling": "cls",
             "embedding_query_instruction": "为这个句子生成表示以用于检索相关文章：",
-            "embedding_threads": 2
-        },
-        "en": {
-            "embedding_model": "../models/embedding/bge-small-en-v1.5.onnx",
-            "embedding_tokenizer_dir": "../models/embedding/en",
-            "embedding_model_id": "BAAI/bge-small-en-v1.5",
-            "embedding_source": "modelscope",
-            "embedding_max_seq_len": 512,
-            "embedding_pooling": "cls",
-            "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:",
             "embedding_threads": 2
         }
     },
@@ -57,15 +46,15 @@
     },
     "ocr_engines": {
         "mineru": {
-            "module": "mineru",
+            "module": "app.core.mineru_ocr",
             "function": "ocr_pdf"
         }
     },
     "llm_config": {
         "provider": "qwen",
         "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key": "sk-458a55fe938a40e181f2b4578d98d609",
-        "model": "qwen3.5-35b-a3b",
+        "api_key": "",
+        "model": "qwen3.5-plus",
         "temperature": 0.0,
         "max_tokens": 2048,
         "timeout": 120,
