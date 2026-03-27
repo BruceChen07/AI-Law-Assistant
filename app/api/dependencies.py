@@ -1,16 +1,17 @@
 from fastapi import Depends, HTTPException, Request
 from app.core.auth import decode_token, get_user_by_id
 
+
 def get_current_user(request: Request) -> dict:
     auth_header = request.headers.get("Authorization")
     if not auth_header or not auth_header.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
-    
+
     token = auth_header.split(" ")[1]
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    
+
     user_id = payload.get("sub")
     user = get_user_by_id(user_id)
     if not user:
@@ -20,5 +21,6 @@ def get_current_user(request: Request) -> dict:
 
 def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     if current_user.get("role") != "admin":
-        raise HTTPException(status_code=403, detail="Admin permission required")
+        raise HTTPException(
+            status_code=403, detail="Admin permission required")
     return current_user

@@ -79,3 +79,28 @@ def ensure_dirs(cfg):
         d = cfg.get(key)
         if d and not os.path.exists(d):
             os.makedirs(d, exist_ok=True)
+
+
+def get_config_path(base_dir: str = None) -> str:
+    if base_dir is None:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.environ.get("APP_CONFIG", os.path.join(base_dir, "config.json"))
+
+
+def save_config(cfg: dict, base_dir: str = None):
+    path = get_config_path(base_dir)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=4)
+    load_config.cache_clear()
+
+
+def update_config_patch(patch: dict, base_dir: str = None) -> dict:
+    path = get_config_path(base_dir)
+    if not os.path.exists(path):
+        raise RuntimeError(f"config.json not found at {path}")
+    with open(path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+    for k, v in patch.items():
+        cfg[k] = v
+    save_config(cfg, base_dir)
+    return _normalize_paths(cfg, os.path.dirname(os.path.abspath(path)))

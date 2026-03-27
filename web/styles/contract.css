@@ -1,0 +1,148 @@
+.contract-shell {
+  position: relative;
+}
+
+.contract-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.contract-heading h1 {
+  font-size: 48px;
+  margin: 0;
+}
+
+.contract-heading p {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 15px;
+}
+
+.contract-eyebrow {
+  font-family: "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  color: var(--accent);
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.contract-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lang-pill, .user-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+
+.user-pill em {
+  font-style: normal;
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.contract-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 22px;
+}
+
+.workbench-grid {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, clamp(560px, 58vw, 1120px)) minmax(320px, 1fr);
+  gap: clamp(16px, 1.4vw, 28px);
+}
+
+.contract-upload .contract-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.panel-title {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+}
+
+.contract-input {
+  font-size: 18px;
+  padding: 12px 16px;
+}
+
+.contract-drop {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px dashed var(--drop-border);
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--drop-bg);
+}
+
+.contract-drop span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.contract-drop em {
+  font-style: normal;
+  color: var(--hint-text);
+  font-size: 12px;
+}
+
+.audit-progress {
+  border: 1px solid var(--progress-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: var(--progress-bg);
+  display: grid;
+  gap: 8px;
+}
+
+.audit-progress-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.audit-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--progress-track);
+  overflow: hidden;
+}
+
+.audit-progress-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, rgba(231, 193, 122, 0.85), rgba(111, 209, 192, 0.85));
+  transition: width 0.35s ease;
+}
+
+.audit-progress-note {
+  font-size: 12px;
+  color: var(--progress-note);
+}
+
+.contract-result {
+  height: clamp(500px, 75vh, 920px);
+  display: flex;
+  flex-direction: column;
+}

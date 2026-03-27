@@ -5,9 +5,8 @@
     "static_dir": "../web/dist",
     "default_language": "zh",
     "reranker_enabled": true,
-    "reranker_model_path": "../models/reranker/zh",
+    "reranker_model_path": "",
     "reranker_profiles": {
-        "zh": "../models/reranker/zh",
         "en": "../models/reranker/en"
     },
     "rerank_batch_size": 8,
@@ -24,28 +23,54 @@
             "embedding_pooling": "cls",
             "embedding_query_instruction": "为这个句子生成表示以用于检索相关文章：",
             "embedding_threads": 2
-        },
-        "en": {
-            "embedding_model": "../models/embedding/bge-small-en-v1.5.onnx",
-            "embedding_tokenizer_dir": "../models/embedding/en",
-            "embedding_model_id": "BAAI/bge-small-en-v1.5",
-            "embedding_source": "modelscope",
-            "embedding_max_seq_len": 512,
-            "embedding_pooling": "cls",
-            "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:",
-            "embedding_threads": 2
         }
     },
     "log_level": "INFO",
-    "log_base_dir": "/Users/bruce/workspace/AI-Law-Assistant/log",
-    "log_dir": "/Users/bruce/workspace/AI-Law-Assistant/log",
+    "log_base_dir": "../logs",
+    "log_dir": "../logs",
     "log_max_bytes": 10485760,
     "log_backup_count": 7,
     "log_when": "midnight",
     "log_interval": 1,
+    "ocr_enabled": true,
+    "ocr_languages": "chi_sim+eng",
+    "ocr_min_text_length": 200,
+    "ocr_dpi": 220,
+    "ocr_engine": "auto",
+    "ocr_engine_order": [
+        "tesseract",
+        "mineru"
+    ],
+    "ocr_engine_by_type": {
+        "pdf": "tesseract"
+    },
+    "ocr_engines": {
+        "mineru": {
+            "module": "app.core.mineru_ocr",
+            "function": "ocr_pdf"
+        }
+    },
+    "llm_config": {
+        "provider": "qwen",
+        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "api_key": "",
+        "model": "qwen3.5-plus",
+        "temperature": 0.0,
+        "max_tokens": 2048,
+        "timeout": 120,
+        "headers": {}
+    },
+    "llm_trace_enabled": true,
+    "llm_trace_dir": "../data/memory/llm_interactions",
+    "llm_trace_max_chars": 12000,
+    "memory_use_long_hits": true,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",
         "http://localhost:5174"
-    ]
+    ],
+    "ui_config": {
+        "show_citation_source": false,
+        "default_theme": "dark"
+    }
 }

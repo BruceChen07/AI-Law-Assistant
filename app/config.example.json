@@ -6,7 +6,7 @@
     "default_language": "zh",
     "embedding_profiles": {
         "zh": {
-            "embedding_model": "../models/embedding/bge-small-zh-v1.5.onnx",
+            "embedding_model": "../models/embedding/zh/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/zh",
             "embedding_model_id": "BAAI/bge-small-zh-v1.5",
             "embedding_source": "modelscope",
@@ -16,7 +16,7 @@
             "embedding_threads": 2
         },
         "en": {
-            "embedding_model": "../models/embedding/bge-small-en-v1.5.onnx",
+            "embedding_model": "../models/embedding/en/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/en",
             "embedding_model_id": "BAAI/bge-small-en-v1.5",
             "embedding_source": "modelscope",
@@ -33,6 +33,73 @@
     "log_backup_count": 7,
     "log_when": "midnight",
     "log_interval": 1,
+    "ocr_enabled": true,
+    "ocr_languages": "chi_sim+eng",
+    "ocr_min_text_length": 200,
+    "ocr_dpi": 220,
+    "ocr_engine": "auto",
+    "ocr_engine_order": [
+        "tesseract",
+        "mineru"
+    ],
+    "ocr_engine_by_type": {
+        "pdf": "tesseract"
+    },
+    "ocr_engines": {
+        "mineru": {
+            "module": "app.core.mineru_ocr",
+            "function": "ocr_pdf"
+        }
+    },
+    "mineru": {
+        "backend": "hybrid-auto-engine",
+        "method": "auto",
+        "lang": "ch",
+        "device": "cpu",
+        "formula": true,
+        "table": true,
+        "model_source": "huggingface",
+        "timeout": 900
+    },
+    "llm_config": {
+        "provider": "openai_compatible",
+        "api_base": "https://api.openai.com/v1",
+        "api_key": "",
+        "model": "gpt-4o-mini",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 60,
+        "headers": {}
+    },
+    "llm_trace_enabled": false,
+    "llm_trace_dir": "../data/memory/llm_interactions",
+    "llm_trace_max_chars": 12000,
+    "ui_config": {
+        "show_citation_source": false,
+        "default_theme": "dark"
+    },
+    "contract_preview": {
+        "enabled": true,
+        "cache_dir": "../data/files/preview_cache",
+        "pdf_dpi": 160,
+        "pdf_max_pages": 30,
+        "text_lines_per_page": 80,
+        "docx_visual_enabled": true,
+        "docx_page_width": 1240,
+        "docx_page_height": 1754,
+        "docx_margin": 72,
+        "docx_line_height": 36,
+        "docx_chars_per_line": 44,
+        "docx_paragraph_spacing": 14,
+        "coord_provider": "mineru",
+        "docx_coord_from_pdf": true,
+        "docx_pdf_min_text_ratio": 0.35,
+        "docx_pdf_gate_min_chars": 120,
+        "docx_pdf_keep_file": false
+    },
+    "memory_use_long_hits": true,
+    "memory_filter_unverifiable_risks": true,
+    "memory_filtered_risk_log_limit": 30,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

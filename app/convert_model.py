@@ -5,6 +5,7 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from modelscope.hub.snapshot_download import snapshot_download
 
+
 def main():
     # Ensure model is downloaded
     model_id = "BAAI/bge-small-zh-v1.5"
@@ -28,10 +29,10 @@ def main():
     src_path = Path(cache_dir)
     # Copy all necessary config/tokenizer files
     allow_list = [
-        "config.json", "tokenizer.json", "tokenizer_config.json", 
+        "config.json", "tokenizer.json", "tokenizer_config.json",
         "vocab.txt", "special_tokens_map.json", "modules.json"
     ]
-    
+
     for item in src_path.iterdir():
         if item.name in allow_list or item.name.endswith(".txt"):
             try:
@@ -46,21 +47,24 @@ def main():
     model.eval()
 
     # Create dummy input
-    dummy_input = tokenizer("预热文本", return_tensors="pt", padding=True, truncation=True, max_length=512)
-    
+    dummy_input = tokenizer("预热文本", return_tensors="pt",
+                            padding=True, truncation=True, max_length=512)
+
     input_names = ["input_ids", "attention_mask", "token_type_ids"]
     output_names = ["last_hidden_state", "pooler_output"]
-    
+
     # Check if model expects token_type_ids
     model_inputs = (dummy_input["input_ids"], dummy_input["attention_mask"])
     dynamic_axes = {
         "input_ids": {0: "batch_size", 1: "sequence_length"},
         "attention_mask": {0: "batch_size", 1: "sequence_length"}
     }
-    
+
     if "token_type_ids" in dummy_input:
-        model_inputs = (dummy_input["input_ids"], dummy_input["attention_mask"], dummy_input["token_type_ids"])
-        dynamic_axes["token_type_ids"] = {0: "batch_size", 1: "sequence_length"}
+        model_inputs = (
+            dummy_input["input_ids"], dummy_input["attention_mask"], dummy_input["token_type_ids"])
+        dynamic_axes["token_type_ids"] = {
+            0: "batch_size", 1: "sequence_length"}
     else:
         # Remove token_type_ids from input_names if not present
         input_names = ["input_ids", "attention_mask"]
@@ -84,6 +88,7 @@ def main():
         print(f"Export failed: {e}")
         import traceback
         traceback.print_exc()
+
 
 if __name__ == "__main__":
     main()
