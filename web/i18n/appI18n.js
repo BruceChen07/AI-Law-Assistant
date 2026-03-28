@@ -1,7 +1,7 @@
 export const appI18n = {
   zh: {
     appTitle: "合同审计",
-    appSubtitle: "上传合同，生成财税与法律风险审计",
+    appSubtitle: "上传合同，生成财税法律风险审计",
     uiLanguage: "界面语言",
     themeLabel: "界面主题",
     themeDark: "深色",

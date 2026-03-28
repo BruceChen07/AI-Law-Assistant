@@ -3,12 +3,15 @@ from typing import List, Dict, Any, Optional
 
 import torch
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from app.core.config import get_config
+from app.core.model_hub import resolve_model_path
 
 logger = logging.getLogger("law_assistant")
 
 
 class RerankerService:
     def __init__(self, model_path: Optional[str] = None, profiles: Optional[Dict[str, str]] = None, device: Optional[str] = None, batch_size: int = 8, max_len: int = 512):
+        self.cfg = get_config()
         self.model_path = model_path
         self.profiles = profiles or {}
         self.models = {}
@@ -21,9 +24,14 @@ class RerankerService:
 
     def _load_model(self, model_path: str, key: str):
         try:
-            logger.info("Loading reranker model from %s on %s", model_path, self.device)
-            tokenizer = AutoTokenizer.from_pretrained(model_path)
-            model = AutoModelForSequenceClassification.from_pretrained(model_path)
+            resolved_path = resolve_model_path(
+                self.cfg,
+                model_path,
+                task="reranker_transformers"
+            )
+            logger.info("Loading reranker model from %s on %s", resolved_path, self.device)
+            tokenizer = AutoTokenizer.from_pretrained(resolved_path)
+            model = AutoModelForSequenceClassification.from_pretrained(resolved_path)
             model.to(self.device)
             model.eval()
             self.models[key] = model

@@ -61,11 +61,30 @@
             "function": "ocr_pdf"
         }
     },
+    "model_hub": {
+        "preferred_sources": [
+            "huggingface",
+            "modelscope"
+        ],
+        "enable_fallback": true,
+        "cache_dir": "../models/cache",
+        "model_mirror_map": {}
+    },
+    "mineru": {
+        "backend": "hybrid-auto-engine",
+        "method": "auto",
+        "lang": "ch",
+        "device": "cpu",
+        "formula": true,
+        "table": true,
+        "model_source": "auto",
+        "timeout": 900
+    },
     "llm_config": {
         "provider": "qwen",
-        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key": "sk-458a55fe938a40e181f2b4578d98d609",
-        "model": "qwen3.5-35b-a3b",
+        "api_base": "",
+        "api_key": "",
+        "model": "",
         "temperature": 0.0,
         "max_tokens": 2048,
         "timeout": 120,

@@ -12,6 +12,8 @@ from typing import List, Protocol, Sequence
 
 import numpy as np
 from pydantic import BaseModel, Field
+from app.core.config import get_config
+from app.core.model_hub import resolve_model_path
 
 logger = logging.getLogger("law_assistant")
 
@@ -39,7 +41,13 @@ class SentenceTransformerEmbedder:
     def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         from sentence_transformers import SentenceTransformer
 
-        self.model = SentenceTransformer(model_name)
+        cfg = get_config()
+        model_path = resolve_model_path(
+            cfg,
+            model_name,
+            task="memory_sentence_transformer"
+        )
+        self.model = SentenceTransformer(model_path)
 
     def encode(self, texts: Sequence[str]) -> np.ndarray:
         if not texts:

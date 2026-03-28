@@ -51,6 +51,15 @@
             "function": "ocr_pdf"
         }
     },
+    "model_hub": {
+        "preferred_sources": [
+            "huggingface",
+            "modelscope"
+        ],
+        "enable_fallback": true,
+        "cache_dir": "../models/cache",
+        "model_mirror_map": {}
+    },
     "mineru": {
         "backend": "hybrid-auto-engine",
         "method": "auto",
@@ -58,7 +67,7 @@
         "device": "cpu",
         "formula": true,
         "table": true,
-        "model_source": "huggingface",
+        "model_source": "auto",
         "timeout": 900
     },
     "llm_config": {

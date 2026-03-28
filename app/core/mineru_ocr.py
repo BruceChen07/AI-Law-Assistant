@@ -1,10 +1,14 @@
 import json
 import os
+import logging
 import subprocess
 import tempfile
 from pathlib import Path
 from typing import Tuple, Dict, Any, Optional
 from app.core.config import get_config
+from app.core.model_hub import get_model_source_order
+
+logger = logging.getLogger("law_assistant")
 
 
 def _pick_lang(default_lang: str, ocr_langs: str) -> str:
@@ -55,25 +59,39 @@ def _run_mineru(path: str, out_dir: str) -> Dict[str, Any]:
     device = str(mineru_cfg.get("device", "cpu"))
     formula = bool(mineru_cfg.get("formula", True))
     table = bool(mineru_cfg.get("table", True))
-    model_source = str(mineru_cfg.get("model_source", "huggingface"))
+    model_source = str(mineru_cfg.get("model_source", "auto")).strip().lower()
     timeout = int(mineru_cfg.get("timeout", 900))
     ocr_langs = str(cfg.get("ocr_languages", "chi_sim+eng"))
     mineru_lang = str(mineru_cfg.get("lang") or _pick_lang("", ocr_langs))
-    cmd = [
-        "mineru",
-        "-p", path,
-        "-o", out_dir,
-        "-m", method,
-        "-b", backend,
-        "-l", mineru_lang,
-        "-d", device,
-        "--source", model_source,
-    ]
-    if not formula:
-        cmd += ["-f", "false"]
-    if not table:
-        cmd += ["-t", "false"]
-    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+    sources = get_model_source_order(cfg) if model_source == "auto" else [model_source]
+    sources = sources or ["huggingface", "modelscope"]
+    last_error = None
+    for source in sources:
+        cmd = [
+            "mineru",
+            "-p", path,
+            "-o", out_dir,
+            "-m", method,
+            "-b", backend,
+            "-l", mineru_lang,
+            "-d", device,
+            "--source", source,
+        ]
+        if not formula:
+            cmd += ["-f", "false"]
+        if not table:
+            cmd += ["-t", "false"]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=timeout)
+            logger.info("mineru_extract_ready source=%s file=%s", source, path)
+            last_error = None
+            break
+        except Exception as e:
+            last_error = e
+            logger.warning("mineru_extract_failed source=%s file=%s err=%s", source, path, str(e))
+            continue
+    if last_error is not None:
+        raise last_error
     stem = os.path.splitext(os.path.basename(path))[0]
     md_path = _read_first_file(out_dir, ".md", stem=stem)
     middle_path = _read_first_file(out_dir, "_middle.json", stem=stem)

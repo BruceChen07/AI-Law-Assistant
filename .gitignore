@@ -61,7 +61,3 @@ tmp_*.json
 # System
 .DS_Store
 Thumbs.db
-
-# Config (private)
-app/config.json
-!app/config.example.json
