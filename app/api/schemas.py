@@ -71,6 +71,7 @@ class TaxAuditRegulationParseResponse(BaseModel):
 class TaxAuditContractAnalyzeResponse(BaseModel):
     contract_id: str
     parse_status: str
+    language: str = "zh"
     clause_count: int
     ocr_used: bool
     started_at: str
@@ -91,6 +92,7 @@ class TaxAuditClauseItem(BaseModel):
 
 class TaxAuditClauseListResponse(BaseModel):
     contract_id: str
+    language: str = "zh"
     total: int
     items: List[TaxAuditClauseItem]
 
@@ -116,6 +118,7 @@ class TaxAuditMatchItem(BaseModel):
 
 class TaxAuditMatchListResponse(BaseModel):
     contract_id: str
+    language: str = "zh"
     total: int
     items: List[TaxAuditMatchItem]
 
@@ -208,6 +211,7 @@ class TaxAuditEvidenceItem(BaseModel):
 
 class TaxAuditReportResponse(BaseModel):
     contract_id: str
+    language: str = "zh"
     generated_at: str
     overview: TaxAuditReportOverview
     risk_summary: TaxAuditRiskSummary
@@ -322,5 +326,6 @@ class TaxAuditIssueItem(BaseModel):
 
 class TaxAuditIssueListResponse(BaseModel):
     contract_id: str
+    language: str = "zh"
     total: int
     items: List[TaxAuditIssueItem]

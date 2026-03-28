@@ -25,6 +25,16 @@ def _safe_bool(v: Any, default: bool) -> bool:
         return False
     return default
 
+def _normalize_lang(lang: Any, default: str = "zh") -> str:
+    s = str(lang or "").strip().lower().replace("_", "-")
+    if not s:
+        return str(default or "zh").strip().lower()
+    if s.startswith("zh"):
+        return "zh"
+    if s.startswith("en"):
+        return "en"
+    return str(default or "zh").strip().lower()
+
 def _normalize_risk_level(level: Any) -> str:
     s = str(level or "").strip().lower()
     if s in ["high", "h", "严重", "高", "高风险"]:

@@ -6,7 +6,7 @@
     "default_language": "zh",
     "embedding_profiles": {
         "zh": {
-            "embedding_model": "../models/embedding/bge-small-zh-v1.5.onnx",
+            "embedding_model": "../models/embedding/zh/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/zh",
             "embedding_model_id": "BAAI/bge-small-zh-v1.5",
             "embedding_source": "modelscope",
@@ -16,7 +16,7 @@
             "embedding_threads": 2
         },
         "en": {
-            "embedding_model": "../models/embedding/bge-small-en-v1.5.onnx",
+            "embedding_model": "../models/embedding/en/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/en",
             "embedding_model_id": "BAAI/bge-small-en-v1.5",
             "embedding_source": "modelscope",

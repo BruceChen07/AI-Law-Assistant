@@ -58,7 +58,8 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
     label = "not_mentioned"
     score = 0.12
     if str(rule.get("rule_type") or "") == "tax_rate":
-        rule_rate = _extract_percent(rule.get("numeric_constraints") or rule_text)
+        rule_rate = _extract_percent(
+            rule.get("numeric_constraints") or rule_text)
         clause_rate = _extract_percent(clause_text)
         if not clause_rate:
             label = "not_mentioned"
@@ -73,7 +74,8 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
             score = 0.99
             reason = "tax_rate_conflict"
     elif str(rule.get("rule_type") or "") == "deadline":
-        rule_days = _extract_deadline_days(rule.get("deadline_constraints") or rule_text)
+        rule_days = _extract_deadline_days(
+            rule.get("deadline_constraints") or rule_text)
         clause_days = _extract_deadline_days(clause_text)
         if clause_days == 0:
             label = "not_mentioned"
@@ -126,12 +128,14 @@ def _pick_matches_for_clause(evaluated: list[dict], top_k: int = 5) -> list[dict
     ranked = sorted(
         evaluated,
         key=lambda x: (
-            0 if x["match_label"] == "non_compliant" else (1 if x["match_label"] == "not_mentioned" else 2),
+            0 if x["match_label"] == "non_compliant" else (
+                1 if x["match_label"] == "not_mentioned" else 2),
             -float(x["match_score"]),
         ),
     )
     selected = ranked[:max(1, int(top_k))]
-    extra = [x for x in ranked if x["match_label"] == "non_compliant" and x not in selected]
+    extra = [x for x in ranked if x["match_label"]
+             == "non_compliant" and x not in selected]
     return selected + extra
 
 
@@ -155,13 +159,18 @@ def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", t
     )
     all_matches = []
     for clause in clauses:
-        evaluated = [evaluate_clause_rule_match(clause, rule) for rule in rules]
-        all_matches.extend(_pick_matches_for_clause(evaluated, top_k=top_k_per_clause))
+        evaluated = [evaluate_clause_rule_match(
+            clause, rule) for rule in rules]
+        all_matches.extend(_pick_matches_for_clause(
+            evaluated, top_k=top_k_per_clause))
     clear_clause_rule_matches_by_contract(cfg, contract_id)
     create_clause_rule_matches(cfg, all_matches, created_by=operator_id)
-    compliant = len([x for x in all_matches if x["match_label"] == "compliant"])
-    non_compliant = len([x for x in all_matches if x["match_label"] == "non_compliant"])
-    not_mentioned = len([x for x in all_matches if x["match_label"] == "not_mentioned"])
+    compliant = len(
+        [x for x in all_matches if x["match_label"] == "compliant"])
+    non_compliant = len(
+        [x for x in all_matches if x["match_label"] == "non_compliant"])
+    not_mentioned = len(
+        [x for x in all_matches if x["match_label"] == "not_mentioned"])
     logger.info(
         "tax_match_done contract_id=%s total=%s compliant=%s non_compliant=%s not_mentioned=%s",
         contract_id,

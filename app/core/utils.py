@@ -75,7 +75,8 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
 
     text, page_count = _extract_pdf_text(path)
     meta["page_count"] = page_count
-    logger.info("pdf_extract_done file=%s pages=%s text_length=%s", path, page_count, len(text))
+    logger.info("pdf_extract_done file=%s pages=%s text_length=%s",
+                path, page_count, len(text))
 
     ocr_enabled = bool(cfg.get("ocr_enabled", True))
     ocr_min_len = int(cfg.get("ocr_min_text_length", 200))
@@ -93,7 +94,8 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
         )
         try:
             manager = OCREngineManager(cfg)
-            ocr_text, ocr_pages, engine = manager.ocr_pdf(path, ocr_langs, ocr_dpi, doc_type="pdf")
+            ocr_text, ocr_pages, engine = manager.ocr_pdf(
+                path, ocr_langs, ocr_dpi, doc_type="pdf")
             if ocr_text.strip():
                 meta["ocr_used"] = True
                 meta["ocr_engine"] = engine or ""
@@ -113,7 +115,13 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
 
 def split_articles(text):
     text = re.sub(r"\r\n", "\n", text)
-    parts = re.split(r"(第[一二三四五六七八九十百千0-9]+条)", text)
+    english_mode = len(re.findall(r"[A-Za-z]", text)) >= max(
+        20, len(re.findall(r"[\u4e00-\u9fff]", text)))
+    parts = re.split(
+        r"(第[一二三四五六七八九十百千0-9]+条|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)",
+        text,
+        flags=re.IGNORECASE,
+    )
     items = []
     if len(parts) >= 3:
         i = 1
@@ -126,7 +134,7 @@ def split_articles(text):
     if not items:
         paras = [p.strip() for p in text.split("\n") if p.strip()]
         for idx, p in enumerate(paras, 1):
-            items.append((f"段{idx}", p))
+            items.append(((f"Para {idx}" if english_mode else f"段{idx}"), p))
     return items
 
 
@@ -138,10 +146,16 @@ def tokenize_query(q: str) -> List[str]:
 
 
 def best_sentence(text: str, tokens: List[str]) -> tuple[str, int]:
-    sents = re.split(r"[。；;\n\r]+", text)
+    sents = re.split(r"[。！？!?；;.\n\r]+", text)
+    normalized_tokens = [(str(t), str(t).lower()) for t in tokens]
     best = ("", 0)
     for s in sents:
-        score = sum(1 for t in tokens if t in s)
+        s_clean = s.strip()
+        if not s_clean:
+            continue
+        s_low = s_clean.lower()
+        score = sum(1 for t_raw, t_low in normalized_tokens if (
+            t_raw in s_clean or t_low in s_low))
         if score > best[1]:
-            best = (s.strip(), score)
+            best = (s_clean, score)
     return best

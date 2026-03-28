@@ -92,9 +92,12 @@ class HybridSearcher:
         all_ids = set(vec_n.keys()) | set(kw_n.keys())
         fused: Dict[int, float] = {}
         for cid in all_ids:
-            fused[cid] = self.cfg.vector_weight * vec_n.get(cid, 0.0) + self.cfg.keyword_weight * kw_n.get(cid, 0.0)
+            fused[cid] = self.cfg.vector_weight * \
+                vec_n.get(cid, 0.0) + self.cfg.keyword_weight * \
+                kw_n.get(cid, 0.0)
 
-        ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:top_k]
+        ranked = sorted(fused.items(), key=lambda x: x[1], reverse=True)[
+            :top_k]
         ranked_ids = [cid for cid, _ in ranked]
         rows = self.indexer.fetch_chunks_by_ids(ranked_ids)
         by = {int(r["id"]): r for r in rows}

@@ -25,6 +25,12 @@ TAX_TYPES = [
     "印花税",
     "附加税",
     "税",
+    "vat",
+    "value added tax",
+    "corporate income tax",
+    "individual income tax",
+    "stamp duty",
+    "tax",
 ]
 
 REGION_TOKENS = [
@@ -33,6 +39,11 @@ REGION_TOKENS = [
     "上海市",
     "广东省",
     "深圳市",
+    "china",
+    "beijing",
+    "shanghai",
+    "guangdong",
+    "shenzhen",
 ]
 
 
@@ -148,7 +159,10 @@ def extract_regulation_text(cfg, file_path: str, file_type: str) -> tuple[str, d
 def split_tax_clauses(text: str) -> list[dict]:
     normalized = re.sub(r"\r\n", "\n", str(text or ""))
     normalized = re.sub(r"\n{2,}", "\n\n", normalized)
-    chunks = re.split(r"(第[一二三四五六七八九十百千0-9]+[章节条款项])", normalized)
+    english_mode = len(re.findall(
+        r"[A-Za-z]", normalized)) >= max(20, len(re.findall(r"[\u4e00-\u9fff]", normalized)))
+    marker_pattern = r"(第[一二三四五六七八九十百千0-9]+[章节条款项]|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)"
+    chunks = re.split(marker_pattern, normalized, flags=re.IGNORECASE)
     items = []
     if len(chunks) >= 3:
         i = 1
@@ -172,7 +186,7 @@ def split_tax_clauses(text: str) -> list[dict]:
         for idx, p in enumerate(paras, 1):
             items.append(
                 {
-                    "article_no": f"段{idx}",
+                    "article_no": (f"Para {idx}" if english_mode else f"段{idx}"),
                     "source_text": p[:4000],
                     "source_page": max(1, idx // 4),
                     "source_paragraph": str(idx),
@@ -191,21 +205,25 @@ def extract_tax_fields(clause: dict, law_title: str = "") -> dict:
     low = text.lower()
     tax_type = ""
     for t in TAX_TYPES:
-        if t in text:
+        if (t in text) or (t.lower() in low):
             tax_type = t
             break
     rule_type = "general"
-    if "税率" in text or "%" in text:
+    if "税率" in text or "tax rate" in low or "%" in text:
         rule_type = "tax_rate"
-    elif "应当" in text or "应于" in text:
+    elif "应当" in text or "应于" in text or "shall" in low or "must" in low:
         rule_type = "mandatory_action"
-    elif "不得" in text or "禁止" in text:
+    elif "不得" in text or "禁止" in text or "shall not" in low or "must not" in low or "prohibited" in low:
         rule_type = "prohibited_action"
-    elif "期限" in text or "日内" in text or "月内" in text:
+    elif "期限" in text or "日内" in text or "月内" in text or "within" in low or "deadline" in low:
         rule_type = "deadline"
     rate = _extract_first(r"([0-9]+(?:\.[0-9]+)?\s*%)", text)
     day_limit = _extract_first(r"([0-9]{1,3}\s*日内)", text)
-    subject = _extract_first(r"(纳税人|扣缴义务人|一般纳税人|小规模纳税人)", text)
+    if not day_limit:
+        day_limit = _extract_first(
+            r"([0-9]{1,3}\s*(?:business\s*)?days?)", text)
+    subject = _extract_first(
+        r"(纳税人|扣缴义务人|一般纳税人|小规模纳税人|taxpayer|withholding agent|general taxpayer|small-scale taxpayer)", text)
     region = ""
     for r in REGION_TOKENS:
         if r in text:
@@ -215,10 +233,18 @@ def extract_tax_fields(clause: dict, law_title: str = "") -> dict:
         r"((?:20[0-9]{2}|19[0-9]{2})[年\-/\.][0-9]{1,2}[月\-/\.][0-9]{1,2}日?)", text)
     expiry_date = _extract_first(
         r"(至(?:20[0-9]{2}|19[0-9]{2})[年\-/\.][0-9]{1,2}[月\-/\.][0-9]{1,2}日?)", text)
+    if not effective_date:
+        effective_date = _extract_first(
+            r"(effective\s+(?:from|on)\s+(?:20[0-9]{2}|19[0-9]{2})[-/\.][0-9]{1,2}[-/\.][0-9]{1,2})", text)
+    if not expiry_date:
+        expiry_date = _extract_first(
+            r"((?:until|through)\s+(?:20[0-9]{2}|19[0-9]{2})[-/\.][0-9]{1,2}[-/\.][0-9]{1,2})", text)
     trigger_condition = subject or (
         "发生涉税交易" if ("税" in text or "tax" in low) else "")
-    required_action = text[:180] if "应" in text else ""
-    prohibited_action = text[:180] if ("不得" in text or "禁止" in text) else ""
+    required_action = text[:180] if (
+        "应" in text or "shall" in low or "must" in low) else ""
+    prohibited_action = text[:180] if (
+        "不得" in text or "禁止" in text or "shall not" in low or "must not" in low or "prohibited" in low) else ""
     numeric_constraints = rate
     deadline_constraints = day_limit
     return {

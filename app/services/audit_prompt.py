@@ -1,7 +1,7 @@
 import json
 import re
 from typing import Dict, Any, List, Optional
-from app.services.audit_utils import _normalize_citation_item
+from app.services.audit_utils import _normalize_citation_item, _normalize_lang
 
 def _build_evidence_block(items: List[Dict[str, Any]], lang: str) -> str:
     if not items:
@@ -37,8 +37,9 @@ def _build_prompt(
     evidence_items: Optional[List[Dict[str, Any]]] = None,
     tax_focus: bool = True
 ) -> Dict[str, str]:
+    norm_lang = _normalize_lang(lang, default="zh")
     evidence = _build_evidence_block(evidence_items or [], lang)
-    if lang.lower() == "en":
+    if norm_lang == "en":
         system = "You are a contract audit assistant. Output strict JSON only."
         focus = (
             "Prioritize tax-related regulations and tax implications in obligations, invoicing, withholding, and tax liabilities. "

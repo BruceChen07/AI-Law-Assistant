@@ -1,6 +1,7 @@
 import logging
 import hashlib
 import sqlite3
+import re
 import numpy as np
 from fastapi import HTTPException
 from app.core.database import get_conn
@@ -15,11 +16,14 @@ def _build_fts_match_query(raw_query: str) -> str:
     if tokens:
         return " OR ".join([f'"{t.replace("\"", "\"\"")}"' for t in tokens])
     cleaned = " ".join(raw_query.replace("\n", " ").replace("\r", " ").split())
-    cleaned = "".join(ch if ("\u4e00" <= ch <= "\u9fff") or ch.isalnum() or ch.isspace() else " " for ch in cleaned)
+    cleaned = "".join(ch if ("\u4e00" <= ch <= "\u9fff")
+                      or ch.isalnum() or ch.isspace() else " " for ch in cleaned)
     simple = [x for x in cleaned.split(" ") if x]
     if simple:
         return " OR ".join([f'"{x.replace("\"", "\"\"")}"' for x in simple[:10]])
-    return '"合同"'
+    english_mode = len(re.findall(r"[A-Za-z]", raw_query)) > len(
+        re.findall(r"[\u4e00-\u9fff]", raw_query))
+    return '"contract"' if english_mode else '"合同"'
 
 
 def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
@@ -35,7 +39,8 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
         # main.py raised HTTPException(503)
         # I'll raise RuntimeError and handle in router, or import HTTPException
         # Better to keep service framework-agnostic if possible, but for now let's raise a custom error or just HTTPException
-        raise HTTPException(status_code=503, detail=f"semantic search enabled but embedding model is not ready for language={lang}")
+        raise HTTPException(
+            status_code=503, detail=f"semantic search enabled but embedding model is not ready for language={lang}")
 
     logger.info("search_start query=%s lang=%s active_lang=%s top_k=%s semantic=%s model_id=%s",
                 q.query[:80], lang, active_lang, q.top_k, q.use_semantic, (prof or {}).get("model_id", "none"))
@@ -88,14 +93,16 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
         logger.info("bm25_candidates query=%s count=%s",
                     q.query[:80], len(bm_rows))
     except sqlite3.OperationalError as e:
-        logger.warning("bm25_failed query=%s match=%s err=%s", q.query[:80], bm_query[:120], str(e))
+        logger.warning("bm25_failed query=%s match=%s err=%s",
+                       q.query[:80], bm_query[:120], str(e))
     for idx, r in enumerate(bm_rows):
         r["bm25_score"] = 1.0 - (idx / max(1, len(bm_rows)))
 
     merged = {r["article_id"]: r for r in bm_rows}
 
     if q.use_semantic:
-        qe = embedder.compute_embedding(q.query, is_query=True, lang=active_lang)
+        qe = embedder.compute_embedding(
+            q.query, is_query=True, lang=active_lang)
         if qe is not None:
             sem_sql = """
             SELECT
@@ -172,7 +179,8 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
             r["final_score"] = r["bm25_score"]
     rows.sort(key=lambda x: x.get("final_score", 0), reverse=True)
 
-    rerank_enabled = q.rerank_enabled if q.rerank_enabled is not None else cfg.get("reranker_enabled", True)
+    rerank_enabled = q.rerank_enabled if q.rerank_enabled is not None else cfg.get(
+        "reranker_enabled", True)
     if q.rerank_mode == "off":
         rerank_enabled = False
     elif q.rerank_mode == "on":
@@ -189,9 +197,11 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     if rerank_enabled and reranker:
         candidates = rows[:max(1, min(rerank_top_n, len(rows)))]
         try:
-            rows = reranker.rerank(q.query, candidates, top_k=q.top_k, lang=lang)
+            rows = reranker.rerank(q.query, candidates,
+                                   top_k=q.top_k, lang=lang)
             if rerank_threshold > 0:
-                rows = [r for r in rows if r.get("rerank_score", 0.0) >= rerank_threshold]
+                rows = [r for r in rows if r.get(
+                    "rerank_score", 0.0) >= rerank_threshold]
         except Exception:
             if not rerank_fallback:
                 raise
@@ -209,7 +219,9 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
         ans, score = best_sentence(r["content"], tokens) if tokens else ("", 0)
         r["answer"] = ans
         r["answer_score"] = score
-        r["match_tokens"] = [t for t in tokens if t in r["content"]]
+        content_low = str(r["content"]).lower()
+        r["match_tokens"] = [t for t in tokens if (
+            t in r["content"] or t.lower() in content_low)]
         r["citation_id"] = f"{r['regulation_id']}:{r['version_id']}:{r['article_id']}"
     logger.info("search_done query=%s results=%s", q.query[:80], len(rows))
     return rows

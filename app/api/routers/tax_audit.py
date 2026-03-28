@@ -30,6 +30,7 @@ from app.api.schemas import (
 from app.services.crud import (
     create_tax_regulation_document,
     create_tax_contract_document,
+    get_tax_contract_document,
     list_contract_clauses,
     list_clause_rule_matches_by_contract,
     list_audit_trace_by_issue,
@@ -39,7 +40,7 @@ from app.services.crud import (
     list_tax_archive_records,
 )
 from app.services.tax_parser import parse_regulation_document
-from app.services.tax_contract_parser import analyze_contract_document
+from app.services.tax_contract_parser import analyze_contract_document, detect_text_language
 from app.services.tax_matcher import match_contract_against_rules
 from app.services.tax_risk import generate_issues_from_matches, review_audit_issue
 from app.services.tax_report import build_tax_audit_report
@@ -80,6 +81,16 @@ async def _save_upload(cfg, file: UploadFile, prefix: str):
         f.write(content)
     digest = hashlib.sha256(content).hexdigest()
     return file_id, save_path, len(content), ext, digest
+
+
+def _resolve_contract_language(cfg, contract_id: str) -> str:
+    contract = get_tax_contract_document(cfg, contract_id) or {}
+    clauses = list_contract_clauses(cfg, contract_id, limit=300)
+    source = "\n".join([str(x.get("clause_text") or "") for x in clauses])
+    if not source:
+        source = str(contract.get("original_filename") or "")
+    lang = detect_text_language(source, default="zh")
+    return "en" if lang == "en" else "zh"
 
 
 def build_router(cfg):
@@ -157,7 +168,8 @@ def build_router(cfg):
     def list_tax_contract_clauses(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         items = list_contract_clauses(cfg, contract_id)
-        return TaxAuditClauseListResponse(contract_id=contract_id, total=len(items), items=items)
+        language = _resolve_contract_language(cfg, contract_id)
+        return TaxAuditClauseListResponse(contract_id=contract_id, language=language, total=len(items), items=items)
 
     @router.post("/tax-audit/contracts/{contract_id}/match", response_model=TaxAuditMatchRunResponse)
     def run_tax_contract_match(contract_id: str, current_user: dict = Depends(get_current_user)):
@@ -178,7 +190,8 @@ def build_router(cfg):
     def list_tax_contract_matches(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         items = list_clause_rule_matches_by_contract(cfg, contract_id)
-        return TaxAuditMatchListResponse(contract_id=contract_id, total=len(items), items=items)
+        language = _resolve_contract_language(cfg, contract_id)
+        return TaxAuditMatchListResponse(contract_id=contract_id, language=language, total=len(items), items=items)
 
     @router.post("/tax-audit/contracts/{contract_id}/issues/generate", response_model=TaxAuditIssueGenerateResponse)
     def generate_tax_audit_issues(contract_id: str, current_user: dict = Depends(get_current_user)):
@@ -196,8 +209,10 @@ def build_router(cfg):
     def list_tax_contract_issues(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         items = list_tax_audit_issues_by_contract(cfg, contract_id)
+        language = _resolve_contract_language(cfg, contract_id)
         return TaxAuditIssueListResponse(
             contract_id=contract_id,
+            language=language,
             total=len(items),
             items=items,
         )

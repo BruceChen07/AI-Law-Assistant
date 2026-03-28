@@ -10,6 +10,7 @@ from app.services.crud import (
     list_contract_clauses,
     list_tax_rules,
 )
+from app.services.tax_contract_parser import detect_text_language
 
 logger = logging.getLogger("law_assistant")
 
@@ -51,6 +52,15 @@ def _review_summary(issues: list[dict]) -> dict:
     }
 
 
+def _detect_contract_language(contract: dict, clauses: list[dict]) -> str:
+    source = "\n".join([str(x.get("clause_text") or "")
+                       for x in clauses[:300]])
+    if not source:
+        source = str(contract.get("original_filename") or "")
+    lang = detect_text_language(source, default="zh")
+    return "en" if lang == "en" else "zh"
+
+
 def build_tax_audit_report(cfg, contract_id: str) -> dict:
     logger.info("tax_report_build_start contract_id=%s", contract_id)
     contract = get_tax_contract_document(cfg, contract_id)
@@ -60,6 +70,7 @@ def build_tax_audit_report(cfg, contract_id: str) -> dict:
     clauses = list_contract_clauses(cfg, contract_id, limit=5000)
     traces = list_audit_trace_by_contract(cfg, contract_id, limit=5000)
     rules = list_tax_rules(cfg, limit=5000)
+    language = _detect_contract_language(contract, clauses)
     clause_map = {str(x.get("id") or ""): x for x in clauses}
     rule_map = {str(x.get("id") or ""): x for x in rules}
     risk_items = []
@@ -111,6 +122,7 @@ def build_tax_audit_report(cfg, contract_id: str) -> dict:
             exception_items.append(item)
     report = {
         "contract_id": contract_id,
+        "language": language,
         "generated_at": _utc_now_iso(),
         "overview": {
             "contract_filename": contract.get("original_filename"),

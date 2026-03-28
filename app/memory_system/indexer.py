@@ -36,14 +36,15 @@ class Chunk:
 
 
 class SentenceTransformerEmbedder:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
         from sentence_transformers import SentenceTransformer
 
         self.model = SentenceTransformer(model_name)
 
     def encode(self, texts: Sequence[str]) -> np.ndarray:
         if not texts:
-            return np.zeros((0, 384), dtype=np.float32)
+            dim = self.model.get_sentence_embedding_dimension() or 384
+            return np.zeros((0, dim), dtype=np.float32)
         emb = self.model.encode(list(texts), normalize_embeddings=True)
         return np.asarray(emb, dtype=np.float32)
 

@@ -36,9 +36,12 @@ async def run_demo() -> None:
     memory_root = Path(r"d:\Workspace\AI-Law-Assistant\memory")
     db_path = memory_root / "memory.db"
     embedder = SentenceTransformerEmbedder("all-MiniLM-L6-v2")
-    indexer = MemoryIndexer(IndexerConfig(memory_root=memory_root, db_path=db_path), embedder)
-    searcher = HybridSearcher(indexer=indexer, db_path=db_path, cfg=HybridSearchConfig(vector_weight=0.7, keyword_weight=0.3))
-    manager = MemoryLifecycleManager(memory_root, indexer, searcher, MemoryManagerConfig())
+    indexer = MemoryIndexer(IndexerConfig(
+        memory_root=memory_root, db_path=db_path), embedder)
+    searcher = HybridSearcher(indexer=indexer, db_path=db_path, cfg=HybridSearchConfig(
+        vector_weight=0.7, keyword_weight=0.3))
+    manager = MemoryLifecycleManager(
+        memory_root, indexer, searcher, MemoryManagerConfig())
     watcher = FileWatcher(memory_root, indexer)
 
     watcher.start()

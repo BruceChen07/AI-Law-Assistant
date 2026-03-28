@@ -1,8 +1,8 @@
 """
 Async Bridge.
-职责: 提供同步代码调用异步协程的桥接工具，处理事件循环的管理。
-输入输出: 接收一个协程对象，返回协程的执行结果。
-异常场景: 协程执行过程中的异常会被捕获并在主线程重新抛出。
+Responsibilities: Provides a bridge for synchronous code to call asynchronous coroutines, handling event loop management.
+Input/Output: Accepts a coroutine object and returns the result of the coroutine.
+Exception Handling: Returns the coroutine result or throws the exception in the main thread.
 """
 import asyncio
 import threading
@@ -11,8 +11,9 @@ from typing import Dict, Any, Coroutine
 
 logger = structlog.get_logger(__name__)
 
+
 def run_coro_sync(coro: Coroutine) -> Any:
-    """在同步上下文中运行异步协程。"""
+    """Run an asynchronous coroutine in a synchronous context."""
     try:
         asyncio.get_running_loop()
         has_running = True
@@ -20,7 +21,7 @@ def run_coro_sync(coro: Coroutine) -> Any:
         has_running = False
     if not has_running:
         return asyncio.run(coro)
-    
+
     result_box: Dict[str, Any] = {}
     error_box: Dict[str, Exception] = {}
 

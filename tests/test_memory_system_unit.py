@@ -26,7 +26,8 @@ def test_index_and_search(tmp_path: Path):
     md = memory_root / "2026-03-18.md"
     md.write_text("第一条 发票开具时限。\n\nArticle 2 payment terms.", encoding="utf-8")
 
-    indexer = MemoryIndexer(IndexerConfig(memory_root=memory_root, db_path=db_path), FakeEmbedder())
+    indexer = MemoryIndexer(IndexerConfig(
+        memory_root=memory_root, db_path=db_path), FakeEmbedder())
     count = indexer.index_file(md)
     assert count >= 1
 
@@ -45,8 +46,10 @@ def test_index_file_dedup_duplicate_ranges(tmp_path: Path):
     md = memory_root / "2026-03-18.md"
     md.write_text("A\n\nB", encoding="utf-8")
 
-    indexer = MemoryIndexer(IndexerConfig(memory_root=memory_root, db_path=db_path), FakeEmbedder())
-    duplicate = Chunk(content="dup", start_line=1, end_line=1, content_hash="h1")
+    indexer = MemoryIndexer(IndexerConfig(
+        memory_root=memory_root, db_path=db_path), FakeEmbedder())
+    duplicate = Chunk(content="dup", start_line=1,
+                      end_line=1, content_hash="h1")
     indexer.chunker.split = lambda _text: [duplicate, duplicate]
 
     count = indexer.index_file(md)
@@ -57,9 +60,11 @@ def test_memory_split_contract_refines_minor_items(tmp_path: Path):
     memory_root = tmp_path / "memory"
     memory_root.mkdir(parents=True, exist_ok=True)
     db_path = memory_root / "memory.db"
-    indexer = MemoryIndexer(IndexerConfig(memory_root=memory_root, db_path=db_path), FakeEmbedder())
+    indexer = MemoryIndexer(IndexerConfig(
+        memory_root=memory_root, db_path=db_path), FakeEmbedder())
     searcher = HybridSearcher(indexer, db_path)
-    manager = MemoryLifecycleManager(memory_root, indexer, searcher, MemoryManagerConfig(max_rounds=32))
+    manager = MemoryLifecycleManager(
+        memory_root, indexer, searcher, MemoryManagerConfig(max_rounds=32))
 
     text = "\n".join([
         "合同编号：A-1",
@@ -80,9 +85,11 @@ def test_memory_compact_clauses_for_budget(tmp_path: Path):
     memory_root = tmp_path / "memory"
     memory_root.mkdir(parents=True, exist_ok=True)
     db_path = memory_root / "memory.db"
-    indexer = MemoryIndexer(IndexerConfig(memory_root=memory_root, db_path=db_path), FakeEmbedder())
+    indexer = MemoryIndexer(IndexerConfig(
+        memory_root=memory_root, db_path=db_path), FakeEmbedder())
     searcher = HybridSearcher(indexer, db_path)
-    manager = MemoryLifecycleManager(memory_root, indexer, searcher, MemoryManagerConfig(max_rounds=6))
+    manager = MemoryLifecycleManager(
+        memory_root, indexer, searcher, MemoryManagerConfig(max_rounds=6))
 
     text = "\n".join(["一、 服务内容"] + [f"、子项{i}" for i in range(1, 13)])
     clauses = manager.split_contract(text)

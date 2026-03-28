@@ -50,7 +50,8 @@ def test_contract_audit_zh_en_bilingual(tmp_path: Path):
     memory_root.mkdir(parents=True, exist_ok=True)
     db_path = memory_root / "memory.db"
 
-    indexer = MemoryIndexer(IndexerConfig(memory_root=memory_root, db_path=db_path), FakeEmbedder())
+    indexer = MemoryIndexer(IndexerConfig(
+        memory_root=memory_root, db_path=db_path), FakeEmbedder())
     searcher = HybridSearcher(indexer, db_path)
     manager = MemoryLifecycleManager(memory_root, indexer, searcher)
 
@@ -58,7 +59,8 @@ def test_contract_audit_zh_en_bilingual(tmp_path: Path):
 Article 2 Supplier shall issue invoice in 15 days.
 第三条 双方按月结算。"""
     legal_catalog = {"中华人民共和国增值税暂行条例": ["第十九条"]}
-    report = asyncio.run(manager.audit_contract(contract, clause_llm, flush_llm, legal_catalog))
+    report = asyncio.run(manager.audit_contract(
+        contract, clause_llm, flush_llm, legal_catalog))
 
     assert report["risk_count"] >= 1
     assert report["legal_validation"]["ok"] is True

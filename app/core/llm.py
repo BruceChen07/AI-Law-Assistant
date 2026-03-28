@@ -16,7 +16,8 @@ class LLMService:
 
     def _clean_text(self, v: Any) -> str:
         s = str(v or "").strip()
-        s = s.replace("`", "").replace("“", "").replace("”", "").replace("‘", "").replace("’", "")
+        s = s.replace("`", "").replace("“", "").replace(
+            "”", "").replace("‘", "").replace("’", "")
         s = s.strip('"').strip("'").strip()
         return s
 
@@ -25,6 +26,16 @@ class LLMService:
         if isinstance(llm_cfg, dict):
             return llm_cfg
         return {}
+
+    def _resolve_api_key(self, cfg: Dict[str, Any]) -> str:
+        key = self._clean_text(cfg.get("api_key", ""))
+        if key:
+            return key
+        for name in ["LLM_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"]:
+            env_key = self._clean_text(os.environ.get(name, ""))
+            if env_key:
+                return env_key
+        return ""
 
     def _build_base_url(self, base: str) -> str:
         if base.endswith("/chat/completions"):
@@ -62,7 +73,8 @@ class LLMService:
             if isinstance(content, list):
                 for item in content:
                     if isinstance(item, dict):
-                        text = str(item.get("text") or item.get("content") or "")
+                        text = str(item.get("text")
+                                   or item.get("content") or "")
                         if text:
                             parts.append(text)
                     else:
@@ -79,13 +91,15 @@ class LLMService:
         trace_dir = str(self.cfg.get("llm_trace_dir") or "").strip()
         if not trace_dir:
             base = str(self.cfg.get("data_dir") or "").strip()
-            trace_dir = os.path.join(base, "llm_traces") if base else os.path.abspath("llm_traces")
+            trace_dir = os.path.join(
+                base, "llm_traces") if base else os.path.abspath("llm_traces")
         max_chars = int(self.cfg.get("llm_trace_max_chars", 12000) or 12000)
         return {"enabled": enabled, "dir": os.path.abspath(trace_dir), "max_chars": max(1000, max_chars)}
 
     def _mask_text(self, text: str) -> str:
         s = str(text or "")
-        s = re.sub(r"Bearer\s+[A-Za-z0-9\-\._]+", "Bearer ***", s, flags=re.IGNORECASE)
+        s = re.sub(r"Bearer\s+[A-Za-z0-9\-\._]+",
+                   "Bearer ***", s, flags=re.IGNORECASE)
         s = re.sub(r"sk-[A-Za-z0-9_\-]{16,}", "sk-***", s)
         s = re.sub(r"\b1[3-9]\d{9}\b", "1**********", s)
         return s
@@ -100,13 +114,15 @@ class LLMService:
         out: List[Dict[str, Any]] = []
         for m in messages or []:
             if not isinstance(m, dict):
-                out.append({"role": "unknown", "content": self._clip(self._mask_text(m), max_chars)})
+                out.append({"role": "unknown", "content": self._clip(
+                    self._mask_text(m), max_chars)})
                 continue
             role = str(m.get("role") or "")
             content = m.get("content", "")
             if isinstance(content, list):
                 content = json.dumps(content, ensure_ascii=False)
-            out.append({"role": role, "content": self._clip(self._mask_text(content), max_chars)})
+            out.append({"role": role, "content": self._clip(
+                self._mask_text(content), max_chars)})
         return out
 
     def _write_trace(self, payload: Dict[str, Any]) -> None:
@@ -133,10 +149,12 @@ class LLMService:
         thinking_budget = cfg.get("thinking_budget_tokens")
         if thinking_budget is not None:
             try:
-                extra_body["thinking_budget_tokens"] = max(0, int(thinking_budget))
+                extra_body["thinking_budget_tokens"] = max(
+                    0, int(thinking_budget))
             except Exception:
                 pass
-        reasoning_effort = str(cfg.get("reasoning_effort") or "").strip().lower()
+        reasoning_effort = str(
+            cfg.get("reasoning_effort") or "").strip().lower()
         if reasoning_effort in {"low", "medium", "high"}:
             kwargs["reasoning_effort"] = reasoning_effort
         if extra_body:
@@ -161,14 +179,17 @@ class LLMService:
         cfg = dict(self._get_llm_config())
         trace_meta = {}
         if overrides:
-            trace_meta = overrides.get("_trace_meta") if isinstance(overrides.get("_trace_meta"), dict) else {}
-            cfg.update({k: v for k, v in overrides.items() if k != "_trace_meta"})
+            trace_meta = overrides.get("_trace_meta") if isinstance(
+                overrides.get("_trace_meta"), dict) else {}
+            cfg.update(
+                {k: v for k, v in overrides.items() if k != "_trace_meta"})
         api_base = self._clean_text(cfg.get("api_base", ""))
-        api_key = self._clean_text(cfg.get("api_key", ""))
+        api_key = self._resolve_api_key(cfg)
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
         max_tokens = int(cfg.get("max_tokens", 2048))
-        extra_headers = cfg.get("headers") if isinstance(cfg.get("headers"), dict) else None
+        extra_headers = cfg.get("headers") if isinstance(
+            cfg.get("headers"), dict) else None
         if not api_base or not model:
             raise RuntimeError("llm_config api_base or model missing")
 
@@ -203,7 +224,8 @@ class LLMService:
             max_retries=max(0, retries - 1),
             default_headers=extra_headers or None
         )
-        request_kwargs = self._build_chat_kwargs(model, messages, temperature, max_tokens, cfg)
+        request_kwargs = self._build_chat_kwargs(
+            model, messages, temperature, max_tokens, cfg)
         try:
             resp = self._create_chat_completion(client, request_kwargs)
         except APITimeoutError as e:
@@ -229,9 +251,11 @@ class LLMService:
                 default_headers=extra_headers or None,
             )
             retry_cfg = dict(cfg)
-            retry_request_kwargs = self._build_chat_kwargs(retry_model, messages, temperature, retry_max_tokens, retry_cfg)
+            retry_request_kwargs = self._build_chat_kwargs(
+                retry_model, messages, temperature, retry_max_tokens, retry_cfg)
             try:
-                resp = self._create_chat_completion(retry_client, retry_request_kwargs)
+                resp = self._create_chat_completion(
+                    retry_client, retry_request_kwargs)
             except Exception as e2:
                 logger.exception(
                     "llm_request_failed_after_retry api_base=%s base_url=%s model=%s retry_model=%s timeout=%s retry_timeout=%s raw_api_base=%r api_key=%s headers=%s",
@@ -245,7 +269,8 @@ class LLMService:
                     self._mask_secret(api_key),
                     list((extra_headers or {}).keys()),
                 )
-                raise RuntimeError(f"llm request failed after timeout retry: {str(e2)}") from e2
+                raise RuntimeError(
+                    f"llm request failed after timeout retry: {str(e2)}") from e2
         except Exception as e:
             logger.exception(
                 "llm_request_failed api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
@@ -267,10 +292,12 @@ class LLMService:
             })
             raise RuntimeError(f"llm request failed: {str(e)}") from e
         parsed = resp.model_dump()
-        usage = parsed.get("usage") if isinstance(parsed.get("usage"), dict) else {}
+        usage = parsed.get("usage") if isinstance(
+            parsed.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
-        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        total_tokens = int(usage.get("total_tokens") or (
+            prompt_tokens + completion_tokens))
         latency_ms = int((time.perf_counter() - t0) * 1000)
         logger.info(
             "llm_request_done model=%s input_tokens_est=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s",

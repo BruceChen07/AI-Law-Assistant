@@ -1,15 +1,15 @@
 """
 Memory Pipeline.
-职责: 协调 MemoryLifecycleManager 运行长短记忆条款级审计流。
-输入输出: 接收合同配置、条款和法条库，返回审计结果及统计元信息。
-异常场景: LLM 超时或解析失败时，记录异常并跳过出错条款，最终可能抛出退级异常。
+Responsibilities: Coordinates the MemoryLifecycleManager.
+Input/Output: Accepts contract configuration, clauses, and legal catalog, and returns audit results and metadata.
+Exception Handling: Logs exceptions and skips clauses that fail, potentially throwing fallback exceptions.
 """
 import json
 import re
 import structlog
 from pathlib import Path
 from typing import Dict, Any, List, Optional
-from app.services.audit_utils import _normalize_risk_level, _enrich_citations
+from app.services.audit_utils import _normalize_risk_level, _enrich_citations, _normalize_lang
 from app.memory_system.indexer import IndexerConfig, MemoryIndexer, SentenceTransformerEmbedder
 from app.memory_system.search import HybridSearcher, HybridSearchConfig
 from app.memory_system.manager import MemoryLifecycleManager, MemoryManagerConfig
@@ -25,7 +25,7 @@ from app.services.contract_audit_modules.risk_suppression import (
 )
 
 logger = structlog.get_logger(__name__)
-_MEMORY_EMBEDDER = None
+_MEMORY_EMBEDDERS: Dict[str, Any] = {}
 
 
 def _estimate_text_tokens(text: str) -> int:
@@ -103,16 +103,21 @@ def _build_compact_whitelist(evidence_items: List[Dict[str, Any]], limit: int = 
     return "\n".join(lines), alias_to_cid
 
 
-def get_memory_embedder():
-    global _MEMORY_EMBEDDER
-    if _MEMORY_EMBEDDER is not None:
-        return _MEMORY_EMBEDDER
+def get_memory_embedder(lang: str = "zh"):
+    global _MEMORY_EMBEDDERS
+    norm_lang = _normalize_lang(lang, default="zh")
+    if norm_lang in _MEMORY_EMBEDDERS:
+        return _MEMORY_EMBEDDERS[norm_lang]
     try:
-        _MEMORY_EMBEDDER = SentenceTransformerEmbedder("all-MiniLM-L6-v2")
-        logger.info("memory_embedder_ready", provider="sentence_transformers")
-        return _MEMORY_EMBEDDER
+        model_name = "BAAI/bge-small-zh-v1.5" if norm_lang == "zh" else "BAAI/bge-small-en-v1.5"
+        embedder = SentenceTransformerEmbedder(model_name)
+        _MEMORY_EMBEDDERS[norm_lang] = embedder
+        logger.info("memory_embedder_ready",
+                    provider="sentence_transformers", lang=norm_lang, model=model_name)
+        return embedder
     except Exception as e:
-        logger.warning("memory_embedder_fallback", reason=str(e))
+        logger.warning("memory_embedder_fallback",
+                       reason=str(e), lang=norm_lang)
 
         class _FallbackEmbedder:
             def encode(self, texts):
@@ -125,8 +130,9 @@ def get_memory_embedder():
                     norm = np.linalg.norm(vec) + 1e-12
                     out.append(vec / norm)
                 return np.vstack(out) if out else np.zeros((0, 16), dtype=np.float32)
-        _MEMORY_EMBEDDER = _FallbackEmbedder()
-        return _MEMORY_EMBEDDER
+        embedder = _FallbackEmbedder()
+        _MEMORY_EMBEDDERS[norm_lang] = embedder
+        return embedder
 
 
 def execute_memory_audit(
@@ -139,13 +145,14 @@ def execute_memory_audit(
     retrieval_opts: Dict[str, Any],
     trace_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """执行带记忆库的条款级审计。"""
+    """Execute clause-level audit with memory."""
+    norm_lang = _normalize_lang(lang, default="zh")
     memory_dir, memory_db = memory_paths(cfg)
     memory_use_long_hits = bool(cfg.get("memory_use_long_hits", True))
     logger.info("memory_pipeline_start", memory_dir=memory_dir,
-                memory_db=memory_db, evidence=len(evidence_items))
+                memory_db=memory_db, evidence=len(evidence_items), lang=norm_lang)
 
-    embedder = get_memory_embedder()
+    embedder = get_memory_embedder(norm_lang)
     indexer = MemoryIndexer(
         IndexerConfig(memory_root=Path(memory_dir), db_path=Path(memory_db)),
         embedder
@@ -196,13 +203,16 @@ def execute_memory_audit(
         for it in evidence_items
         if str(it.get("citation_id") or "").strip()
     }
-    filter_unverifiable_risks = bool(cfg.get("memory_filter_unverifiable_risks", True))
-    filtered_risk_log_limit = max(1, int(cfg.get("memory_filtered_risk_log_limit") or 30))
+    filter_unverifiable_risks = bool(
+        cfg.get("memory_filter_unverifiable_risks", True))
+    filtered_risk_log_limit = max(
+        1, int(cfg.get("memory_filtered_risk_log_limit") or 30))
     evidence_whitelist_text = build_evidence_whitelist_text(
         evidence_items, limit=int(cfg.get("memory_whitelist_limit") or 36))
     citation_alias_map: Dict[str, str] = {}
     global_tax_context = build_global_tax_context(preview_clauses)
-    global_tax_context_text = format_global_tax_context(global_tax_context, per_topic_limit=2)
+    global_tax_context_text = format_global_tax_context(
+        global_tax_context, per_topic_limit=2)
 
     clause_parse_state = {"count": 0, "clause_ids": []}
     base_trace_meta = dict(trace_context or {})
@@ -247,27 +257,52 @@ def execute_memory_audit(
 
         long_memory_block = ""
         if memory_use_long_hits and long_memory_hits:
-            long_memory_block = f"长期记忆命中:\n{long_memory_hits}\n\n"
+            if norm_lang == "en":
+                long_memory_block = f"Long-term Memory Hits:\n{long_memory_hits}\n\n"
+            else:
+                long_memory_block = f"长期记忆命中:\n{long_memory_hits}\n\n"
+
         global_context_block = ""
         if global_tax_context_text:
-            global_context_block = f"全局涉税事实画像(来自整份合同):\n{global_tax_context_text}\n\n"
+            if norm_lang == "en":
+                global_context_block = f"Global Tax Fact Profile (from the entire contract):\n{global_tax_context_text}\n\n"
+            else:
+                global_context_block = f"全局涉税事实画像(来自整份合同):\n{global_tax_context_text}\n\n"
 
-        system = "你是资深合同审计律师。请只输出JSON。"
-        user = (
-            f"语言:{lang}\n"
-            "仅根据输入审计；优先参考白名单法条；输出必须是JSON。\n"
-            "短记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n"
-            "风险项优先填写白名单 citation_id；如无法确定 citation_id，可留空，但必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
-            "若要输出‘未明确/未约定/未提及/缺失’风险，可参考短记忆、长期命中与当前条款；仅在同一要素已被明确且可执行约定覆盖时才抑制该风险。\n"
-            "禁止输出推理过程、分析过程与额外解释，只输出最终JSON。\n"
-            f"白名单:\n{evidence_whitelist_text}\n\n"
-            f"短记忆:\n{short_memory}\n\n"
-            f"{global_context_block}"
-            f"{long_memory_block}"
-            f"条款标题:{clause_title}\n"
-            f"条款正文:\n{clause_text}\n\n"
-            "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
-        )
+        if norm_lang == "en":
+            system = "You are a senior contract audit lawyer. Please output ONLY in JSON format."
+            user = (
+                f"Language: {norm_lang}\n"
+                "Audit strictly based on the input; prioritize the whitelisted laws; output MUST be JSON.\n"
+                "Short memory and long-term hits are for factual reference only; do not directly reuse their historical conclusions.\n"
+                "For risk items, prioritize filling in the whitelisted citation_id; if the citation_id cannot be determined, it can be left blank, but try to fill in the law_title and article_no for post-processing mapping and verification.\n"
+                "If outputting 'unclear/unspecified/unmentioned/missing' risks, refer to the short memory, long-term hits, and the current clause; suppress this risk ONLY if the same element has been covered by explicit and enforceable provisions.\n"
+                "Do NOT output reasoning processes, analysis processes, or extra explanations. ONLY output the final JSON.\n"
+                f"Whitelist:\n{evidence_whitelist_text}\n\n"
+                f"Short Memory:\n{short_memory}\n\n"
+                f"{global_context_block}"
+                f"{long_memory_block}"
+                f"Clause Title: {clause_title}\n"
+                f"Clause Text:\n{clause_text}\n\n"
+                "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
+            )
+        else:
+            system = "你是资深合同审计律师。请只输出JSON。"
+            user = (
+                f"语言:{norm_lang}\n"
+                "仅根据输入审计；优先参考白名单法条；输出必须是JSON。\n"
+                "短记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n"
+                "风险项优先填写白名单 citation_id；如无法确定 citation_id，可留空，但必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
+                "若要输出‘未明确/未约定/未提及/缺失’风险，可参考短记忆、长期命中与当前条款；仅在同一要素已被明确且可执行约定覆盖时才抑制该风险。\n"
+                "禁止输出推理过程、分析过程与额外解释，只输出最终JSON。\n"
+                f"白名单:\n{evidence_whitelist_text}\n\n"
+                f"短记忆:\n{short_memory}\n\n"
+                f"{global_context_block}"
+                f"{long_memory_block}"
+                f"条款标题:{clause_title}\n"
+                f"条款正文:\n{clause_text}\n\n"
+                "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
+            )
         clause_trace_meta = {
             **base_trace_meta,
             "stage": "contract_clause_audit",
@@ -276,7 +311,7 @@ def execute_memory_audit(
             "clause_path": str(clause.get("clause_path") or ""),
             "risk_detection_mode": risk_detection_mode,
             "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
-            "lang": lang,
+            "lang": norm_lang,
         }
         write_audit_trace(
             cfg,
@@ -632,7 +667,8 @@ def execute_memory_audit(
             cid = str(item.get("citation_id") or "").strip()
             mapped_ok = bool(cid and cid in allowed_citation_ids)
             ev = evidence_by_cid.get(cid) if mapped_ok else {}
-            full_text = str((ev or {}).get("content") or (ev or {}).get("excerpt") or "").strip()
+            full_text = str((ev or {}).get("content") or (
+                ev or {}).get("excerpt") or "").strip()
             if mapped_ok and full_text:
                 display_risks.append(item)
                 continue

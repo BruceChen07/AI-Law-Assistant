@@ -23,7 +23,8 @@ def copy_if_exists(src_dir: Path, dst_dir: Path, name: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-id", default="auto")
-    parser.add_argument("--language", default="all", choices=["zh", "en", "all"])
+    parser.add_argument("--language", default="all",
+                        choices=["zh", "en", "all"])
     parser.add_argument("--target-dir", default="..\\models\\embedding")
     parser.add_argument("--onnx-name", default="")
     parser.add_argument("--config-path", default="config.json")
@@ -48,9 +49,11 @@ def main():
             if args.reranker:
                 model_id = "BAAI/bge-reranker-base"
             else:
-                model_id = default_embedding_models.get(lang, "BAAI/bge-small-zh-v1.5")
+                model_id = default_embedding_models.get(
+                    lang, "BAAI/bge-small-zh-v1.5")
 
-        target_dir = Path(resolve_path(app_dir, os.path.join(base_target_dir, lang)))
+        target_dir = Path(resolve_path(
+            app_dir, os.path.join(base_target_dir, lang)))
         target_dir.mkdir(parents=True, exist_ok=True)
 
         local_dir = snapshot_download(
@@ -98,24 +101,30 @@ def main():
             with open(cfg_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             if args.reranker:
-                cfg["reranker_model_path"] = os.path.relpath(str(target_dir), app_dir)
+                cfg["reranker_model_path"] = os.path.relpath(
+                    str(target_dir), app_dir)
                 reranker_profiles = cfg.setdefault("reranker_profiles", {})
-                reranker_profiles[lang] = os.path.relpath(str(target_dir), app_dir)
+                reranker_profiles[lang] = os.path.relpath(
+                    str(target_dir), app_dir)
             else:
                 cfg.setdefault("default_language", "zh")
                 profiles = cfg.setdefault("embedding_profiles", {})
                 profile = profiles.setdefault(lang, {})
-                profile["embedding_model"] = os.path.relpath(str(onnx_dst), app_dir)
-                profile["embedding_tokenizer_dir"] = os.path.relpath(str(target_dir), app_dir)
+                profile["embedding_model"] = os.path.relpath(
+                    str(onnx_dst), app_dir)
+                profile["embedding_tokenizer_dir"] = os.path.relpath(
+                    str(target_dir), app_dir)
                 profile["embedding_model_id"] = model_id
                 profile["embedding_source"] = "modelscope"
                 profile.setdefault("embedding_max_seq_len", 512)
                 profile.setdefault("embedding_pooling", "cls")
                 profile.setdefault("embedding_threads", 2)
                 if lang == "en":
-                    profile.setdefault("embedding_query_instruction", "Represent this sentence for retrieving relevant passages:")
+                    profile.setdefault(
+                        "embedding_query_instruction", "Represent this sentence for retrieving relevant passages:")
                 else:
-                    profile.setdefault("embedding_query_instruction", "为这个句子生成表示以用于检索相关文章：")
+                    profile.setdefault(
+                        "embedding_query_instruction", "为这个句子生成表示以用于检索相关文章：")
             with open(cfg_path, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=4)
 

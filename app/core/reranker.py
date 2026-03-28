@@ -13,7 +13,8 @@ class RerankerService:
         self.profiles = profiles or {}
         self.models = {}
         self.tokenizers = {}
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or (
+            "cuda" if torch.cuda.is_available() else "cpu")
         self.batch_size = batch_size
         self.max_len = max_len
         if model_path:
@@ -21,9 +22,11 @@ class RerankerService:
 
     def _load_model(self, model_path: str, key: str):
         try:
-            logger.info("Loading reranker model from %s on %s", model_path, self.device)
+            logger.info("Loading reranker model from %s on %s",
+                        model_path, self.device)
             tokenizer = AutoTokenizer.from_pretrained(model_path)
-            model = AutoModelForSequenceClassification.from_pretrained(model_path)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                model_path)
             model.to(self.device)
             model.eval()
             self.models[key] = model
@@ -53,7 +56,8 @@ class RerankerService:
         if not model or not tokenizer:
             return 0.0
         with torch.no_grad():
-            inputs = tokenizer([[query, text]], padding=True, truncation=True, return_tensors="pt", max_length=self.max_len)
+            inputs = tokenizer([[query, text]], padding=True, truncation=True,
+                               return_tensors="pt", max_length=self.max_len)
             inputs = {k: v.to(self.device) for k, v in inputs.items()}
             scores = model(**inputs, return_dict=True).logits.view(-1,).float()
             return float(scores[0])
@@ -69,9 +73,11 @@ class RerankerService:
         for i in range(0, len(pairs), self.batch_size):
             batch_pairs = pairs[i:i + self.batch_size]
             with torch.no_grad():
-                inputs = tokenizer(batch_pairs, padding=True, truncation=True, return_tensors="pt", max_length=self.max_len)
+                inputs = tokenizer(batch_pairs, padding=True, truncation=True,
+                                   return_tensors="pt", max_length=self.max_len)
                 inputs = {k: v.to(self.device) for k, v in inputs.items()}
-                scores = model(**inputs, return_dict=True).logits.view(-1,).float()
+                scores = model(
+                    **inputs, return_dict=True).logits.view(-1,).float()
                 all_scores.extend(scores.cpu().numpy().tolist())
 
         for i, c in enumerate(candidates):

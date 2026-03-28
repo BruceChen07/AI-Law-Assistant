@@ -7,6 +7,7 @@ import { appI18n } from "./i18n/appI18n"
 const THEME_STORAGE_KEY = "ui_theme"
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
+const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
 
 const getStoredTheme = () => {
   const v = String(localStorage.getItem(THEME_STORAGE_KEY) || "").toLowerCase()
@@ -361,6 +362,14 @@ export default function App() {
       return `P${pageNo || "-"} / Para ${paragraphNo || "-"}`
     }
     return t.noLocation
+  }
+
+  const formatRiskLevel = (value) => {
+    const level = String(value || "").trim().toLowerCase()
+    if (level === "high") return t.riskHigh
+    if (level === "medium") return t.riskMedium
+    if (level === "low") return t.riskLow
+    return value || "N/A"
   }
 
   const formatAnchorStrategy = (value) => {
@@ -737,6 +746,9 @@ export default function App() {
       const res = await auditContract(form)
       bumpProgress(100, "done")
       const nextDocumentId = String(res.document_id || "")
+      const detectedLang = normalizeAppLang(res?.meta?.language || contract.language)
+      setUiLang(detectedLang)
+      setContract(prev => ({ ...prev, language: detectedLang }))
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)
       setDocumentId(nextDocumentId)
@@ -1157,7 +1169,7 @@ export default function App() {
                               role="button"
                               tabIndex={0}
                             >
-                              <strong>{r.level || "N/A"}</strong>
+                              <strong>{formatRiskLevel(r.level)}</strong>
                               <span>{r.type || "-"}</span>
                               <p>{r.issue || "-"}</p>
                               <div className="risk-location">{t.location}: {formatRiskLocation(location)}</div>
