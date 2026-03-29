@@ -5,7 +5,9 @@ import re
 import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
+from urllib.parse import urlsplit
 from openai import OpenAI, APITimeoutError
+from app.core.secure_store import get_llm_api_key
 
 logger = logging.getLogger("law_assistant")
 
@@ -31,6 +33,12 @@ class LLMService:
         key = self._clean_text(cfg.get("api_key", ""))
         if key:
             return key
+<<<<<<< Updated upstream
+=======
+        secure_key = self._clean_text(get_llm_api_key(self.cfg))
+        if secure_key:
+            return secure_key
+>>>>>>> Stashed changes
         for name in ["LLM_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"]:
             env_key = self._clean_text(os.environ.get(name, ""))
             if env_key:
@@ -38,11 +46,19 @@ class LLMService:
         return ""
 
     def _build_base_url(self, base: str) -> str:
-        if base.endswith("/chat/completions"):
-            return base[: -len("/chat/completions")]
-        if base.endswith("/"):
-            return base[:-1]
-        return base
+        s = re.sub(r"\s+", "", self._clean_text(base))
+        if not s:
+            return ""
+        if not re.match(r"^https?://", s, flags=re.IGNORECASE):
+            s = f"https://{s}"
+        if s.endswith("/chat/completions"):
+            s = s[: -len("/chat/completions")]
+        if s.endswith("/"):
+            s = s[:-1]
+        p = urlsplit(s)
+        if not p.scheme or not p.netloc:
+            raise RuntimeError("llm_config api_base invalid")
+        return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
 
     def _build_headers(self, api_key: Optional[str], extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -166,7 +182,14 @@ class LLMService:
             return client.chat.completions.create(**kwargs)
         except Exception as e:
             msg = str(e).lower()
-            if ("unsupported" in msg or "unknown" in msg or "unrecognized" in msg or "invalid" in msg) and (
+            if (
+                "unsupported" in msg
+                or "unknown" in msg
+                or "unrecognized" in msg
+                or "invalid" in msg
+                or "unexpected keyword" in msg
+                or "unexpected keyword argument" in msg
+            ) and (
                 "extra_body" in kwargs or "reasoning_effort" in kwargs
             ):
                 fallback_kwargs = dict(kwargs)
@@ -183,7 +206,12 @@ class LLMService:
                 overrides.get("_trace_meta"), dict) else {}
             cfg.update(
                 {k: v for k, v in overrides.items() if k != "_trace_meta"})
+<<<<<<< Updated upstream
         api_base = self._clean_text(cfg.get("api_base", ""))
+=======
+        api_base_raw = cfg.get("api_base", "")
+        api_base = self._build_base_url(str(api_base_raw or ""))
+>>>>>>> Stashed changes
         api_key = self._resolve_api_key(cfg)
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
@@ -193,7 +221,7 @@ class LLMService:
         if not api_base or not model:
             raise RuntimeError("llm_config api_base or model missing")
 
-        base_url = self._build_base_url(api_base)
+        base_url = api_base
         timeout = int(cfg.get("timeout", 60))
         retries = max(1, int(cfg.get("retries", 2)))
         input_tokens_est = self._estimate_input_tokens(messages)
@@ -282,6 +310,11 @@ class LLMService:
                 self._mask_secret(api_key),
                 list((extra_headers or {}).keys())
             )
+            dns_hint = ""
+            low_err = str(e).lower()
+            if "getaddrinfo failed" in low_err or "name or service not known" in low_err:
+                host = urlsplit(base_url).netloc
+                dns_hint = f" (dns resolve failed for host: {host})"
             self._write_trace({
                 "ts": datetime.utcnow().isoformat(),
                 "ok": False,
@@ -290,7 +323,7 @@ class LLMService:
                 "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
                 "error": self._clip(self._mask_text(str(e)), self._trace_options()["max_chars"]),
             })
-            raise RuntimeError(f"llm request failed: {str(e)}") from e
+            raise RuntimeError(f"llm request failed: {str(e)}{dns_hint}") from e        
         parsed = resp.model_dump()
         usage = parsed.get("usage") if isinstance(
             parsed.get("usage"), dict) else {}

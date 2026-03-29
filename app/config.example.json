@@ -71,9 +71,47 @@
         "timeout": 60,
         "headers": {}
     },
+    "secret_store": {
+        "enabled": true,
+        "backend": "keyring",
+        "service_name": "ai-law-assistant",
+        "llm_api_key_name": "llm_api_key"
+    },
+    "rag_db_paths": {
+        "zh": "../data/rag_zh.db",
+        "en": "../data/rag_en.db"
+    },
+    "rag_dual_search_enabled": true,
+    "retrieval_regulation_language": "zh",
+    "translation_config": {
+        "enabled": false,
+        "backend": "hy_mt_local",
+        "mode": "dual",
+        "cross_lang_source_query_enabled": false,
+        "model_id": "tencent/HY-MT1.5-1.8B",
+        "model_dir": "",
+        "device": "cpu",
+        "source_langs": [
+            "en"
+        ],
+        "target_lang": "zh",
+        "max_source_chars": 600,
+        "max_new_tokens": 320,
+        "num_beams": 4,
+        "cache_size": 2000,
+        "glossary": {
+            "VAT": "增值税",
+            "withholding tax": "预提税",
+            "invoice": "发票"
+        }
+    },
     "llm_trace_enabled": false,
     "llm_trace_dir": "../data/memory/llm_interactions",
     "llm_trace_max_chars": 12000,
+    "rag_trace_enabled": true,
+    "rag_trace_dir": "../data/memory/debug/rag_retrieval",
+    "rag_trace_max_chars": 3000,
+    "rag_trace_max_rows": 20,
     "ui_config": {
         "show_citation_source": false,
         "default_theme": "dark"
@@ -97,9 +135,15 @@
         "docx_pdf_gate_min_chars": 120,
         "docx_pdf_keep_file": false
     },
-    "memory_use_long_hits": true,
+    "memory_use_long_hits": false,
+    "memory_enable_long_memory": false,
+    "memory_enable_short_memory": true,
     "memory_filter_unverifiable_risks": true,
     "memory_filtered_risk_log_limit": 30,
+    "contract_audit_debug_retention_days": 7,
+    "contract_audit_debug_cleanup_interval_sec": 1800,
+    "contract_audit_debug_archive_before_delete": false,
+    "contract_audit_debug_archive_dir": "",
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",

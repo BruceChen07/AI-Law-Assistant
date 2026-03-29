@@ -12,6 +12,7 @@ from app.api.dependencies import require_admin
 from app.core.database import get_conn
 from app.core.config import get_config, update_config_patch
 from app.core.llm import LLMService
+from app.core.secure_store import has_llm_api_key, set_llm_api_key, delete_llm_api_key
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -172,6 +173,18 @@ def _validate_llm_config(payload: dict):
     timeout = int(payload.get("timeout", 60))
     if timeout <= 0:
         raise HTTPException(status_code=400, detail="timeout must be positive")
+
+
+def _ensure_llm_secret_migrated(cfg: dict) -> dict:
+    llm_cfg = cfg.get("llm_config") if isinstance(cfg.get("llm_config"), dict) else {}
+    plain = _clean_text(llm_cfg.get("api_key", ""))
+    if not plain:
+        return cfg
+    if not set_llm_api_key(cfg, plain):
+        return cfg
+    next_llm = dict(llm_cfg)
+    next_llm["api_key"] = ""
+    return update_config_patch({"llm_config": next_llm})
 
 
 def _normalize_theme(v: Optional[str]) -> str:
@@ -432,7 +445,7 @@ def get_stats(current_user: dict = Depends(require_admin)):
 
 @router.get("/llm-config", response_model=LLMConfigResponse)
 def get_llm_config(current_user: dict = Depends(require_admin)):
-    cfg = get_config()
+    cfg = _ensure_llm_secret_migrated(get_config())
     llm_cfg = cfg.get("llm_config") or {}
     return LLMConfigResponse(
         provider=str(llm_cfg.get("provider", "")),
@@ -443,7 +456,7 @@ def get_llm_config(current_user: dict = Depends(require_admin)):
         timeout=int(llm_cfg.get("timeout", 60)),
         headers=llm_cfg.get("headers") if isinstance(
             llm_cfg.get("headers"), dict) else {},
-        has_api_key=bool(llm_cfg.get("api_key"))
+        has_api_key=bool(llm_cfg.get("api_key")) or has_llm_api_key(cfg)
     )
 
 
@@ -451,9 +464,11 @@ def get_llm_config(current_user: dict = Depends(require_admin)):
 def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: dict = Depends(require_admin)):
     data = _normalize_llm_payload(payload.dict())
     _validate_llm_config(data)
-    current = get_config().get("llm_config") or {}
-    if not data.get("api_key"):
-        data["api_key"] = _clean_text(current.get("api_key", ""))
+    cfg_now = get_config()
+    plain_api_key = _clean_text(data.get("api_key", ""))
+    if plain_api_key and not set_llm_api_key(cfg_now, plain_api_key):
+        raise HTTPException(status_code=500, detail="failed to save api_key in secure store")
+    data["api_key"] = ""
     cfg = update_config_patch({"llm_config": data})
     if hasattr(request.app.state, "llm"):
         request.app.state.llm.cfg = cfg
@@ -467,8 +482,23 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
         timeout=int(llm_cfg.get("timeout", 60)),
         headers=llm_cfg.get("headers") if isinstance(
             llm_cfg.get("headers"), dict) else {},
-        has_api_key=bool(llm_cfg.get("api_key"))
+        has_api_key=has_llm_api_key(cfg)
     )
+
+
+@router.delete("/llm-config/api-key")
+def clear_llm_api_key(request: Request, current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    if not delete_llm_api_key(cfg):
+        raise HTTPException(status_code=500, detail="failed to clear api_key")
+    llm_cfg = cfg.get("llm_config") if isinstance(cfg.get("llm_config"), dict) else {}
+    if llm_cfg.get("api_key"):
+        next_llm = dict(llm_cfg)
+        next_llm["api_key"] = ""
+        cfg = update_config_patch({"llm_config": next_llm})
+    if hasattr(request.app.state, "llm"):
+        request.app.state.llm.cfg = cfg
+    return {"message": "api_key cleared"}
 
 
 @router.get("/ui-config", response_model=UIConfigResponse)

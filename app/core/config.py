@@ -48,6 +48,12 @@ def _normalize_paths(cfg: dict, base_dir: str):
         for lang, path in reranker_profiles.items():
             normalized_reranker[lang] = _resolve_path(base_dir, path)
         normalized["reranker_profiles"] = normalized_reranker
+    rag_db_paths = normalized.get("rag_db_paths")
+    if isinstance(rag_db_paths, dict):
+        normalized["rag_db_paths"] = {
+            str(lang or "").strip().lower(): _resolve_path(base_dir, path)
+            for lang, path in rag_db_paths.items()
+        }
     return normalized
 
 

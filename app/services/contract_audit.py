@@ -3,6 +3,7 @@ Contract Audit Facade.
 职责: 作为合同审计模块的统一入口，封装 IO 操作并调用拆分后的子模块。
 """
 import time
+import uuid
 import structlog
 from typing import Dict, Any, Optional, Callable
 
@@ -27,8 +28,19 @@ def _attach_risk_locations(audit, clauses):
     return attach_risk_locations(audit, clauses)
 
 
-def _get_memory_embedder():
-    return None
+def _get_memory_embedder(lang: str = "zh"):
+    getter = getattr(memory_pipeline_module, "get_memory_embedder", None)
+    if not callable(getter):
+        return None
+    try:
+        return getter(lang)
+    except TypeError:
+        try:
+            return getter()
+        except Exception:
+            return None
+    except Exception:
+        return None
 
 
 def audit_contract(
@@ -38,13 +50,14 @@ def audit_contract(
     lang: str = "zh",
     embedder=None,
     reranker=None,
+    translator=None,
     retrieval_options: Optional[Dict[str, Any]] = None,
     progress_cb: Optional[Callable[[str, int, str], None]] = None
 ) -> Dict[str, Any]:
     """
-    统一的合同审计门面函数。
-    整合文本抽取、条款预览、证据检索及带有记忆的 LLM 条款级审计。
-    对上层调用保持零感知。
+    A unified facade function for contract auditing.
+    It integrates text extraction, clause preview, evidence retrieval, and LLM clause-level auditing with memory.
+    It remains completely transparent to upper-level calls.
     """
     def _report(stage: str, percent: int, message: str = "") -> None:
         if not callable(progress_cb):
@@ -55,8 +68,10 @@ def audit_contract(
             return
 
     audit_started_at = time.perf_counter()
+    audit_id = f"audit_{uuid.uuid4().hex[:12]}"
     _report("extracting", 15, "extracting text")
-    logger.info("audit_extract_start", file=file_path, lang=lang)
+    logger.info("audit_extract_start", file=file_path,
+                lang=lang, audit_id=audit_id)
     text, meta = extract_text_with_config(cfg, file_path)
     preview_clauses = build_preview_clauses(text)
     logger.info(
@@ -70,8 +85,18 @@ def audit_contract(
     _report("extract_done", 30, "extract complete")
     opts = _normalize_retrieval_options(retrieval_options)
     _report("retrieval", 40, "retrieving evidence")
-    retrieved = _retrieve_regulation_evidence(
-        cfg, text, lang, opts, embedder=embedder, reranker=reranker)
+    retrieval_embedder = embedder
+    if retrieval_embedder is None:
+        try:
+            retrieval_embedder = _get_memory_embedder(lang)
+        except TypeError:
+            retrieval_embedder = _get_memory_embedder()
+    if translator is None:
+        retrieved = _retrieve_regulation_evidence(
+            cfg, text, lang, opts, embedder=retrieval_embedder, reranker=reranker)
+    else:
+        retrieved = _retrieve_regulation_evidence(
+            cfg, text, lang, opts, embedder=retrieval_embedder, reranker=reranker, translator=translator)
     logger.info(
         "audit_retrieval_done",
         file=file_path,
@@ -80,7 +105,9 @@ def audit_contract(
         queries=retrieved.get("queries"),
         success=retrieved.get("query_success", 0),
         failed=retrieved.get("query_failed", 0),
-        evidence_count=len(retrieved.get("items") or [])
+        evidence_count=len(retrieved.get("items") or []),
+        degraded=retrieved.get("retrieval_degraded", False),
+        degraded_reasons=retrieved.get("retrieval_degraded_reasons", []),
     )
     _report("retrieval_done", 55, "evidence ready")
     if opts.get("require_full_coverage") and _safe_int(retrieved.get("query_failed", 0), 0) > 0:
@@ -91,6 +118,7 @@ def audit_contract(
         cfg,
         "contract_split",
         {
+            "audit_id": audit_id,
             "file_path": file_path,
             "lang": lang,
             "text_length": len(text),
@@ -110,10 +138,14 @@ def audit_contract(
     )
     logger.info("audit_memory_enabled", file=file_path,
                 clauses=len(preview_clauses))
-    custom_embedder = _get_memory_embedder() if callable(
-        _get_memory_embedder) else None
+    custom_embedder = None
+    if callable(_get_memory_embedder):
+        try:
+            custom_embedder = _get_memory_embedder(lang)
+        except TypeError:
+            custom_embedder = _get_memory_embedder()
     if custom_embedder is not None and hasattr(custom_embedder, "encode"):
-        memory_pipeline_module.get_memory_embedder = lambda: custom_embedder
+        memory_pipeline_module.get_memory_embedder = lambda _lang="zh": custom_embedder
     if HybridSearcher is not None:
         memory_pipeline_module.HybridSearcher = HybridSearcher
     _report("auditing", 70, "auditing clauses")
@@ -128,6 +160,7 @@ def audit_contract(
         trace_context={
             "module": "contract_audit",
             "file_path": file_path,
+            "audit_id": audit_id,
         },
     )
     _report("audit_done", 90, "audit complete")
@@ -141,6 +174,10 @@ def audit_contract(
     audit_duration_ms = int((time.perf_counter() - audit_started_at) * 1000)
     output_meta = {
         "language": "en" if str(lang or "").lower() == "en" else "zh",
+<<<<<<< Updated upstream
+=======
+        "audit_id": audit_id,
+>>>>>>> Stashed changes
         "text_length": len(text),
         "ocr_used": meta.get("ocr_used"),
         "ocr_engine": meta.get("ocr_engine"),
@@ -153,6 +190,8 @@ def audit_contract(
         "retrieval_chunk_total": retrieved.get("chunk_total", 0),
         "retrieval_query_success": retrieved.get("query_success", 0),
         "retrieval_query_failed": retrieved.get("query_failed", 0),
+        "retrieval_degraded": bool(retrieved.get("retrieval_degraded", False)),
+        "retrieval_degraded_reasons": list(retrieved.get("retrieval_degraded_reasons") or []),
         "retrieval_coverage": 0.0 if _safe_int(retrieved.get("chunk_total", 0), 0) == 0 else round(_safe_int(retrieved.get("query_success", 0), 0) / _safe_int(retrieved.get("chunk_total", 0), 0), 4),
         "retrieval_failed_chunks": retrieved.get("failed_chunks", []),
         "retrieved_chunks": len(evidence_items),
@@ -178,6 +217,7 @@ def audit_contract(
         cfg,
         "audit_done",
         {
+            "audit_id": audit_id,
             "file_path": file_path,
             "duration_ms": audit_duration_ms,
             "preview_clause_total": len(preview_clauses),
@@ -193,6 +233,7 @@ def audit_contract(
         "audit_metrics_done",
         file=file_path,
         duration_ms=audit_duration_ms,
+        audit_id=audit_id,
         preview_clauses=len(preview_clauses),
         memory_rounds=output_meta.get("memory_clause_rounds", 0),
         llm_calls=output_meta.get("memory_llm_call_count", 0),

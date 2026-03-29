@@ -4,12 +4,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import get_config, ensure_dirs
+from app.core.config import get_config, ensure_dirs, get_config_path
 from app.core.logger import setup_logging
 from app.core.database import init_db, ensure_embedding_columns
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
 from app.core.llm import LLMService
+from app.core.translation import TranslationService
+from app.ensure_local_models import ensure_models
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
@@ -50,7 +52,61 @@ def create_app():
         batch_size=cfg.get("rerank_batch_size", 8),
         max_len=cfg.get("rerank_max_len", 512),
     )
+    preflight_enabled = bool(cfg.get("model_preflight_check_on_startup", True))
+    preflight_auto_download = bool(
+        cfg.get("model_preflight_auto_download_on_startup", False))
+    preflight_include_optional = bool(
+        cfg.get("model_preflight_include_optional", True))
+    preflight_require_all = bool(cfg.get("model_preflight_require_all", True))
+    if preflight_enabled:
+        logger.info(
+            "model_preflight_start config_path=%s check_only=%s include_optional=%s types=all",
+            get_config_path(),
+            (not preflight_auto_download),
+            preflight_include_optional,
+        )
+        preflight = ensure_models(
+            cfg=cfg,
+            check_only=not preflight_auto_download,
+            include_optional=preflight_include_optional,
+            model_types="all",
+        )
+        rows = preflight.get("models") or []
+        logger.info(
+            "model_preflight_summary all_ready=%s checked=%s auto_download=%s include_optional=%s",
+            bool(preflight.get("all_ready", False)),
+            len(rows),
+            preflight_auto_download,
+            preflight_include_optional,
+        )
+        if not rows:
+            logger.warning("model_preflight_no_items_checked")
+        for item in rows:
+            logger.info(
+                "model_preflight_item name=%s type=%s ok=%s downloaded=%s path=%s model_id=%s reason=%s message=%s",
+                item.get("name", ""),
+                item.get("type", ""),
+                bool(item.get("ok", False)),
+                bool(item.get("downloaded", False)),
+                item.get("path", "") or (item.get("detail") or {}).get("path", ""),
+                item.get("model_id", ""),
+                item.get("reason", ""),
+                item.get("message", ""),
+            )
+        if not bool(preflight.get("all_ready", False)):
+            missing = [
+                str(x.get("name", ""))
+                for x in rows
+                if not bool(x.get("ok", False))
+            ]
+            if preflight_require_all:
+                raise RuntimeError(
+                    "local model preflight failed, run: python app/ensure_local_models.py --types all --include-optional")
+            logger.warning("model_preflight_not_ready missing=%s", missing)
+    else:
+        logger.info("model_preflight_disabled")
     llm = LLMService(cfg)
+    translator = TranslationService(cfg)
 
     app = FastAPI(title="Law Assistant")
 
@@ -97,12 +153,14 @@ def create_app():
     app.include_router(build_regulations_router(cfg, embedder, reranker))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
-    app.include_router(build_contracts_router(cfg, llm, embedder, reranker))
+    app.include_router(build_contracts_router(
+        cfg, llm, embedder, reranker, translator))
     app.include_router(build_tax_audit_router(cfg))
 
     app.state.cfg = cfg
     app.state.embedder = embedder
     app.state.reranker = reranker
     app.state.llm = llm
+    app.state.translator = translator
     app.state.logger = logger
     return app

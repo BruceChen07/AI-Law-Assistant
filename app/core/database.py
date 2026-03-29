@@ -7,6 +7,32 @@ def get_conn(cfg):
     return conn
 
 
+def _normalize_lang_tag(lang: str, default: str = "zh") -> str:
+    s = str(lang or "").strip().lower()
+    if s.startswith("en"):
+        return "en"
+    if s.startswith("zh"):
+        return "zh"
+    return default
+
+
+def get_rag_db_path(cfg, lang: str):
+    paths = cfg.get("rag_db_paths") if isinstance(cfg.get("rag_db_paths"), dict) else {}
+    norm_lang = _normalize_lang_tag(lang, default="zh")
+    p = str(paths.get(norm_lang) or "").strip()
+    if p:
+        return p
+    fallback = str(cfg.get("db_path") or "").strip()
+    return fallback
+
+
+def get_rag_conn(cfg, lang: str):
+    path = get_rag_db_path(cfg, lang)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
 def init_db(cfg):
     conn = get_conn(cfg)
     cur = conn.cursor()

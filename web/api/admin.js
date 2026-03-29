@@ -47,6 +47,13 @@ export async function adminUpdateLLMConfig(payload) {
   })
 }
 
+export async function adminDeleteLLMApiKey() {
+  return requestJson(`${API_BASE}/api/admin/llm-config/api-key`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function adminGetUIConfig() {
   return requestJson(`${API_BASE}/api/admin/ui-config`, {
     headers: { ...getAuthHeaders() }

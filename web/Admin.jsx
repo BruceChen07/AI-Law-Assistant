@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
@@ -16,6 +16,7 @@ export default function Admin({ onBack, lang }) {
   const [llmConfig, setLlmConfig] = useState(null)
   const [llmHasApiKey, setLlmHasApiKey] = useState(false)
   const [llmSaving, setLlmSaving] = useState(false)
+  const [llmClearingKey, setLlmClearingKey] = useState(false)
   const [llmError, setLlmError] = useState("")
   const [llmTestPrompt, setLlmTestPrompt] = useState("")
   const [llmTestResult, setLlmTestResult] = useState("")
@@ -189,6 +190,20 @@ export default function Admin({ onBack, lang }) {
       setLlmError(err.message)
     } finally {
       setLlmSaving(false)
+    }
+  }
+
+  const clearLLMApiKey = async () => {
+    setLlmClearingKey(true)
+    try {
+      await adminDeleteLLMApiKey()
+      setLlmHasApiKey(false)
+      setLlmConfig(prev => prev ? { ...prev, api_key: "" } : prev)
+      setLlmError(t.llmApiKeyCleared)
+    } catch (err) {
+      setLlmError(err.message)
+    } finally {
+      setLlmClearingKey(false)
     }
   }
 
@@ -499,6 +514,7 @@ export default function Admin({ onBack, lang }) {
               </div>
               <div className="row">
                 <button disabled={llmSaving} onClick={saveLLM}>{t.save}</button>
+                <button disabled={llmClearingKey || !llmHasApiKey} onClick={clearLLMApiKey}>{t.llmClearApiKey}</button>
                 {llmError && <span style={{ marginLeft: 12 }}>{llmError}</span>}
               </div>
               <div className="llm-test">

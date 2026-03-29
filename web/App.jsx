@@ -5,6 +5,7 @@ import Admin from "./Admin"
 import { appI18n } from "./i18n/appI18n"
 
 const THEME_STORAGE_KEY = "ui_theme"
+const APP_LANG_STORAGE_KEY = "ui_lang"
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
@@ -12,6 +13,11 @@ const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" 
 const getStoredTheme = () => {
   const v = String(localStorage.getItem(THEME_STORAGE_KEY) || "").toLowerCase()
   return v === "light" || v === "dark" ? v : ""
+}
+
+const getStoredAppLang = () => {
+  const v = normalizeAppLang(localStorage.getItem(APP_LANG_STORAGE_KEY) || "")
+  return v === "en" || v === "zh" ? v : "zh"
 }
 
 export default function App() {
@@ -33,17 +39,17 @@ export default function App() {
     }
     syncUser()
   }, [])
-  const [uiLang, setUiLang] = useState("zh")
+  const [uiLang, setUiLang] = useState(() => getStoredAppLang())
   const [theme, setTheme] = useState("dark")
-  const [contract, setContract] = useState({
+  const [contract, setContract] = useState(() => ({
     title: "",
-    language: "zh",
+    language: getStoredAppLang(),
     auditMode: "rag",
     region: "",
     date: "",
     industry: "",
     taxFocus: true
-  })
+  }))
   const [contractFile, setContractFile] = useState(null)
   const [contractError, setContractError] = useState("")
   const [contractLoading, setContractLoading] = useState(false)
@@ -332,6 +338,10 @@ export default function App() {
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", normalizeTheme(theme))
   }, [theme])
+
+  useEffect(() => {
+    localStorage.setItem(APP_LANG_STORAGE_KEY, normalizeAppLang(uiLang))
+  }, [uiLang])
 
   useEffect(() => {
     if (!user) return
@@ -747,7 +757,10 @@ export default function App() {
       bumpProgress(100, "done")
       const nextDocumentId = String(res.document_id || "")
       const detectedLang = normalizeAppLang(res?.meta?.language || contract.language)
+<<<<<<< Updated upstream
       setUiLang(detectedLang)
+=======
+>>>>>>> Stashed changes
       setContract(prev => ({ ...prev, language: detectedLang }))
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)

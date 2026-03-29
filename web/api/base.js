@@ -10,7 +10,23 @@ export function getAuthHeaders() {
 }
 
 export async function ensureOk(res) {
-  if (!res.ok) throw new Error(await res.text())
+  if (res.ok) return
+  const text = await res.text()
+  let message = text
+  try {
+    const parsed = JSON.parse(text)
+    const detail = parsed?.detail
+    if (typeof detail === "string" && detail.trim()) {
+      message = detail
+    } else if (detail && typeof detail === "object") {
+      message = String(detail.message || detail.user_message || text)
+    } else if (typeof parsed?.message === "string" && parsed.message.trim()) {
+      message = parsed.message
+    }
+  } catch {
+    message = text
+  }
+  throw new Error(message)
 }
 
 export async function requestJson(url, options) {

@@ -4,7 +4,7 @@ import sqlite3
 import re
 import numpy as np
 from fastapi import HTTPException
-from app.core.database import get_conn
+from app.core.database import get_conn, get_rag_conn, get_rag_db_path
 from app.core.utils import tokenize_query, best_sentence
 from app.api.schemas import SearchQuery
 
@@ -26,7 +26,15 @@ def _build_fts_match_query(raw_query: str) -> str:
     return '"contract"' if english_mode else '"合同"'
 
 
-def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
+def _table_exists(cur, table_name: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table_name,),
+    )
+    return cur.fetchone() is not None
+
+
+def search_regulations(cfg, q: SearchQuery, embedder, reranker=None, target_rag_lang: str = ""):
     if not q.query.strip():
         return []
     default_lang = embedder.get_registry_status()["default_language"]
@@ -42,12 +50,19 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
         raise HTTPException(
             status_code=503, detail=f"semantic search enabled but embedding model is not ready for language={lang}")
 
-    logger.info("search_start query=%s lang=%s active_lang=%s top_k=%s semantic=%s model_id=%s",
-                q.query[:80], lang, active_lang, q.top_k, q.use_semantic, (prof or {}).get("model_id", "none"))
+    rag_lang = str(target_rag_lang or lang).strip().lower()
+    rag_db_path = get_rag_db_path(cfg, rag_lang)
+    logger.info("search_start query=%s lang=%s active_lang=%s rag_lang=%s rag_db=%s top_k=%s semantic=%s model_id=%s",
+                q.query[:80], lang, active_lang, rag_lang, rag_db_path, q.top_k, q.use_semantic, (prof or {}).get("model_id", "none"))
     tokens = tokenize_query(q.query)
     bm_query = _build_fts_match_query(q.query)
-    conn = get_conn(cfg)
+    conn = get_rag_conn(cfg, rag_lang) if target_rag_lang else get_conn(cfg)
     cur = conn.cursor()
+    required_tables = ("article", "article_fts", "regulation", "regulation_version")
+    if any(not _table_exists(cur, t) for t in required_tables):
+        logger.info("search_skip_missing_tables rag_lang=%s rag_db=%s", rag_lang, rag_db_path)
+        conn.close()
+        return []
     candidate_min = 10
     candidate_max = 200
     candidate_size = q.candidate_size or candidate_min
@@ -133,36 +148,40 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
             if q.date:
                 sem_sql += " AND (v.effective_date='' OR v.effective_date<=?) AND (v.expiry_date='' OR v.expiry_date>=?)"
                 sem_params.extend([q.date, q.date])
-            cur.execute(sem_sql, sem_params)
-            sem_rows = []
-            for row in cur.fetchall():
-                v = np.frombuffer(row[1], dtype=np.float32)
-                sim = float(np.dot(qe, v))
-                sem_rows.append({
-                    "article_id": row[0],
-                    "article_no": row[2],
-                    "content": row[3],
-                    "version_id": row[4],
-                    "regulation_id": row[5],
-                    "title": row[6],
-                    "effective_date": row[7],
-                    "expiry_date": row[8],
-                    "region": row[9],
-                    "industry": row[10],
-                    "semantic_raw": sim
-                })
-            sem_rows.sort(key=lambda x: x["semantic_raw"], reverse=True)
-            sem_rows = sem_rows[:candidate_n]
-            logger.info("semantic_candidates query=%s count=%s",
-                        q.query[:80], len(sem_rows))
-            for idx, r in enumerate(sem_rows):
-                r["semantic_score"] = 1.0 - (idx / max(1, len(sem_rows)))
-                found = merged.get(r["article_id"])
-                if found:
-                    found["semantic_raw"] = r["semantic_raw"]
-                    found["semantic_score"] = r["semantic_score"]
-                else:
-                    merged[r["article_id"]] = r
+            try:
+                cur.execute(sem_sql, sem_params)
+                sem_rows = []
+                for row in cur.fetchall():
+                    v = np.frombuffer(row[1], dtype=np.float32)
+                    sim = float(np.dot(qe, v))
+                    sem_rows.append({
+                        "article_id": row[0],
+                        "article_no": row[2],
+                        "content": row[3],
+                        "version_id": row[4],
+                        "regulation_id": row[5],
+                        "title": row[6],
+                        "effective_date": row[7],
+                        "expiry_date": row[8],
+                        "region": row[9],
+                        "industry": row[10],
+                        "semantic_raw": sim
+                    })
+                sem_rows.sort(key=lambda x: x["semantic_raw"], reverse=True)
+                sem_rows = sem_rows[:candidate_n]
+                logger.info("semantic_candidates query=%s count=%s",
+                            q.query[:80], len(sem_rows))
+                for idx, r in enumerate(sem_rows):
+                    r["semantic_score"] = 1.0 - (idx / max(1, len(sem_rows)))
+                    found = merged.get(r["article_id"])
+                    if found:
+                        found["semantic_raw"] = r["semantic_raw"]
+                        found["semantic_score"] = r["semantic_score"]
+                    else:
+                        merged[r["article_id"]] = r
+            except sqlite3.OperationalError as e:
+                logger.warning("semantic_failed query=%s rag_lang=%s err=%s",
+                               q.query[:80], rag_lang, str(e))
         else:
             logger.warning(
                 "semantic_enabled_but_embedder_unavailable query=%s lang=%s", q.query[:80], lang)

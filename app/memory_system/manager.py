@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import re
+import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List
@@ -38,6 +40,8 @@ class Risk(BaseModel):
 
 
 class MemoryManagerConfig(BaseModel):
+    enable_short_memory: bool = True
+    enable_long_memory: bool = True
     short_memory_token_limit: int = Field(default=4000, ge=512, le=8000)
     flush_soft_threshold: int = Field(default=4000, ge=512, le=8000)
     llm_timeout_sec: float = Field(default=8.0, ge=1.0, le=30.0)
@@ -53,6 +57,10 @@ class MemoryManagerConfig(BaseModel):
     short_store_clause_chars: int = Field(default=420, ge=80, le=2000)
     short_store_risks_chars: int = Field(default=900, ge=120, le=4000)
     long_hit_keep: int = Field(default=3, ge=1, le=10)
+    debug_retention_days: int = Field(default=7, ge=1, le=3650)
+    debug_cleanup_interval_sec: int = Field(default=1800, ge=60, le=86400)
+    debug_archive_before_delete: bool = False
+    debug_archive_dir: str = ""
 
 
 class ShortMemoryBuffer:
@@ -88,6 +96,43 @@ class MemoryLifecycleManager:
         self.cfg = cfg or MemoryManagerConfig()
         self.short = ShortMemoryBuffer(self.cfg.short_memory_token_limit)
         self.memory_root.mkdir(parents=True, exist_ok=True)
+        self._last_clause_debug_cleanup_at = 0.0
+
+    def _cleanup_clause_split_debug(self) -> None:
+        now_ts = time.time()
+        interval = max(60, int(self.cfg.debug_cleanup_interval_sec or 1800))
+        if now_ts - float(self._last_clause_debug_cleanup_at or 0.0) < interval:
+            return
+        self._last_clause_debug_cleanup_at = now_ts
+        retention_days = max(1, int(self.cfg.debug_retention_days or 7))
+        now = datetime.utcnow()
+        root = self.memory_root / "debug" / "contract_clause_split"
+        if not root.exists():
+            return
+        cutoff = now.toordinal() - retention_days
+        archive_enabled = bool(self.cfg.debug_archive_before_delete)
+        archive_root = Path(str(self.cfg.debug_archive_dir or "").strip())
+        if archive_enabled and not str(archive_root):
+            archive_root = root / "_archive"
+        if archive_enabled:
+            archive_root.mkdir(parents=True, exist_ok=True)
+        for p in root.iterdir():
+            if not p.is_dir():
+                continue
+            try:
+                day = datetime.strptime(p.name, "%Y-%m-%d")
+            except Exception:
+                continue
+            if day.toordinal() <= cutoff:
+                if archive_enabled:
+                    archive_base = archive_root / \
+                        f"contract_clause_split_{p.name}"
+                    try:
+                        shutil.make_archive(
+                            str(archive_base), "zip", root_dir=str(root), base_dir=p.name)
+                    except Exception:
+                        pass
+                shutil.rmtree(p, ignore_errors=True)
 
     def split_contract(self, text: str) -> List[Clause]:
         raw = split_contract_clauses(str(text or ""))
@@ -250,13 +295,23 @@ class MemoryLifecycleManager:
         with path.open("a", encoding="utf-8") as f:
             f.write(block)
 
-    def _dump_clause_split(self, clauses: List[Clause]) -> Path:
-        debug_dir = self.memory_root / "debug"
+    def _dump_clause_split(self, clauses: List[Clause], audit_id: str = "") -> Path:
+        self._cleanup_clause_split_debug()
+        now = datetime.utcnow()
+        day = now.strftime("%Y-%m-%d")
+        debug_dir = self.memory_root / "debug" / "contract_clause_split" / day
         debug_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S-%f")
-        target = debug_dir / f"contract_clause_split_{stamp}.json"
+        stamp = now.strftime("%Y%m%d-%H%M%S-%f")
+        raw_audit_id = str(audit_id or "").strip()
+        audit_tag = re.sub(r"[^A-Za-z0-9_-]", "_", raw_audit_id)
+        if audit_tag:
+            target = debug_dir / \
+                f"contract_clause_split_{stamp}_{audit_tag}.json"
+        else:
+            target = debug_dir / f"contract_clause_split_{stamp}.json"
         payload = {
-            "generated_at": datetime.utcnow().isoformat(),
+            "generated_at": now.isoformat(),
+            "audit_id": raw_audit_id,
             "count": len(clauses),
             "clauses": [c.model_dump() for c in clauses],
         }
@@ -265,6 +320,8 @@ class MemoryLifecycleManager:
         return target
 
     async def check_and_flush(self, llm_flush_callback: Callable[[str], Awaitable[str]]) -> None:
+        if not self.cfg.enable_short_memory:
+            return
         if self.short.total_tokens() <= self.cfg.flush_soft_threshold:
             return
         tokens = self.short.total_tokens()
@@ -417,6 +474,7 @@ class MemoryLifecycleManager:
         llm_clause_callback: Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]],
         llm_flush_callback: Callable[[str], Awaitable[str]],
         legal_catalog: Dict[str, List[str]],
+        audit_id: str = "",
     ) -> Dict[str, Any]:
         raw_clauses = self.split_contract(contract_text)
         clauses = self._compact_clauses_for_budget(
@@ -424,7 +482,7 @@ class MemoryLifecycleManager:
         logger.info("memory_audit_start clauses=%s compacted=%s short_limit=%s top_k=%s", len(
             raw_clauses), max(0, len(raw_clauses) - len(clauses)), self.cfg.short_memory_token_limit, self.cfg.retrieval_top_k)
         try:
-            dump_path = await asyncio.to_thread(self._dump_clause_split, clauses)
+            dump_path = await asyncio.to_thread(self._dump_clause_split, clauses, audit_id)
             logger.info("memory_clause_split_dumped file=%s clauses=%s", str(
                 dump_path), len(clauses))
         except Exception as e:
@@ -436,16 +494,22 @@ class MemoryLifecycleManager:
                 logger.error(
                     "memory_audit_round_exceeded max_rounds=%s actual_round=%s", self.cfg.max_rounds, i)
                 break
-            hits = self.searcher.search(
-                clause.text[:self.cfg.clause_query_max_chars], top_k=self.cfg.retrieval_top_k)
-            ranked_hits = self._ranked_long_hits(clause.text, hits)
-            kept_hits = ranked_hits[:self.cfg.long_hit_keep]
-            long_ctx = "\n\n".join(self._clip(str(getattr(
-                h, "content", "") or ""), self.cfg.hit_item_max_chars) for h in kept_hits)
-            short_ctx_items = self.short.export(
-            )[-max(2, self.cfg.short_ctx_turns * 2):]
-            short_ctx = "\n".join(x.get("content", "")
-                                  for x in short_ctx_items)
+            hits = []
+            kept_hits = []
+            long_ctx = ""
+            if self.cfg.enable_long_memory:
+                hits = self.searcher.search(
+                    clause.text[:self.cfg.clause_query_max_chars], top_k=self.cfg.retrieval_top_k)
+                ranked_hits = self._ranked_long_hits(clause.text, hits)
+                kept_hits = ranked_hits[:self.cfg.long_hit_keep]
+                long_ctx = "\n\n".join(self._clip(str(getattr(
+                    h, "content", "") or ""), self.cfg.hit_item_max_chars) for h in kept_hits)
+            short_ctx = ""
+            if self.cfg.enable_short_memory:
+                short_ctx_items = self.short.export(
+                )[-max(2, self.cfg.short_ctx_turns * 2):]
+                short_ctx = "\n".join(x.get("content", "")
+                                      for x in short_ctx_items)
             payload = {
                 "round": i,
                 "clause": clause.model_dump(),
@@ -467,18 +531,20 @@ class MemoryLifecycleManager:
                 },
                 "facts": facts,
             }
-            await self.append_long_memory(
-                f"Clause Facts {clause.clause_id}",
-                "```json\n" +
-                json.dumps(long_record, ensure_ascii=False,
-                           indent=2) + "\n```",
-            )
-            self.short.append(
-                "user", f"{clause.clause_id}: {self._clip(clause.text, self.cfg.short_store_clause_chars)}")
-            short_fact_line = self._clip(self._short_fact_line(
-                clause, facts), self.cfg.short_store_risks_chars)
-            self.short.append("assistant", short_fact_line)
-            await self.check_and_flush(llm_flush_callback)
+            if self.cfg.enable_long_memory:
+                await self.append_long_memory(
+                    f"Clause Facts {clause.clause_id}",
+                    "```json\n" +
+                    json.dumps(long_record, ensure_ascii=False,
+                               indent=2) + "\n```",
+                )
+            if self.cfg.enable_short_memory:
+                self.short.append(
+                    "user", f"{clause.clause_id}: {self._clip(clause.text, self.cfg.short_store_clause_chars)}")
+                short_fact_line = self._clip(self._short_fact_line(
+                    clause, facts), self.cfg.short_store_risks_chars)
+                self.short.append("assistant", short_fact_line)
+                await self.check_and_flush(llm_flush_callback)
             logger.info(
                 "memory_round_done round=%s clause_id=%s hits=%s short_tokens=%s risks=%s",
                 i,

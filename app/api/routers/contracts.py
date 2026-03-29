@@ -27,6 +27,27 @@ def _normalize_theme(v: Optional[str]) -> str:
     return "light" if s == "light" else "dark"
 
 
+def _build_audit_error_detail(err: Exception, language: str) -> str:
+    msg = str(err or "")
+    low = msg.lower()
+    is_zh = str(language or "zh").lower().startswith("zh")
+    if "invalid_api_key" in low or "incorrect api key" in low or "authentication" in low or "401" in low:
+        if is_zh:
+            return "LLM 鉴权失败：API Key 无效或已过期。请前往【Admin -> 模型配置】更新 API Base、Model、API Key 后重试。"
+        return "LLM authentication failed: API key is invalid or expired. Go to Admin -> Model Config and update API Base, Model, and API key, then retry."
+    if "timeout" in low or "timed out" in low:
+        if is_zh:
+            return "LLM 请求超时。请在【Admin -> 模型配置】适当增大 timeout，或更换更稳定的模型后重试。"
+        return "LLM request timed out. Increase timeout in Admin -> Model Config or switch to a more stable model, then retry."
+    if "keyring" in low:
+        if is_zh:
+            return "本地安全密钥存储不可用。请安装 keyring 依赖或改用环境变量配置 LLM_API_KEY 后重试。"
+        return "Local secure key storage is unavailable. Install keyring or use LLM_API_KEY environment variable, then retry."
+    if is_zh:
+        return "合同审计失败。请检查【Admin -> 模型配置】中的 LLM 参数后重试。"
+    return "Contract audit failed. Check LLM settings in Admin -> Model Config and retry."
+
+
 def _set_audit_progress(audit_id: str, status: str, progress: int, stage: str, message: str = "") -> None:
     payload = {
         "audit_id": audit_id,
@@ -45,7 +66,7 @@ def _get_audit_progress(audit_id: str) -> Optional[Dict[str, Any]]:
         return _audit_progress.get(audit_id)
 
 
-def build_router(cfg, llm, embedder=None, reranker=None):
+def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
     router = APIRouter()
 
     @router.post("/contracts/audit")
@@ -151,6 +172,7 @@ def build_router(cfg, llm, embedder=None, reranker=None):
                 lang=language,
                 embedder=embedder,
                 reranker=reranker,
+                translator=translator,
                 retrieval_options=retrieval_options,
                 progress_cb=_progress_cb
             )
@@ -182,19 +204,20 @@ def build_router(cfg, llm, embedder=None, reranker=None):
                 doc_id,
                 save_path
             )
-            _set_audit_progress(audit_id, "failed", 100, "failed", str(e))
+            detail = _build_audit_error_detail(e, language)
+            _set_audit_progress(audit_id, "failed", 100, "failed", detail)
             insert_contract_audit(
                 cfg,
                 audit_id=audit_id,
                 document_id=doc_id,
                 status="failed",
-                result_json=json.dumps({"error": str(e)}, ensure_ascii=False),
+                result_json=json.dumps(
+                    {"error": str(e), "detail": detail}, ensure_ascii=False),
                 model_provider=str(model_cfg.get("provider", "")),
                 model_name=str(model_cfg.get("model", "")),
                 created_at=datetime.utcnow().isoformat()
             )
-            raise HTTPException(
-                status_code=500, detail="contract audit failed")
+            raise HTTPException(status_code=500, detail=detail)
 
         return {
             "audit_id": audit_id,
@@ -359,7 +382,11 @@ def build_router(cfg, llm, embedder=None, reranker=None):
             audit.get("risks"), list) else []
         citations = audit.get("citations") if isinstance(
             audit.get("citations"), list) else []
+<<<<<<< Updated upstream
         citation_map = {str(c.get("citation_id") or "")                        : c for c in citations if isinstance(c, dict)}
+=======
+        citation_map = {str(c.get("citation_id") or ""): c for c in citations if isinstance(c, dict)}
+>>>>>>> Stashed changes
         risk_summary = {"high": 0, "medium": 0, "low": 0}
         risk_items = []
         evidence_items = []

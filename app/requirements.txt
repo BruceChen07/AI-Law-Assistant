@@ -12,7 +12,7 @@ onnxruntime==1.20.0
 numpy==1.26.4
 sentence-transformers==3.3.1
 watchdog==6.0.0
-transformers==4.46.3
+transformers==4.56.0
 modelscope>=1.26.0
 pyjwt==2.8.0
 bcrypt==4.0.1
@@ -26,3 +26,4 @@ MarkupSafe>=2.1.5
 onnx==1.17.0
 
 structlog
+keyring>=25.6.0
