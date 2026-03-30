@@ -4,24 +4,7 @@ Responsibilities: Coordinates the MemoryLifecycleManager.
 Input/Output: Accepts contract configuration, clauses, and legal catalog, and returns audit results and metadata.
 Exception Handling: Logs exceptions and skips clauses that fail, potentially throwing fallback exceptions.
 """
-import json
-import re
-import structlog
-from datetime import datetime
-from pathlib import Path
-<<<<<<< Updated upstream
-from typing import Dict, Any, List, Optional
-=======
-from typing import Dict, Any, List, Optional, Tuple
->>>>>>> Stashed changes
-from app.services.audit_utils import _normalize_risk_level, _enrich_citations, _normalize_lang
-from app.memory_system.indexer import IndexerConfig, MemoryIndexer, SentenceTransformerEmbedder
-from app.memory_system.search import HybridSearcher, HybridSearchConfig
-from app.memory_system.manager import MemoryLifecycleManager, MemoryManagerConfig
-from app.services.contract_audit_modules.async_bridge import run_coro_sync
-from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip, memory_paths, write_round_trace
-from app.services.contract_audit_modules.citation_catalog import build_legal_catalog, build_citation_lookup, build_evidence_whitelist_text
-from app.services.utils.contract_audit_utils import citation_match_key, normalize_article_no, normalize_law_title
+from app.services.audit_tax import _is_tax_related_text
 from app.services.contract_audit_modules.risk_suppression import (
     build_global_tax_context,
     format_global_tax_context,
@@ -29,7 +12,20 @@ from app.services.contract_audit_modules.risk_suppression import (
     reconcile_cross_clause_conflicts,
     detect_zero_risk_fallback_hit,
 )
-from app.services.audit_tax import _is_tax_related_text
+from app.services.utils.contract_audit_utils import citation_match_key, normalize_article_no, normalize_law_title
+from app.services.contract_audit_modules.citation_catalog import build_legal_catalog, build_citation_lookup, build_evidence_whitelist_text
+from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip, memory_paths, write_round_trace
+from app.services.contract_audit_modules.async_bridge import run_coro_sync
+from app.memory_system.manager import MemoryLifecycleManager, MemoryManagerConfig
+from app.memory_system.search import HybridSearcher, HybridSearchConfig
+from app.memory_system.indexer import IndexerConfig, MemoryIndexer, SentenceTransformerEmbedder
+from app.services.audit_utils import _normalize_risk_level, _enrich_citations, _normalize_lang
+from typing import Dict, Any, List, Optional, Tuple
+import json
+import re
+import structlog
+from datetime import datetime
+from pathlib import Path
 
 logger = structlog.get_logger(__name__)
 _MEMORY_EMBEDDERS: Dict[str, Any] = {}
@@ -110,8 +106,6 @@ def _build_compact_whitelist(evidence_items: List[Dict[str, Any]], limit: int = 
     return "\n".join(lines), alias_to_cid
 
 
-<<<<<<< Updated upstream
-=======
 def _select_fallback_citation(evidence_items: List[Dict[str, Any]], allowed_citation_ids: set, norm_lang: str) -> Dict[str, str]:
     kw = ["税", "发票", "纳税", "免税", "tax", "vat",
           "invoice", "withholding", "exempt"]
@@ -323,7 +317,6 @@ def _dedupe_similar_risks(risks: List[Dict[str, Any]], log_limit: int = 30) -> T
     return selected, removed_hits
 
 
->>>>>>> Stashed changes
 def get_memory_embedder(lang: str = "zh"):
     global _MEMORY_EMBEDDERS
     norm_lang = _normalize_lang(lang, default="zh")
@@ -376,12 +369,8 @@ def execute_memory_audit(
     memory_use_long_hits = bool(
         cfg.get("memory_use_long_hits", True)) and memory_enable_long_memory
     logger.info("memory_pipeline_start", memory_dir=memory_dir,
-<<<<<<< Updated upstream
-                memory_db=memory_db, evidence=len(evidence_items), lang=norm_lang)
-=======
                 memory_db=memory_db, evidence=len(evidence_items), lang=norm_lang,
                 enable_long_memory=memory_enable_long_memory, enable_short_memory=memory_enable_short_memory)
->>>>>>> Stashed changes
 
     embedder = get_memory_embedder(norm_lang)
     indexer = MemoryIndexer(
@@ -444,8 +433,6 @@ def execute_memory_audit(
         for it in evidence_items
         if str(it.get("citation_id") or "").strip()
     }
-<<<<<<< Updated upstream
-=======
     citation_id_casefold_map = {
         str(it.get("citation_id") or "").strip().lower(): str(it.get("citation_id") or "").strip()
         for it in evidence_items
@@ -453,7 +440,6 @@ def execute_memory_audit(
     }
     article_citation_index = _build_article_citation_index(
         evidence_items, allowed_citation_ids)
->>>>>>> Stashed changes
     filter_unverifiable_risks = bool(
         cfg.get("memory_filter_unverifiable_risks", True))
     filtered_risk_log_limit = max(
@@ -541,11 +527,7 @@ def execute_memory_audit(
                 f"Language: {norm_lang}\n"
                 "Audit strictly based on the input; prioritize the whitelisted laws; output MUST be JSON.\n"
                 "Short memory and long-term hits are for factual reference only; do not directly reuse their historical conclusions.\n"
-<<<<<<< Updated upstream
-                "For risk items, prioritize filling in the whitelisted citation_id; if the citation_id cannot be determined, it can be left blank, but try to fill in the law_title and article_no for post-processing mapping and verification.\n"
-=======
                 "For risk items, if a whitelist item can be matched, you MUST fill citation_id with an exact whitelist ID and MUST NOT invent any ID; only leave citation_id blank when no match can be determined, and still fill law_title and article_no for post-processing mapping and verification.\n"
->>>>>>> Stashed changes
                 "If outputting 'unclear/unspecified/unmentioned/missing' risks, refer to the short memory, long-term hits, and the current clause; suppress this risk ONLY if the same element has been covered by explicit and enforceable provisions.\n"
                 "Do NOT output reasoning processes, analysis processes, or extra explanations. ONLY output the final JSON.\n"
                 f"Whitelist:\n{evidence_whitelist_text}\n\n"
@@ -562,11 +544,7 @@ def execute_memory_audit(
                 f"语言:{norm_lang}\n"
                 "仅根据输入审计；优先参考白名单法条；输出必须是JSON。\n"
                 "短记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n"
-<<<<<<< Updated upstream
-                "风险项优先填写白名单 citation_id；如无法确定 citation_id，可留空，但必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
-=======
                 "风险项如能匹配白名单，必须填写与白名单完全一致的 citation_id，且不得编造ID；仅在确实无法匹配时才可留空，并必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
->>>>>>> Stashed changes
                 "若要输出‘未明确/未约定/未提及/缺失’风险，可参考短记忆、长期命中与当前条款；仅在同一要素已被明确且可执行约定覆盖时才抑制该风险。\n"
                 "禁止输出推理过程、分析过程与额外解释，只输出最终JSON。\n"
                 f"白名单:\n{evidence_whitelist_text}\n\n"
@@ -993,15 +971,13 @@ def execute_memory_audit(
             ev = evidence_by_cid.get(cid) if mapped_ok else {}
             full_text = str((ev or {}).get("content") or (
                 ev or {}).get("excerpt") or "").strip()
-<<<<<<< Updated upstream
-=======
+
             risk_issue = str(item.get("issue") or "")
             law_title = str(item.get("law_title") or "")
             evidence = str(item.get("evidence") or "")
             suggestion = str(item.get("suggestion") or "")
             tax_related = _is_tax_related_text(" ".join(
                 [risk_issue, law_title, evidence, suggestion]))
->>>>>>> Stashed changes
             if mapped_ok and full_text:
                 display_risks.append(item)
                 continue

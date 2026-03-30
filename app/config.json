@@ -23,8 +23,6 @@
             "embedding_pooling": "cls",
             "embedding_query_instruction": "为这个句子生成表示以用于检索相关文章：",
             "embedding_threads": 2
-<<<<<<< Updated upstream
-=======
         },
         "en": {
             "embedding_model": "..\\models\\embedding\\en\\model.onnx",
@@ -35,7 +33,6 @@
             "embedding_pooling": "cls",
             "embedding_threads": 2,
             "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:"
->>>>>>> Stashed changes
         }
     },
     "log_level": "INFO",
@@ -67,11 +64,7 @@
         "provider": "qwen",
         "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
         "api_key": "",
-<<<<<<< Updated upstream
         "model": "qwen3.5-plus",
-=======
-        "model": "qwen3.5-27b",
->>>>>>> Stashed changes
         "temperature": 0.0,
         "max_tokens": 2048,
         "timeout": 120,

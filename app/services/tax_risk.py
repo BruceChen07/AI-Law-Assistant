@@ -1,6 +1,8 @@
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
+from app.core.llm import LLMService
 from app.services.crud import (
     get_tax_contract_document,
     list_clause_rule_matches_by_contract,
@@ -72,28 +74,71 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "") -
         operator_id,
         len(matches),
     )
-    issue_items = []
-    for m in matches:
+
+    llm = LLMService(cfg)
+
+    def process_match(m):
         label = str(m.get("match_label") or "")
         if label not in ["non_compliant", "not_mentioned"]:
-            continue
+            return None
+
         evidence = {}
         try:
             evidence = json.loads(m.get("evidence_json") or "{}")
         except Exception:
-            evidence = {}
-        issue_items.append(
-            {
-                "contract_document_id": contract_id,
-                "clause_id": m.get("clause_id", ""),
-                "rule_id": m.get("rule_id", ""),
-                "risk_level": _risk_level_by_label(label),
-                "issue_text": _build_issue_text(m, english_mode=english_mode),
-                "suggestion": _build_suggestion(m, english_mode=english_mode),
-                "reviewer_status": "pending",
-                "reviewer_note": evidence.get("reason", ""),
-            }
-        )
+            pass
+
+        clause_text = evidence.get("clause_excerpt", "")
+        rule_text = evidence.get("rule_excerpt", "")
+
+        # Build prompt for dynamic risk issue generation
+        lang_instruction = "English" if english_mode else "Chinese"
+        prompt = f"""
+        You are a senior tax auditor. Based on the following contract clause and tax rule, generate a specific risk issue description and a concrete revision suggestion.
+        
+        Match Type: {label} ("non_compliant" means conflict, "not_mentioned" means missing key obligations)
+        Contract Clause: "{clause_text}"
+        Tax Rule: "{rule_text}"
+        
+        Respond ONLY with a JSON object in {lang_instruction} language, using this format:
+        {{
+            "issue_text": "Detailed description of the specific risk or conflict found.",
+            "suggestion": "Concrete, actionable suggestion on how to revise the clause."
+        }}
+        """
+
+        issue_text = _build_issue_text(m, english_mode=english_mode)
+        suggestion = _build_suggestion(m, english_mode=english_mode)
+
+        try:
+            response = llm.chat([{"role": "user", "content": prompt}], model=cfg.get(
+                "llm_config", {}).get("model", "qwen3.5-plus"))
+            cleaned_response = re.sub(
+                r'```json\s*|\s*```', '', response).strip()
+            result = json.loads(cleaned_response)
+            issue_text = result.get("issue_text", issue_text)
+            suggestion = result.get("suggestion", suggestion)
+        except Exception as e:
+            logger.error(f"LLM risk generation failed: {e}")
+
+        return {
+            "contract_document_id": contract_id,
+            "clause_id": m.get("clause_id", ""),
+            "rule_id": m.get("rule_id", ""),
+            "risk_level": _risk_level_by_label(label),
+            "issue_text": issue_text,
+            "suggestion": suggestion,
+            "reviewer_status": "pending",
+            "reviewer_note": evidence.get("reason", ""),
+        }
+
+    issue_items = []
+    with ThreadPoolExecutor(max_workers=cfg.get("tax_audit_max_workers", 4)) as executor:
+        results = executor.map(process_match, matches)
+        for item in results:
+            if item is not None:
+                issue_items.append(item)
+
     clear_audit_issues_by_contract(cfg, contract_id)
     create_audit_issues(cfg, issue_items, created_by=operator_id)
     high = len([x for x in issue_items if x["risk_level"] == "high"])

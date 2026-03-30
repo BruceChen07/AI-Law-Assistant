@@ -33,12 +33,9 @@ class LLMService:
         key = self._clean_text(cfg.get("api_key", ""))
         if key:
             return key
-<<<<<<< Updated upstream
-=======
         secure_key = self._clean_text(get_llm_api_key(self.cfg))
         if secure_key:
             return secure_key
->>>>>>> Stashed changes
         for name in ["LLM_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"]:
             env_key = self._clean_text(os.environ.get(name, ""))
             if env_key:
@@ -206,12 +203,8 @@ class LLMService:
                 overrides.get("_trace_meta"), dict) else {}
             cfg.update(
                 {k: v for k, v in overrides.items() if k != "_trace_meta"})
-<<<<<<< Updated upstream
-        api_base = self._clean_text(cfg.get("api_base", ""))
-=======
         api_base_raw = cfg.get("api_base", "")
         api_base = self._build_base_url(str(api_base_raw or ""))
->>>>>>> Stashed changes
         api_key = self._resolve_api_key(cfg)
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
@@ -323,7 +316,8 @@ class LLMService:
                 "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
                 "error": self._clip(self._mask_text(str(e)), self._trace_options()["max_chars"]),
             })
-            raise RuntimeError(f"llm request failed: {str(e)}{dns_hint}") from e        
+            raise RuntimeError(
+                f"llm request failed: {str(e)}{dns_hint}") from e
         parsed = resp.model_dump()
         usage = parsed.get("usage") if isinstance(
             parsed.get("usage"), dict) else {}

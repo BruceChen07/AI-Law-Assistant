@@ -2,6 +2,10 @@ import re
 import json
 import logging
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from app.core.llm import LLMService
+from app.core.embedding import EmbeddingService
 from app.services.crud import (
     get_tax_contract_document,
     list_contract_clauses,
@@ -17,33 +21,15 @@ def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _extract_percent(text: str) -> str:
-    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", str(text or ""))
-    return f"{m.group(1)}%" if m else ""
-
-
-def _extract_deadline_days(text: str) -> int:
-    m = re.search(r"([0-9]{1,3})\s*(?:日内|天内|个工作日内)", str(text or ""))
-    return int(m.group(1)) if m else 0
-
-
-def _keywords(text: str) -> set[str]:
-    parts = re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z0-9_]+", str(text or ""))
-    stop = {"应当", "按照", "以及", "或者", "进行", "相关", "条款", "规定", "合同"}
-    return {p for p in parts if p not in stop}
-
-
-def _overlap_score(rule_text: str, clause_text: str) -> float:
-    a = _keywords(rule_text)
-    b = _keywords(clause_text)
-    if not a or not b:
+def _cosine_similarity(vec1, vec2):
+    v1 = np.array(vec1)
+    v2 = np.array(vec2)
+    if np.linalg.norm(v1) == 0 or np.linalg.norm(v2) == 0:
         return 0.0
-    inter = len(a.intersection(b))
-    union = len(a.union(b))
-    return round(inter / max(union, 1), 4)
+    return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
 
 
-def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
+def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLMService = None) -> dict:
     clause_text = str(clause.get("clause_text") or "")
     rule_text = " ".join(
         [
@@ -54,59 +40,45 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
             str(rule.get("deadline_constraints") or ""),
         ]
     ).strip()
-    reason = ""
+
+    if not llm:
+        llm = LLMService(cfg)
+
+    prompt = f"""
+    You are an expert tax and legal auditor. 
+    Analyze the relationship between the following contract clause and the tax rule.
+    
+    Contract Clause:
+    "{clause_text}"
+    
+    Tax Rule:
+    "{rule_text}"
+    
+    Determine if the clause complies with the rule.
+    Return ONLY a JSON object with the following structure:
+    {{
+        "label": "compliant" | "non_compliant" | "not_mentioned",
+        "score": float between 0.0 and 1.0 (confidence score),
+        "reason": "short explanation of the relationship in English or Chinese"
+    }}
+    """
+
     label = "not_mentioned"
     score = 0.12
-    if str(rule.get("rule_type") or "") == "tax_rate":
-        rule_rate = _extract_percent(
-            rule.get("numeric_constraints") or rule_text)
-        clause_rate = _extract_percent(clause_text)
-        if not clause_rate:
-            label = "not_mentioned"
-            score = 0.15
-            reason = "clause_has_no_tax_rate"
-        elif clause_rate == rule_rate and rule_rate:
-            label = "compliant"
-            score = 0.96
-            reason = "tax_rate_consistent"
-        elif rule_rate and clause_rate != rule_rate:
-            label = "non_compliant"
-            score = 0.99
-            reason = "tax_rate_conflict"
-    elif str(rule.get("rule_type") or "") == "deadline":
-        rule_days = _extract_deadline_days(
-            rule.get("deadline_constraints") or rule_text)
-        clause_days = _extract_deadline_days(clause_text)
-        if clause_days == 0:
-            label = "not_mentioned"
-            score = 0.2
-            reason = "deadline_missing"
-        elif rule_days > 0 and clause_days <= rule_days:
-            label = "compliant"
-            score = 0.9
-            reason = "deadline_within_limit"
-        elif rule_days > 0 and clause_days > rule_days:
-            label = "non_compliant"
-            score = 0.95
-            reason = "deadline_exceeds_limit"
-        else:
-            label = "not_mentioned"
-            score = 0.22
-            reason = "deadline_unclear"
-    else:
-        overlap = _overlap_score(rule_text, clause_text)
-        if overlap >= 0.28:
-            label = "compliant"
-            score = min(0.88, 0.55 + overlap)
-            reason = "keyword_overlap_sufficient"
-        elif overlap <= 0.05:
-            label = "not_mentioned"
-            score = 0.12
-            reason = "keyword_overlap_missing"
-        else:
-            label = "not_mentioned"
-            score = 0.3 + overlap
-            reason = "keyword_overlap_weak"
+    reason = "LLM analysis failed or timeout"
+
+    try:
+        response = llm.chat([{"role": "user", "content": prompt}], model=cfg.get(
+            "llm_config", {}).get("model", "qwen3.5-plus"))
+        # Clean up response to ensure valid JSON parsing
+        cleaned_response = re.sub(r'```json\s*|\s*```', '', response).strip()
+        result = json.loads(cleaned_response)
+        label = result.get("label", "not_mentioned")
+        score = float(result.get("score", 0.5))
+        reason = result.get("reason", "")
+    except Exception as e:
+        logger.error(f"LLM match evaluation failed: {e}")
+
     evidence = {
         "reason": reason,
         "clause_excerpt": clause_text[:300],
@@ -157,12 +129,78 @@ def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", t
         len(rules),
         int(top_k_per_clause),
     )
+
+    # 1. Initialize services
+    embedder = EmbeddingService(default_language=str(
+        cfg.get("default_language", "zh")).lower())
+    embedder.load_embedders(cfg)
+    llm = LLMService(cfg)
+
+    # 2. Get embeddings for rules
+    rule_texts = [
+        " ".join([
+            str(r.get("source_text") or ""),
+            str(r.get("required_action") or ""),
+            str(r.get("prohibited_action") or ""),
+            str(r.get("numeric_constraints") or ""),
+            str(r.get("deadline_constraints") or ""),
+        ]).strip() for r in rules
+    ]
+
+    # Simple language detection for embedding
+    sample_text = " ".join(rule_texts[:5])
+    lang = "en" if len(re.findall(r"[A-Za-z]", sample_text)) > len(
+        re.findall(r"[\u4e00-\u9fff]", sample_text)) else "zh"
+
+    rule_embeddings = []
+    for text in rule_texts:
+        emb = embedder.compute_embedding(text, lang=lang)
+        if emb is not None:
+            rule_embeddings.append(emb)
+        else:
+            rule_embeddings.append(
+                np.zeros(16, dtype=np.float32))  # Dummy fallback
+
     all_matches = []
-    for clause in clauses:
-        evaluated = [evaluate_clause_rule_match(
-            clause, rule) for rule in rules]
-        all_matches.extend(_pick_matches_for_clause(
-            evaluated, top_k=top_k_per_clause))
+
+    # 3. Process clauses concurrently
+    def process_clause(clause):
+        clause_text = str(clause.get("clause_text") or "")
+        clause_emb = embedder.compute_embedding(clause_text, lang=lang)
+        if clause_emb is None:
+            clause_emb = np.zeros(16, dtype=np.float32)
+
+        # Calculate similarities
+        similarities = []
+        for idx, rule_emb in enumerate(rule_embeddings):
+            sim = _cosine_similarity(clause_emb, rule_emb)
+            similarities.append((idx, sim))
+
+        # Top-K relevant rules by vector similarity
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        top_indices = [
+            # Threshold
+            idx for idx, sim in similarities[:top_k_per_clause] if sim > 0.3]
+
+        if not top_indices:
+            # If no rule is semantically close, fallback to top 1 just to be safe or skip
+            top_indices = [similarities[0][0]] if similarities else []
+
+        evaluated = []
+        for idx in top_indices:
+            rule = rules[idx]
+            match_result = evaluate_clause_rule_match_llm(
+                clause, rule, cfg, llm)
+            # Add semantic similarity as part of the score or metadata if needed
+            evaluated.append(match_result)
+
+        return _pick_matches_for_clause(evaluated, top_k=top_k_per_clause)
+
+    with ThreadPoolExecutor(max_workers=cfg.get("tax_audit_max_workers", 4)) as executor:
+        results = executor.map(process_clause, clauses)
+        for matches in results:
+            all_matches.extend(matches)
+
     clear_clause_rule_matches_by_contract(cfg, contract_id)
     create_clause_rule_matches(cfg, all_matches, created_by=operator_id)
     compliant = len(

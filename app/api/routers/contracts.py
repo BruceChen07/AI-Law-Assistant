@@ -382,11 +382,7 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
             audit.get("risks"), list) else []
         citations = audit.get("citations") if isinstance(
             audit.get("citations"), list) else []
-<<<<<<< Updated upstream
-        citation_map = {str(c.get("citation_id") or "")                        : c for c in citations if isinstance(c, dict)}
-=======
         citation_map = {str(c.get("citation_id") or ""): c for c in citations if isinstance(c, dict)}
->>>>>>> Stashed changes
         risk_summary = {"high": 0, "medium": 0, "low": 0}
         risk_items = []
         evidence_items = []
