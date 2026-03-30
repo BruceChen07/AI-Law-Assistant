@@ -11,14 +11,15 @@ A contract auditing system designed for finance, tax, and legal affairs. It incl
 
 ## Features
 
-- **Contract Auditing**: Upload contracts (docx/pdf/scanned pdf) on the main interface to generate a risk list and summary, and support exporting Word documents with precise annotations (M1/M2 lossless annotation technology).
-- **OCR Enhancement**: Automatically fallback to OCR when PDF text is insufficient, supporting multi-engine configuration.
-- **Regulation Management**: Upload regulation documents in the Admin panel and complete clause parsing and retrieval.
-- **Hybrid Retrieval**: BM25 + Vector Recall + Cross-encoder Reranking.
-- **Progress Tracking**: Audit progress bar display combining frontend simulation and backend real interfaces.
-- **Model Configuration**: Centralized LLM parameter management, hot-switching, and UI configuration (e.g., hide/show evidence sources).
-- **Authentication & Management**: User login and admin API.
-- **Web UI**: React + Vite frontend with English/Chinese switching.
+- **Contract Auditing**: Upload contracts (docx/pdf/scanned pdf), generate risk lists with evidence references, and export Word reports with precise annotations
+- **OCR Enhancement**: Automatic OCR fallback for low-text PDFs with multi-engine routing
+- **Regulation Management**: Admin upload, clause parsing, retrieval, and task tracking
+- **Hybrid + Cross-language Retrieval**: BM25 + vector recall + optional reranking, with translation-assisted querying (`translation_config`)
+- **Memory-based Audit Pipeline**: Clause-round auditing, citation whitelist mapping, unverifiable-risk filtering, and audit trace outputs
+- **Secure Runtime Config**: LLM keys are intended to be loaded from secure store/environment instead of plaintext config persistence
+- **Model/UI Configuration**: Centralized LLM/runtime config and UI feature toggles
+- **Authentication & Admin**: Login, role-based management endpoints
+- **Web UI**: React + Vite frontend with English/Chinese switching
 
 ## Technical Architecture
 
@@ -75,10 +76,14 @@ pip install -r requirements.txt
 Copy the example configuration file:
 
 ```bash
+# Linux / macOS
 cp app/config.example.json app/config.json
+
+# Windows PowerShell
+Copy-Item app/config.example.json app/config.json
 ```
 
-Modify the configurations in `app/config.json` as needed.
+Modify `app/config.json` as needed. For production use, keep LLM API keys in secure store/environment variables rather than plaintext config.
 
 ### 4. Initialize Database
 
@@ -195,7 +200,15 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 ### Configuration File (app/config.json)
 
-See the Chinese documentation for full details, or use the provided example JSON.
+Use `app/config.example.json` as the source of truth. Key groups to review:
+
+- `llm_config`: provider/base URL/model/sampling/timeout
+- `secret_store`: secure key backend (for LLM API key persistence)
+- `embedding_profiles` / `reranker_profiles`: language-specific model paths
+- `translation_config`: cross-language retrieval translation settings
+- `retrieval_regulation_language`: primary language of the regulation corpus
+- `ocr_engines` and `mineru`: OCR routing and engine options
+- `ui_config`: frontend display toggles
 
 ### Environment Variables
 
