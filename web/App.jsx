@@ -757,10 +757,7 @@ export default function App() {
       bumpProgress(100, "done")
       const nextDocumentId = String(res.document_id || "")
       const detectedLang = normalizeAppLang(res?.meta?.language || contract.language)
-<<<<<<< Updated upstream
       setUiLang(detectedLang)
-=======
->>>>>>> Stashed changes
       setContract(prev => ({ ...prev, language: detectedLang }))
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)
