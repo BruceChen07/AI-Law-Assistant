@@ -176,6 +176,14 @@ def _normalize_retrieval_options(opts: Optional[Dict[str, Any]]) -> Dict[str, An
     if risk_detection_mode not in ["relaxed", "balanced", "strict"]:
         risk_detection_mode = "relaxed"
     relaxed = risk_detection_mode == "relaxed"
+    balanced = risk_detection_mode == "balanced"
+    default_candidate = 80 if relaxed else (25 if balanced else 20)
+    default_rerank_top_n = 80 if relaxed else (25 if balanced else 20)
+    default_top_k_evidence = 20 if relaxed else (12 if balanced else 10)
+    default_query_char_limit = 520 if relaxed else (420 if balanced else 360)
+    default_chunk_size = 1400 if relaxed else (1200 if balanced else 1000)
+    default_max_chunks = 10 if relaxed else (5 if balanced else 3)
+    default_per_chunk_top_k = 8 if relaxed else 5
     return {
         "audit_mode": mode,
         "risk_detection_mode": risk_detection_mode,
@@ -185,15 +193,15 @@ def _normalize_retrieval_options(opts: Optional[Dict[str, Any]]) -> Dict[str, An
         "use_semantic": _safe_bool(o.get("use_semantic"), True),
         "semantic_weight": _safe_float(o.get("semantic_weight"), 0.6),
         "bm25_weight": _safe_float(o.get("bm25_weight"), 0.4),
-        "candidate_size": max(10, min(_safe_int(o.get("candidate_size"), 80 if relaxed else 50), 200)),
+        "candidate_size": max(10, min(_safe_int(o.get("candidate_size"), default_candidate), 200)),
         "rerank_enabled": _safe_bool(o.get("rerank_enabled"), True),
-        "rerank_top_n": max(1, min(_safe_int(o.get("rerank_top_n"), 80 if relaxed else 50), 200)),
+        "rerank_top_n": max(1, min(_safe_int(o.get("rerank_top_n"), default_rerank_top_n), 200)),
         "rerank_mode": str(o.get("rerank_mode", "on")).strip() or "on",
-        "top_k_evidence": max(1, min(_safe_int(o.get("top_k_evidence"), 20 if relaxed else 12), 30)),
-        "query_char_limit": max(100, min(_safe_int(o.get("query_char_limit"), 520 if relaxed else 360), 2000)),
-        "chunk_size": max(300, min(_safe_int(o.get("contract_chunk_size"), 1400 if relaxed else 1200), 6000)),
-        "max_chunks": max(1, min(_safe_int(o.get("contract_chunk_max"), 10 if relaxed else 6), 30)),
-        "per_chunk_top_k": max(1, min(_safe_int(o.get("per_chunk_top_k"), 8 if relaxed else 5), 20)),
+        "top_k_evidence": max(1, min(_safe_int(o.get("top_k_evidence"), default_top_k_evidence), 30)),
+        "query_char_limit": max(100, min(_safe_int(o.get("query_char_limit"), default_query_char_limit), 2000)),
+        "chunk_size": max(300, min(_safe_int(o.get("contract_chunk_size"), default_chunk_size), 6000)),
+        "max_chunks": max(1, min(_safe_int(o.get("contract_chunk_max"), default_max_chunks), 30)),
+        "per_chunk_top_k": max(1, min(_safe_int(o.get("per_chunk_top_k"), default_per_chunk_top_k), 20)),
         "tax_focus": _safe_bool(o.get("tax_focus"), True),
         "tax_boost": max(0.0, min(_safe_float(o.get("tax_boost"), 0.35 if relaxed else 0.25), 1.0)),
         "tax_filter_to_tax_only": _safe_bool(o.get("tax_filter_to_tax_only"), not relaxed),
@@ -252,6 +260,18 @@ def _build_query_routes(
     elif not routes:
         routes.extend(origin_routes)
     return routes
+
+
+def _split_tax_prefixed_query(route: str, query_text: str) -> Tuple[str, str]:
+    text = str(query_text or "").strip()
+    if not route.endswith("_tax"):
+        return text, text
+    if "\n" not in text:
+        return text, text
+    semantic_query = text.split("\n", 1)[1].strip()
+    if not semantic_query:
+        return text, text
+    return text, semantic_query
 
 
 def _resolve_rag_search_languages(cfg: Dict[str, Any], source_lang: str) -> List[str]:
@@ -327,8 +347,12 @@ def _retrieve_regulation_evidence(
             for q_text, q_lang, q_route in queries_to_run:
                 dedup[(q_text, q_lang, q_route)] = True
             for q_text, q_lang, q_route in dedup.keys():
+                bm25_query_text, semantic_query_text = _split_tax_prefixed_query(
+                    q_route, q_text)
                 q = SearchQuery(
-                    query=q_text,
+                    query=semantic_query_text,
+                    bm25_query=bm25_query_text,
+                    semantic_query=semantic_query_text,
                     language=q_lang,
                     top_k=retrieval_opts["per_chunk_top_k"],
                     date=retrieval_opts["date"] or None,

@@ -28,6 +28,13 @@ def normalize_law_title(law_title: Any) -> str:
         "civilcodeofthepeoplesrepublicofchina": "中华人民共和国民法典",
         "prccivilcode": "中华人民共和国民法典",
         "thecivilcodeofthepeoplesrepublicofchina": "中华人民共和国民法典",
+        "valueaddedtaxlawofthepeoplesrepublicofchina": "中华人民共和国增值税法",
+        "vatlawofthepeoplesrepublicofchina": "中华人民共和国增值税法",
+        "enterpriseincometaxlawofthepeoplesrepublicofchina": "中华人民共和国企业所得税法",
+        "individualincometaxlawofthepeoplesrepublicofchina": "中华人民共和国个人所得税法",
+        "lawofthepeoplesrepublicofchinaontaxcollectionandadministration": "中华人民共和国税收征收管理法",
+        "invoicemanagementmeasuresofthepeoplesrepublicofchina": "中华人民共和国发票管理办法",
+        "invoiceadministrationlawofthepeoplesrepublicofchina": "中华人民共和国发票管理办法",
     }
     return alias.get(s, s)
 

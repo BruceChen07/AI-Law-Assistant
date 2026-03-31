@@ -238,3 +238,45 @@ def test_retrieval_passes_target_rag_lang_to_search(monkeypatch):
     assert out["queries"] == 2
     assert ("zh", "zh") in calls
     assert ("zh", "en") in calls
+
+
+def test_tax_route_uses_prefixed_bm25_and_raw_semantic_query(monkeypatch):
+    calls = []
+
+    def fake_search(_cfg, q, _embedder, _reranker=None, target_rag_lang=""):
+        calls.append({
+            "query": q.query,
+            "bm25_query": q.bm25_query,
+            "semantic_query": q.semantic_query,
+            "target_rag_lang": target_rag_lang,
+        })
+        return [{
+            "citation_id": "zh:tax:1",
+            "final_score": 0.9,
+            "content": "税务相关法规",
+            "title": "税法",
+            "article_no": "第一条",
+        }]
+
+    monkeypatch.setattr(ar, "search_regulations", fake_search)
+    cfg = {"retrieval_regulation_language": "zh"}
+    opts = ar._normalize_retrieval_options(
+        {"audit_mode": "rag", "tax_focus": True, "contract_chunk_max": 1}
+    )
+    out = ar._retrieve_regulation_evidence(
+        cfg=cfg,
+        text="供应商应依法开具增值税专用发票并履行代扣代缴义务。",
+        lang="zh",
+        retrieval_opts=opts,
+        embedder=DummyEmbedderNoProfile(),
+        reranker=None,
+        translator=None,
+    )
+
+    assert out["queries"] == 2
+    assert len(calls) == 2
+    tax_call = [x for x in calls if x["bm25_query"] != x["semantic_query"]][0]
+    assert "财税" in tax_call["bm25_query"]
+    assert "\n" in tax_call["bm25_query"]
+    assert tax_call["query"] == tax_call["semantic_query"]
+    assert "财税" not in tax_call["semantic_query"]

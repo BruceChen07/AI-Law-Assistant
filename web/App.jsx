@@ -102,9 +102,12 @@ export default function App() {
   const normalizeArticleNo = (value) => {
     const v = String(value || "").trim()
     if (!v) return ""
+    const enMatched = v.match(/^(?:article|art\.?)[\s.]*([0-9]{1,5})$/i)
+    if (enMatched) return `Article ${enMatched[1]}`
     if (v.includes("条")) return v
     if (v.startsWith("第")) return `${v}条`
-    return `第${v}条`
+    if (/^[0-9]{1,5}$/.test(v)) return `第${v}条`
+    return v
   }
   const normalizeLawTitle = (value) => String(value || "").replace(/[《》\s]/g, "").trim().toLowerCase()
   const buildLawArticleKey = (lawTitle, articleNo) => {
@@ -122,10 +125,10 @@ export default function App() {
   const parseBasisLawArticle = (basis) => {
     const text = String(basis || "").replace(/[《》]/g, " ").replace(/\s+/g, " ").trim()
     if (!text) return { lawTitle: "", articleNo: "" }
-    const matchedArticle = text.match(/第[一二三四五六七八九十百千万0-9]+条/)
+    const matchedArticle = text.match(/第[一二三四五六七八九十百千万0-9]+条|(?:Article|Art\.?)\s*[0-9]{1,5}/i)
     if (!matchedArticle) return { lawTitle: "", articleNo: "" }
-    const articleNo = matchedArticle[0]
-    const lawTitle = text.replace(articleNo, "").trim()
+    const articleNo = normalizeArticleNo(matchedArticle[0])
+    const lawTitle = text.replace(matchedArticle[0], "").trim()
     return { lawTitle, articleNo }
   }
   const buildCitationTitle = (citation) => {

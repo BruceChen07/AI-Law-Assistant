@@ -41,7 +41,7 @@ Models (Embedding + Reranker + LLM)
 | Layer | Technology |
 |------|------|
 | Backend Framework | FastAPI, Uvicorn |
-| Database | SQLite + FTS5 |
+| Database | SQLite + FTS5, Optional ChromaDB |
 | Vector/Reranking | ONNX Runtime, Transformers, Torch |
 | Models | BGE-small-zh/en, BGE-reranker |
 | Frontend Framework | React 18, Vite 5 |
@@ -56,6 +56,7 @@ Models (Embedding + Reranker + LLM)
 - Node.js 22+
 - Windows / Linux / macOS
 - OCR Dependencies: tesseract, poppler, mineru (for scanned PDFs)
+- Vector Database: SQLite in-memory computation is used by default. For production environments (1M+ vectors), it's highly recommended to install `chromadb` and switch engines via the admin UI.
 
 ### 1. Clone the Project
 

@@ -27,3 +27,10 @@ onnx==1.17.0
 
 structlog
 keyring>=25.6.0
+
+# Database
+# Note: chromadb is optional but highly recommended for production scale (million+ vectors)
+# You can switch to it dynamically from the admin panel once installed.
+chromadb>=0.4.0
+
+jieba==0.42.1

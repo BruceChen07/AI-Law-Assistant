@@ -2,6 +2,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 from app.core.database import get_conn
+from app.core.utils import tokenize_text_for_fts
 
 logger = logging.getLogger("law_assistant")
 
@@ -65,10 +66,12 @@ def insert_articles(cfg, version_id, items, job_id=None, language: str = "zh", e
             INSERT INTO article(id,regulation_version_id,article_no,level_path,content,keywords)
             VALUES(?,?,?,?,?,?)
         """, (aid, version_id, article_no, article_no, content, ""))
+        
+        fts_content = tokenize_text_for_fts(content)
         cur.execute("""
             INSERT INTO article_fts(content,article_id,regulation_version_id)
             VALUES(?,?,?)
-        """, (content, aid, version_id))
+        """, (fts_content, aid, version_id))
         prof = embedder.get_embed_profile(language) if embedder else None
         v = embedder.compute_embedding(
             content, lang=language) if embedder else None

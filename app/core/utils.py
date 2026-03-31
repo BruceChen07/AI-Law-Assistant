@@ -1,14 +1,21 @@
 import os
 import re
 import logging
+import threading
+import jieba
 from typing import List, Tuple, Optional, Dict, Any
 from pypdf import PdfReader
 from docx import Document
 from app.core.ocr import OCREngineManager
+from app.core.config import get_config
 
 logger = logging.getLogger("law_assistant")
 
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_JIEBA_READY = False
+_JIEBA_LOCK = threading.Lock()
+_JIEBA_HMM_ENABLED = False
 
 
 def resolve_path(p: str, base_dir: str = APP_ROOT) -> str:
@@ -118,7 +125,7 @@ def split_articles(text):
     english_mode = len(re.findall(r"[A-Za-z]", text)) >= max(
         20, len(re.findall(r"[\u4e00-\u9fff]", text)))
     parts = re.split(
-        r"(第[一二三四五六七八九十百千0-9]+条|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)",
+        r"(?m)^\s*(第[一二三四五六七八九十百千0-9]+条|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)",
         text,
         flags=re.IGNORECASE,
     )
@@ -138,11 +145,51 @@ def split_articles(text):
     return items
 
 
+def _init_jieba() -> None:
+    global _JIEBA_READY, _JIEBA_HMM_ENABLED
+    if _JIEBA_READY:
+        return
+    with _JIEBA_LOCK:
+        if _JIEBA_READY:
+            return
+        cfg = get_config()
+        _JIEBA_HMM_ENABLED = bool(cfg.get("jieba_hmm_enabled", False))
+        raw_path = str(cfg.get("jieba_user_dict_path", "../data/dict/law_dict.txt") or "").strip()
+        if raw_path:
+            dict_path = resolve_path(raw_path, APP_ROOT)
+            if os.path.exists(dict_path):
+                jieba.load_userdict(dict_path)
+                logger.info("jieba_user_dict_loaded path=%s", dict_path)
+            else:
+                logger.warning("jieba_user_dict_missing path=%s", dict_path)
+        force_words = cfg.get("jieba_force_words", [])
+        if isinstance(force_words, list):
+            for item in force_words:
+                word = str(item or "").strip()
+                if word:
+                    jieba.suggest_freq(word, tune=True)
+        _JIEBA_READY = True
+
+
+def tokenize_text_for_fts(text: str) -> str:
+    """Tokenize text using jieba for SQLite FTS indexing."""
+    if not text:
+        return ""
+    _init_jieba()
+    return " ".join(jieba.cut(text, HMM=_JIEBA_HMM_ENABLED))
+
+
 def tokenize_query(q: str) -> List[str]:
-    words = re.findall(r"[\u4e00-\u9fff]+", q)
-    words += re.findall(r"[A-Za-z]+", q)
-    words += re.findall(r"[0-9]+", q)
-    return [w for w in words if len(w) >= 2][:10]
+    if not q.strip():
+        return []
+    _init_jieba()
+    words = list(jieba.cut_for_search(q, HMM=_JIEBA_HMM_ENABLED))
+    res = []
+    for w in words:
+        w = w.strip()
+        if len(w) >= 2 or (len(w) == 1 and w.isalnum()):
+            res.append(w)
+    return res[:15]
 
 
 def best_sentence(text: str, tokens: List[str]) -> tuple[str, int]:

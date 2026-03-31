@@ -22,3 +22,10 @@ def test_best_sentence():
     s, score = best_sentence(text, tokens)
     assert s == "句子二包含关键词"
     assert score == 1
+
+
+def test_tokenize_query_tax_terms():
+    q = "税收征收管理法实施细则 增值税专用缴款书"
+    tokens = tokenize_query(q)
+    assert "税收征收管理法实施细则" in tokens
+    assert "增值税专用缴款书" in tokens

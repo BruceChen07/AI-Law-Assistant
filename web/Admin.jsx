@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
@@ -13,6 +13,7 @@ export default function Admin({ onBack, lang }) {
   const [search, setSearch] = useState("")
   const [docCategory, setDocCategory] = useState("contract")
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [userDeleteConfirm, setUserDeleteConfirm] = useState(null)
   const [llmConfig, setLlmConfig] = useState(null)
   const [llmHasApiKey, setLlmHasApiKey] = useState(false)
   const [llmSaving, setLlmSaving] = useState(false)
@@ -25,6 +26,9 @@ export default function Admin({ onBack, lang }) {
   const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark" })
   const [uiSaving, setUiSaving] = useState(false)
   const [uiError, setUiError] = useState("")
+  const [vectorStoreConfig, setVectorStoreConfig] = useState(null)
+  const [vectorStoreSaving, setVectorStoreSaving] = useState(false)
+  const [vectorStoreMsg, setVectorStoreMsg] = useState("")
   const [regUpload, setRegUpload] = useState({
     title: "",
     doc_no: "",
@@ -46,6 +50,7 @@ export default function Admin({ onBack, lang }) {
   const [regHasSearched, setRegHasSearched] = useState(false)
   const [regSearchError, setRegSearchError] = useState("")
   const [regShowAdvanced, setRegShowAdvanced] = useState(false)
+  const [regExpanded, setRegExpanded] = useState({})
   
   const fileInputRef = useRef(null)
 
@@ -61,6 +66,7 @@ export default function Admin({ onBack, lang }) {
     if (tab === "model") {
       loadLLM()
       loadUIConfig()
+      loadVectorStoreConfig()
     }
     if (tab === "regulations") {}
   }, [tab, pagination.page, docCategory])
@@ -149,6 +155,38 @@ export default function Admin({ onBack, lang }) {
       setUiError("")
     } catch (err) {
       setUiError(err.message)
+    }
+  }
+
+  const loadVectorStoreConfig = async () => {
+    try {
+      const data = await adminGetVectorStoreConfig()
+      setVectorStoreConfig(data)
+      setVectorStoreMsg("")
+    } catch (err) {
+      setVectorStoreMsg(err.message)
+    }
+  }
+
+  const saveVectorStoreConfig = async () => {
+    setVectorStoreSaving(true)
+    setVectorStoreMsg("")
+    try {
+      await adminUpdateVectorStoreConfig({ engine: vectorStoreConfig.engine })
+      setVectorStoreMsg(lang === "zh" ? "向量库引擎配置已保存并开始异步迁移" : "Vector store config saved, async migration started")
+    } catch (err) {
+      setVectorStoreMsg(err.message)
+    } finally {
+      setVectorStoreSaving(false)
+    }
+  }
+
+  const cleanupVectorStore = async () => {
+    try {
+      const res = await adminCleanupVectorStore()
+      setVectorStoreMsg(lang === "zh" ? `清理完成，删除了 ${res.deleted_records} 条数据` : `Cleanup done, deleted ${res.deleted_records} records`)
+    } catch (err) {
+      setVectorStoreMsg(err.message)
     }
   }
 
@@ -274,6 +312,7 @@ export default function Admin({ onBack, lang }) {
     setRegSearching(true)
     setRegHasSearched(true)
     setRegSearchError("")
+    setRegExpanded({})
     try {
       const res = await searchRegulations(payload)
       setRegResults(Array.isArray(res) ? res : [])
@@ -303,6 +342,16 @@ export default function Admin({ onBack, lang }) {
       alert(err.message)
     }
   }
+
+  const handleUserDelete = async (userId) => {
+    try {
+      await adminDeleteUser(userId)
+      setUserDeleteConfirm(null)
+      loadUsers()
+    } catch (err) {
+      alert(err.message)
+    }
+  }
   
   const formatSize = (bytes) => {
     if (bytes < 1024) return bytes + " B"
@@ -318,6 +367,14 @@ export default function Admin({ onBack, lang }) {
       utcStr += "Z"
     }
     return new Date(utcStr).toLocaleString()
+  }
+
+  const getRegResultKey = (r, i) => String(r?.citation_id || `${r?.regulation_id || "reg"}:${r?.article_id || i}`)
+
+  const getRegSummary = (text) => {
+    const s = String(text || "")
+    if (s.length <= 300) return s
+    return `${s.slice(0, 300)}...`
   }
   
   if (!admin) {
@@ -568,6 +625,31 @@ export default function Admin({ onBack, lang }) {
                   {uiError && <span style={{ marginLeft: 12 }}>{uiError}</span>}
                 </div>
               </div>
+
+              {vectorStoreConfig && (
+                <div className="llm-test">
+                  <div className="row">
+                    <label>{lang === "zh" ? "向量库存储引擎" : "Vector Store Engine"}</label>
+                  </div>
+                  <div className="row">
+                    <label>{lang === "zh" ? "当前引擎:" : "Current Engine:"}</label>
+                    <select
+                      value={vectorStoreConfig.engine}
+                      onChange={e => setVectorStoreConfig(prev => ({ ...prev, engine: e.target.value }))}
+                    >
+                      <option value="sqlite">SQLite (Default)</option>
+                      <option value="chromadb" disabled={!vectorStoreConfig.chroma_available}>
+                        ChromaDB {!vectorStoreConfig.chroma_available && (lang === "zh" ? "(未安装依赖)" : "(Not Installed)")}
+                      </option>
+                    </select>
+                  </div>
+                  <div className="row">
+                    <button disabled={vectorStoreSaving} onClick={saveVectorStoreConfig}>{t.save}</button>
+                    <button onClick={cleanupVectorStore} style={{ marginLeft: 8 }}>{lang === "zh" ? "一键清理旧引擎数据" : "Clean Old Engine Data"}</button>
+                    {vectorStoreMsg && <span style={{ marginLeft: 12 }}>{vectorStoreMsg}</span>}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -602,7 +684,18 @@ export default function Admin({ onBack, lang }) {
                       </select>
                     </td>
                     <td>{formatDate(u.created_at)}</td>
-                    <td>{u.role}</td>
+                    <td>
+                      {u.id === user?.id ? (
+                        <span>-</span>
+                      ) : userDeleteConfirm === u.id ? (
+                        <span>
+                          <button onClick={() => handleUserDelete(u.id)}>{t.confirm}</button>
+                          <button onClick={() => setUserDeleteConfirm(null)}>{t.cancel}</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setUserDeleteConfirm(u.id)}>{t.delete}</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -623,6 +716,14 @@ export default function Admin({ onBack, lang }) {
             <input placeholder={lang === "zh" ? "地区" : "Region"} value={regUpload.region} onChange={e => setRegUpload({ ...regUpload, region: e.target.value })} />
             <input placeholder={lang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={regUpload.industry} onChange={e => setRegUpload({ ...regUpload, industry: e.target.value })} />
             <div className="row" style={{ alignItems: "center" }}>
+              <select 
+                value={regUpload.language} 
+                onChange={e => setRegUpload({ ...regUpload, language: e.target.value })}
+                style={{ marginRight: '12px' }}
+              >
+                <option value="zh">中文文档</option>
+                <option value="en">English Document</option>
+              </select>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -726,10 +827,25 @@ export default function Admin({ onBack, lang }) {
           {regHasSearched && !regSearchError && regResults.length === 0 && !regSearching && <div className="error">{t.noMatch}</div>}
           <ul className="list">
             {regResults.slice(0, 5).map((r, i) => (
-              <li key={i}>
+              <li key={getRegResultKey(r, i)}>
                 <div className="title">{r.title} - {r.article_no}</div>
                 <div className="meta">{r.effective_date} | {r.region} | {r.industry}</div>
-                <div className="content">{r.content?.slice(0, 300)}...</div>
+                <div className="content">
+                  {regExpanded[getRegResultKey(r, i)] ? String(r.content || "") : getRegSummary(r.content)}
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const key = getRegResultKey(r, i)
+                      setRegExpanded(prev => ({ ...prev, [key]: !prev[key] }))
+                    }}
+                  >
+                    {regExpanded[getRegResultKey(r, i)]
+                      ? (lang === "zh" ? "收起全文" : "Collapse")
+                      : (lang === "zh" ? "展开全文" : "Expand")}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

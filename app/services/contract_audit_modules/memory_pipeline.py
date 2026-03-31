@@ -22,10 +22,12 @@ from app.memory_system.indexer import IndexerConfig, MemoryIndexer, SentenceTran
 from app.services.audit_utils import _normalize_risk_level, _enrich_citations, _normalize_lang
 from typing import Dict, Any, List, Optional, Tuple
 import json
+import os
 import re
 import structlog
 from datetime import datetime
 from pathlib import Path
+from app.core.utils import resolve_path
 
 logger = structlog.get_logger(__name__)
 _MEMORY_EMBEDDERS: Dict[str, Any] = {}
@@ -84,6 +86,35 @@ def _dedupe_long_memory_hits(text: str, max_blocks: int, max_chars: int) -> str:
         out = out[:limit]
     return out
 
+
+def _load_llm_json_object(raw_text: str) -> Dict[str, Any]:
+    s = str(raw_text or "").strip()
+    if not s:
+        return json.loads(s)
+    fenced = re.sub(r"^\s*```(?:json)?\s*", "", s, count=1, flags=re.IGNORECASE)
+    fenced = re.sub(r"\s*```\s*$", "", fenced, count=1, flags=re.IGNORECASE).strip()
+    candidates: List[str] = []
+    if fenced:
+        candidates.append(fenced)
+        left = fenced.find("{")
+        right = fenced.rfind("}")
+        if left >= 0 and right > left:
+            obj_text = fenced[left:right + 1].strip()
+            if obj_text and obj_text != fenced:
+                candidates.append(obj_text)
+    if s and s not in candidates:
+        candidates.append(s)
+    last_error: Optional[Exception] = None
+    for item in candidates:
+        try:
+            out = json.loads(item)
+            if isinstance(out, dict):
+                return out
+        except Exception as e:
+            last_error = e
+    if last_error is not None:
+        raise last_error
+    return json.loads(fenced)
 
 def _build_compact_whitelist(evidence_items: List[Dict[str, Any]], limit: int = 40):
     lines: List[str] = []
@@ -317,17 +348,41 @@ def _dedupe_similar_risks(risks: List[Dict[str, Any]], log_limit: int = 30) -> T
     return selected, removed_hits
 
 
-def get_memory_embedder(lang: str = "zh"):
+def _memory_model_ref(cfg: Optional[Dict[str, Any]], lang: str) -> str:
+    norm_lang = _normalize_lang(lang, default="zh")
+    c = cfg or {}
+    profile = c.get("embedding_profiles") if isinstance(c.get("embedding_profiles"), dict) else {}
+    p = profile.get(norm_lang) if isinstance(profile.get(norm_lang), dict) else {}
+    local_dir = str(
+        c.get(f"memory_embedding_model_dir_{norm_lang}")
+        or c.get("memory_embedding_model_dir")
+        or p.get("embedding_tokenizer_dir")
+        or ""
+    ).strip()
+    if local_dir:
+        local_dir = resolve_path(local_dir)
+        if local_dir and os.path.isdir(local_dir):
+            return local_dir
+    return "BAAI/bge-small-zh-v1.5" if norm_lang == "zh" else "BAAI/bge-small-en-v1.5"
+
+
+def get_memory_embedder(lang: str = "zh", cfg: Optional[Dict[str, Any]] = None):
     global _MEMORY_EMBEDDERS
     norm_lang = _normalize_lang(lang, default="zh")
-    if norm_lang in _MEMORY_EMBEDDERS:
-        return _MEMORY_EMBEDDERS[norm_lang]
+    model_ref = _memory_model_ref(cfg, norm_lang)
+    force_local = bool((cfg or {}).get("memory_embedding_force_local", True))
+    cache_key = f"{norm_lang}:{model_ref}:{int(force_local)}"
+    if cache_key in _MEMORY_EMBEDDERS:
+        return _MEMORY_EMBEDDERS[cache_key]
     try:
-        model_name = "BAAI/bge-small-zh-v1.5" if norm_lang == "zh" else "BAAI/bge-small-en-v1.5"
-        embedder = SentenceTransformerEmbedder(model_name)
-        _MEMORY_EMBEDDERS[norm_lang] = embedder
+        if force_local:
+            os.environ["HF_HUB_OFFLINE"] = "1"
+            os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        local_only = force_local or os.path.isdir(str(model_ref))
+        embedder = SentenceTransformerEmbedder(model_ref, local_files_only=local_only)
+        _MEMORY_EMBEDDERS[cache_key] = embedder
         logger.info("memory_embedder_ready",
-                    provider="sentence_transformers", lang=norm_lang, model=model_name)
+                    provider="sentence_transformers", lang=norm_lang, model=model_ref, local_only=local_only, force_local=force_local)
         return embedder
     except Exception as e:
         logger.warning("memory_embedder_fallback",
@@ -345,7 +400,7 @@ def get_memory_embedder(lang: str = "zh"):
                     out.append(vec / norm)
                 return np.vstack(out) if out else np.zeros((0, 16), dtype=np.float32)
         embedder = _FallbackEmbedder()
-        _MEMORY_EMBEDDERS[norm_lang] = embedder
+        _MEMORY_EMBEDDERS[cache_key] = embedder
         return embedder
 
 
@@ -372,7 +427,7 @@ def execute_memory_audit(
                 memory_db=memory_db, evidence=len(evidence_items), lang=norm_lang,
                 enable_long_memory=memory_enable_long_memory, enable_short_memory=memory_enable_short_memory)
 
-    embedder = get_memory_embedder(norm_lang)
+    embedder = get_memory_embedder(norm_lang, cfg=cfg)
     indexer = MemoryIndexer(
         IndexerConfig(memory_root=Path(memory_dir), db_path=Path(memory_db)),
         embedder
@@ -677,7 +732,7 @@ def execute_memory_audit(
             }
         }
         try:
-            parsed = json.loads(result_text)
+            parsed = _load_llm_json_object(result_text)
             if not isinstance(parsed, dict):
                 clause_parse_state["count"] += 1
                 clause_parse_state["clause_ids"].append(
@@ -1009,9 +1064,20 @@ def execute_memory_audit(
         risk_summary[r.get("level", "low")] += 1
 
     parse_failed_count = int(clause_parse_state.get("count") or 0)
+    fail_on_parse_and_no_risk = bool(
+        cfg.get("memory_fail_on_parse_and_no_risk", False))
+    require_full_coverage = bool(retrieval_opts.get("require_full_coverage", False))
     if parse_failed_count > 0 and not normalized_risks:
-        raise RuntimeError(
-            "memory audit degraded: llm json parse failed and no risks produced")
+        if fail_on_parse_and_no_risk or require_full_coverage:
+            raise RuntimeError(
+                "memory audit degraded: llm json parse failed and no risks produced")
+        logger.warning(
+            "memory_pipeline_degraded_no_risk_after_parse_fail",
+            parse_failed_count=parse_failed_count,
+            clause_ids=clause_parse_state.get("clause_ids", []),
+            fail_on_parse_and_no_risk=fail_on_parse_and_no_risk,
+            require_full_coverage=require_full_coverage,
+        )
 
     legal_validation = report.get("legal_validation") if isinstance(
         report.get("legal_validation"), dict) else {"ok": True, "issues": []}

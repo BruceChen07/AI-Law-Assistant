@@ -189,7 +189,7 @@ def insert_risk_comments(input_path: str, output_path: str, risks: list):
             comment_elem = ET.Element(f"{{{NAMESPACES['w']}}}comment")
             comment_elem.set(f"{{{NAMESPACES['w']}}}id", current_id)
             comment_elem.set(
-                f"{{{NAMESPACES['w']}}}author", "AI Law Assistant")
+                f"{{{NAMESPACES['w']}}}author", "Tax Assistant")
 
             # Use timezone-aware UTC datetime instead of utcnow()
             from datetime import timezone

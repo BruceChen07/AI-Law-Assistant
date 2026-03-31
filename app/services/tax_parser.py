@@ -161,7 +161,7 @@ def split_tax_clauses(text: str) -> list[dict]:
     normalized = re.sub(r"\n{2,}", "\n\n", normalized)
     english_mode = len(re.findall(
         r"[A-Za-z]", normalized)) >= max(20, len(re.findall(r"[\u4e00-\u9fff]", normalized)))
-    marker_pattern = r"(第[一二三四五六七八九十百千0-9]+[章节条款项]|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)"
+    marker_pattern = r"(?m)^\s*(第[一二三四五六七八九十百千0-9]+[章节条款项]|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)"
     chunks = re.split(marker_pattern, normalized, flags=re.IGNORECASE)
     items = []
     if len(chunks) >= 3:

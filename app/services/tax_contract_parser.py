@@ -3,6 +3,7 @@ import re
 import json
 import logging
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
 from app.services.crud import (
     get_tax_contract_document,
     update_tax_contract_document_status,
@@ -71,15 +72,84 @@ def _extract_first(pattern: str, text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def extract_clause_entities(clause_text: str) -> dict:
-    txt = str(clause_text or "")
+def _is_tax_related_clause(text: str) -> bool:
+    txt = str(text or "").strip()
+    if not txt:
+        return False
+    low = txt.lower()
+    keywords = [
+        "税", "增值税", "所得税", "发票", "纳税", "税率", "税额", "税费", "税务",
+        "vat", "cit", "pit", "tax", "invoice", "withholding", "withhold",
+        "deduct", "remit", "levy",
+    ]
+    if any(k in txt for k in keywords[:9]):
+        return True
+    if any(k in low for k in keywords[9:]):
+        return True
+    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*%", txt):
+        return True
+    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元)", txt):
+        return True
+    if re.search(r"(?:rmb|cny|usd|\$)\s*[0-9]+", low):
+        return True
+    return False
+
+
+def extract_clause_entities(clause_text: str, cfg: dict = None) -> dict:
+    """
+    Extract business entities from a contract clause.
+    Upgraded to use LLM for structured extraction if cfg is provided,
+    otherwise falls back to regex.
+    """
+    txt = str(clause_text or "").strip()
+    if not txt:
+        return {}
+
+    if cfg and _is_tax_related_clause(txt):
+        from app.core.llm import LLMService
+        llm = LLMService(cfg)
+        prompt = f"""
+        你是一个合同实体抽取助手。请从以下合同条款中提取财税相关实体，并以JSON格式返回。
+        
+        需要提取的字段及格式（如果条款中没有对应信息，请返回null）：
+        - taxpayer_type: 纳税人类型（如 "一般纳税人", "小规模纳税人"）
+        - tax_category: 税种（如 "VAT", "CIT", "PIT"，如果中文写了"增值税"则转为"VAT"）
+        - tax_rate: 税率（如 0.13, 0.09, 0.06，将百分比转为小数）
+        - invoice_type: 发票类型（如 "专用发票", "普通发票", "电子发票"）
+        - transaction_type: 交易类型/业务类型（如 "销售货物", "提供劳务", "租赁"）
+        - amount: 金额（如 "100万元"）
+        - invoice_time: 开票时点/期限（如 "30日内", "付款前"）
+        - withholding_obligation: 是否有代扣代缴义务（"是" 或 "否"）
+        
+        合同条款：
+        {txt}
+        
+        请仅返回纯JSON对象，不要有任何其他说明：
+        """
+        try:
+            response, _ = llm.chat([{"role": "user", "content": prompt}], overrides={
+                                   "temperature": 0.1})
+            text = response.strip()
+            if "```json" in text:
+                text = text.split("```json")[1].split("```")[0].strip()
+            elif "```" in text:
+                text = text.split("```")[1].split("```")[0].strip()
+            return json.loads(text)
+        except Exception as e:
+            logger.warning(
+                f"LLM entity extraction failed: {e}, falling back to regex")
+
+    # Fallback regex extraction
     low = txt.lower()
     english_mode = _is_english_text(txt)
     amount = _extract_first(r"([0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元))", txt)
     if not amount:
         amount = _extract_first(
             r"((?:rmb|cny|usd|\$)\s*[0-9]+(?:,[0-9]{3})*(?:\.[0-9]+)?)", txt)
+
+    # Try to convert regex tax rate to decimal to match DSL format
     tax_rate = _extract_first(r"([0-9]+(?:\.[0-9]+)?\s*%)", txt)
+
     invoice_type = _extract_first(
         r"(专用发票|普通发票|电子发票|增值税专用发票|vat invoice|special vat invoice|ordinary invoice|electronic invoice)", txt)
     invoice_time = _extract_first(r"([0-9]{1,3}\s*(?:日内|个工作日内|天内))", txt)
@@ -88,24 +158,53 @@ def extract_clause_entities(clause_text: str) -> dict:
             r"(within\s*[0-9]{1,3}\s*(?:business\s*)?days?)", txt)
     withholding = ("yes" if english_mode else "是") if (
         "代扣代缴" in txt or "代扣" in txt or "withholding" in low or "withhold" in low) else ""
+
+    tax_category = None
+    if "增值税" in txt or "vat" in low:
+        tax_category = "VAT"
+    elif "企业所得税" in txt or "cit" in low:
+        tax_category = "CIT"
+    elif "个人所得税" in txt or "pit" in low:
+        tax_category = "PIT"
+
+    taxpayer_type = None
+    if "一般纳税人" in txt:
+        taxpayer_type = "一般纳税人"
+    elif "小规模纳税人" in txt:
+        taxpayer_type = "小规模纳税人"
+
     entities = {
-        "amount": amount,
+        "taxpayer_type": taxpayer_type,
+        "tax_category": tax_category,
         "tax_rate": tax_rate,
         "invoice_type": invoice_type,
+        "amount": amount,
         "invoice_time": invoice_time,
         "withholding_obligation": withholding,
     }
-    return entities
+    return {k: v for k, v in entities.items() if v is not None}
 
 
-def enrich_contract_clauses(clauses: list[dict]) -> list[dict]:
-    result = []
-    for c in clauses:
-        entities = extract_clause_entities(c.get("clause_text", ""))
+def enrich_contract_clauses(clauses: list[dict], cfg: dict = None) -> list[dict]:
+    def _build_item(c: dict) -> dict:
+        entities = extract_clause_entities(c.get("clause_text", ""), cfg)
         item = dict(c)
         item["entities_json"] = json.dumps(entities, ensure_ascii=False)
-        result.append(item)
-    return result
+        return item
+
+    if not clauses:
+        return []
+    max_workers = 1
+    if cfg:
+        try:
+            max_workers = int(cfg.get("tax_entity_extract_max_workers", 8))
+        except Exception:
+            max_workers = 8
+    max_workers = max(1, min(max_workers, len(clauses)))
+    if max_workers == 1:
+        return [_build_item(c) for c in clauses]
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(_build_item, clauses))
 
 
 def analyze_contract_document(cfg, contract_id: str, operator_id: str = "") -> dict:
@@ -135,7 +234,7 @@ def analyze_contract_document(cfg, contract_id: str, operator_id: str = "") -> d
                 meta.get("ext", ""),
             )
         clauses = split_contract_clauses(text)
-        clauses = enrich_contract_clauses(clauses)
+        clauses = enrich_contract_clauses(clauses, cfg)
         replace_contract_clauses(
             cfg, contract_id, clauses, created_by=operator_id)
         update_tax_contract_document_status(

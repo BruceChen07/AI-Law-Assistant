@@ -44,7 +44,7 @@ Models (Embedding + Reranker + LLM)
 | 层级    | 技术                                |
 | ----- | --------------------------------- |
 | 后端框架  | FastAPI, Uvicorn                  |
-| 数据库   | SQLite + FTS5                     |
+| 数据库   | SQLite + FTS5, 可选 ChromaDB        |
 | 向量/重排 | ONNX Runtime, Transformers, Torch |
 | 模型    | BGE-small-zh/en, BGE-reranker     |
 | 前端框架  | React 18, Vite 5                  |
@@ -59,6 +59,7 @@ Models (Embedding + Reranker + LLM)
 - Node.js 22+
 - Windows / Linux / macOS
 - OCR 依赖：tesseract、poppler, mineru（用于扫描 PDF）
+- 向量数据库：默认使用 SQLite 内存计算。如果是生产环境（百万级以上向量），建议安装 `chromadb` 并在后台配置切换。
 
 ### 1. 克隆项目
 

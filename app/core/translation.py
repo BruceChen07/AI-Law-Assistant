@@ -225,6 +225,8 @@ class TranslationService:
             truncation=True,
             max_length=max(32, self._max_source_chars()),
         )
+        if "token_type_ids" in tok:
+            del tok["token_type_ids"]
         if self._device() == "cuda" and self._torch and self._torch.cuda.is_available():
             tok = {k: v.to("cuda") for k, v in tok.items()}
         with self._torch.no_grad():

@@ -75,7 +75,7 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
         title: str = Form(""),
         language: str = Form("zh"),
         audit_mode: str = Form("rag"),
-        risk_detection_mode: str = Form("relaxed"),
+        risk_detection_mode: str = Form("balanced"),
         region: str = Form(""),
         date: str = Form(""),
         industry: str = Form(""),
@@ -84,15 +84,15 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
         use_semantic: Optional[str] = Form(None),
         semantic_weight: Optional[str] = Form(None),
         bm25_weight: Optional[str] = Form(None),
-        candidate_size: Optional[str] = Form(None),
+        candidate_size: Optional[str] = Form("25"),
         rerank_enabled: Optional[str] = Form(None),
-        rerank_top_n: Optional[str] = Form(None),
+        rerank_top_n: Optional[str] = Form("25"),
         rerank_mode: str = Form("on"),
         top_k_evidence: Optional[str] = Form(None),
         query_char_limit: Optional[str] = Form(None),
         contract_chunk_size: Optional[str] = Form(None),
-        contract_chunk_max: Optional[str] = Form(None),
-        per_chunk_top_k: Optional[str] = Form(None),
+        contract_chunk_max: Optional[str] = Form("5"),
+        per_chunk_top_k: Optional[str] = Form("5"),
         current_user: dict = Depends(get_current_user),
     ):
         language = _normalize_lang(language, default="zh")
@@ -106,9 +106,21 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
                             "received", "file received")
 
         doc_id = str(uuid.uuid4())
-        save_path = os.path.join(cfg["files_dir"], f"{doc_id}{ext}")
+        cache_dir = os.path.join(
+            cfg.get("data_dir", "./data"), "uploads", "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        save_path = os.path.join(cache_dir, f"{doc_id}{ext}")
         with open(save_path, "wb") as f:
             f.write(await file.read())
+
+        # Also insert into new upload_log table
+        from app.core.database import get_conn
+        with get_conn(cfg) as conn:
+            conn.execute(
+                "INSERT INTO upload_log (file_id, original_filename, file_path, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                (doc_id, file.filename, save_path)
+            )
+            conn.commit()
 
         _set_audit_progress(audit_id, "running", 10, "saved", "file saved")
 
@@ -382,7 +394,8 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
             audit.get("risks"), list) else []
         citations = audit.get("citations") if isinstance(
             audit.get("citations"), list) else []
-        citation_map = {str(c.get("citation_id") or ""): c for c in citations if isinstance(c, dict)}
+        citation_map = {str(c.get("citation_id") or "")
+                            : c for c in citations if isinstance(c, dict)}
         risk_summary = {"high": 0, "medium": 0, "low": 0}
         risk_items = []
         evidence_items = []

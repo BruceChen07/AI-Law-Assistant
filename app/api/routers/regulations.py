@@ -1,8 +1,10 @@
 import os
 import uuid
+import logging
 from typing import Optional
 from fastapi import APIRouter, UploadFile, File, Form, BackgroundTasks, HTTPException, Depends
 from app.core.database import get_conn
+from app.core.logger import get_pipeline_logger
 from app.services.importer import process_import
 from app.services.crud import insert_job, insert_document, backfill_legal_document_categories
 from app.services.search import search_regulations
@@ -12,6 +14,9 @@ from app.api.dependencies import get_current_user
 
 def build_router(cfg, embedder, reranker=None):
     router = APIRouter()
+    logger = logging.getLogger("law_assistant")
+    rag_logger = get_pipeline_logger(
+        cfg, name="rag_pipeline", filename="rag_pipeline.log")
 
     @router.post("/regulations/import")
     async def import_regulation(
@@ -30,15 +35,37 @@ def build_router(cfg, embedder, reranker=None):
         language: str = Form("zh"),
         current_user: dict = Depends(get_current_user),
     ):
+        class_name = "RegulationsRouter"
         job_id = str(uuid.uuid4())
+        rag_logger.info(
+            "class=%s stage=import_request_received job_id=%s filename=%s title=%s user_id=%s",
+            class_name, job_id, file.filename, title, current_user.get("id", ""))
         insert_job(cfg, job_id)
         ext = os.path.splitext(file.filename)[1].lower()
         if ext not in [".docx", ".pdf"]:
+            rag_logger.warning(
+                "class=%s stage=import_request_rejected job_id=%s ext=%s",
+                class_name, job_id, ext)
             raise HTTPException(
                 status_code=400, detail="unsupported file type, only docx and pdf are allowed")
-        save_path = os.path.join(cfg["files_dir"], f"{job_id}{ext}")
+                
+        cache_dir = os.path.join(cfg.get("data_dir", "./data"), "uploads", "cache")
+        os.makedirs(cache_dir, exist_ok=True)
+        save_path = os.path.join(cache_dir, f"{job_id}{ext}")
         with open(save_path, "wb") as f:
             f.write(await file.read())
+        rag_logger.info(
+            "class=%s stage=import_file_saved job_id=%s save_path=%s size_bytes=%s",
+            class_name, job_id, save_path, os.path.getsize(save_path))
+            
+        # Also insert into new upload_log table
+        with get_conn(cfg) as conn:
+            conn.execute(
+                "INSERT INTO upload_log (file_id, original_filename, file_path, created_at, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                (job_id, file.filename, save_path)
+            )
+            conn.commit()
+
         # record document for admin dashboard
         doc_id = str(uuid.uuid4())
         doc_id = insert_document(
@@ -60,18 +87,30 @@ def build_router(cfg, embedder, reranker=None):
             cfg, embedder, job_id, save_path, title, doc_no, issuer, reg_type,
             status, effective_date, expiry_date, region, industry, regulation_id, language,
         )
+        rag_logger.info(
+            "class=%s stage=import_task_enqueued job_id=%s doc_id=%s language=%s",
+            class_name, job_id, doc_id, language)
+        logger.info("regulation_import_enqueued job_id=%s doc_id=%s", job_id, doc_id)
         return {"job_id": job_id, "doc_id": doc_id}
 
     @router.get("/regulations/import/{job_id}")
     def import_status(job_id: str):
+        class_name = "RegulationsRouter"
         conn = get_conn(cfg)
         cur = conn.cursor()
         cur.execute("SELECT * FROM ingest_job WHERE id=?", (job_id,))
         row = cur.fetchone()
         conn.close()
         if not row:
+            rag_logger.warning(
+                "class=%s stage=import_status_not_found job_id=%s",
+                class_name, job_id)
             raise HTTPException(status_code=404, detail="job not found")
-        return dict(row)
+        data = dict(row)
+        rag_logger.info(
+            "class=%s stage=import_status_poll job_id=%s status=%s error=%s",
+            class_name, job_id, data.get("status", ""), bool(data.get("error")))
+        return data
 
     @router.get("/regulations")
     def list_regulations():
@@ -98,6 +137,9 @@ def build_router(cfg, embedder, reranker=None):
 
     @router.post("/regulations/search")
     def search(q: SearchQuery):
+        rag_logger.info(
+            "class=%s stage=search_request query=%s lang=%s top_k=%s semantic=%s",
+            "RegulationsRouter", str(q.query or "")[:80], q.language, q.top_k, q.use_semantic)
         return search_regulations(cfg, q, embedder, reranker)
 
     return router

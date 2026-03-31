@@ -13,6 +13,7 @@ from app.core.database import get_conn
 from app.core.config import get_config, update_config_patch
 from app.core.llm import LLMService
 from app.core.secure_store import has_llm_api_key, set_llm_api_key, delete_llm_api_key
+from app.vector_store.factory import VectorStoreFactory
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -176,7 +177,8 @@ def _validate_llm_config(payload: dict):
 
 
 def _ensure_llm_secret_migrated(cfg: dict) -> dict:
-    llm_cfg = cfg.get("llm_config") if isinstance(cfg.get("llm_config"), dict) else {}
+    llm_cfg = cfg.get("llm_config") if isinstance(
+        cfg.get("llm_config"), dict) else {}
     plain = _clean_text(llm_cfg.get("api_key", ""))
     if not plain:
         return cfg
@@ -406,7 +408,104 @@ def update_role(
     return {"message": f"Role updated to {role}"}
 
 
+@router.delete("/users/{user_id}", response_model=DeleteResponse)
+def delete_user(
+    user_id: str,
+    request: Request,
+    current_user: dict = Depends(require_admin)
+):
+    if str(current_user.get("id")) == str(user_id):
+        raise HTTPException(status_code=400, detail="Cannot delete current user")
+
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, username, role FROM users WHERE id = ?", (user_id,))
+    target = cur.fetchone()
+    if not target:
+        conn.close()
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if str(target["role"]) == "admin":
+        cur.execute(
+            "SELECT COUNT(*) as cnt FROM users WHERE role = 'admin' AND is_active = 1 AND id <> ?",
+            (user_id,),
+        )
+        other_admin_count = int(cur.fetchone()["cnt"])
+        if other_admin_count <= 0:
+            conn.close()
+            raise HTTPException(
+                status_code=400, detail="Cannot delete the last active admin")
+
+    cur.execute(
+        "SELECT COUNT(*) as cnt FROM documents WHERE user_id = ? AND status = 'active'",
+        (user_id,),
+    )
+    active_doc_count = int(cur.fetchone()["cnt"])
+    if active_doc_count > 0:
+        conn.close()
+        raise HTTPException(
+            status_code=400, detail="Please delete this user's active documents first")
+
+    cur.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+    cur.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"], "delete", "user", user_id,
+        ip_address, user_agent, f"Deleted user: {target['username']}"
+    )
+
+    return DeleteResponse(message="User deleted successfully", deleted_id=user_id)
+
+
+class VectorStoreConfigUpdate(BaseModel):
+    engine: str
+
+
+@router.get("/vector-store/config")
+def get_vector_store_config(current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    engine = VectorStoreFactory.get_engine(cfg)
+    chroma_available = VectorStoreFactory.is_chroma_available()
+    return {
+        "engine": engine,
+        "chroma_available": chroma_available,
+        "supported_engines": ["sqlite"] + (["chromadb"] if chroma_available else [])
+    }
+
+
+@router.put("/vector-store/config")
+def update_vector_store_config(req: VectorStoreConfigUpdate, current_user: dict = Depends(require_admin)):
+    if req.engine not in ['sqlite', 'chromadb']:
+        raise HTTPException(status_code=400, detail="Unsupported engine")
+
+    cfg = get_config()
+    try:
+        VectorStoreFactory.set_engine(cfg, req.engine)
+
+        # We need to trigger the async task for processing pending files
+        from app.services.vector_store_migration import trigger_migration
+        trigger_migration(cfg)
+
+        return {"status": "success", "engine": req.engine}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/vector-store/cleanup")
+def cleanup_old_vector_data(current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    from app.services.vector_store_migration import cleanup_old_engine_data
+    result = cleanup_old_engine_data(cfg)
+    return result
+
 # ============ Statistics ============
+
+
 @router.get("/stats", response_model=StatsResponse)
 def get_stats(current_user: dict = Depends(require_admin)):
     conn = get_conn(get_config())
@@ -467,7 +566,8 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
     cfg_now = get_config()
     plain_api_key = _clean_text(data.get("api_key", ""))
     if plain_api_key and not set_llm_api_key(cfg_now, plain_api_key):
-        raise HTTPException(status_code=500, detail="failed to save api_key in secure store")
+        raise HTTPException(
+            status_code=500, detail="failed to save api_key in secure store")
     data["api_key"] = ""
     cfg = update_config_patch({"llm_config": data})
     if hasattr(request.app.state, "llm"):
@@ -491,7 +591,8 @@ def clear_llm_api_key(request: Request, current_user: dict = Depends(require_adm
     cfg = get_config()
     if not delete_llm_api_key(cfg):
         raise HTTPException(status_code=500, detail="failed to clear api_key")
-    llm_cfg = cfg.get("llm_config") if isinstance(cfg.get("llm_config"), dict) else {}
+    llm_cfg = cfg.get("llm_config") if isinstance(
+        cfg.get("llm_config"), dict) else {}
     if llm_cfg.get("api_key"):
         next_llm = dict(llm_cfg)
         next_llm["api_key"] = ""

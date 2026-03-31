@@ -40,15 +40,58 @@ def _default_log_base_dir():
     return os.path.join(project_root, "logs")
 
 
+def _resolve_logging_runtime(cfg):
+    level_name = str(cfg.get("log_level", "INFO")).upper()
+    level = getattr(logging, level_name, logging.INFO)
+    base_dir = str(cfg.get("log_base_dir") or cfg.get(
+        "log_dir") or _default_log_base_dir())
+    base_dir = os.path.abspath(base_dir)
+    date_dir = datetime.now().strftime("%Y-%m-%d")
+    log_dir = os.path.join(base_dir, date_dir)
+    return level_name, level, log_dir
+
+
+def _formatter(module_mode: bool = True):
+    if module_mode:
+        return logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
+    return logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(threadName)s | %(name)s | %(message)s")
+
+
+def get_pipeline_logger(cfg, name: str = "rag_pipeline", filename: str = "rag_pipeline.log"):
+    level_name, level, log_dir = _resolve_logging_runtime(cfg)
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, filename)
+    logger_name = f"law_assistant.{name}"
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(level)
+    logger.propagate = False
+    target_handler = None
+    for h in logger.handlers:
+        if getattr(h, "_la_file_path", "") == log_path:
+            target_handler = h
+            break
+    if target_handler is None:
+        handler = SizeAndTimeRotatingFileHandler(
+            log_path,
+            when=str(cfg.get("log_when", "midnight")),
+            interval=int(cfg.get("log_interval", 1)),
+            backupCount=int(cfg.get("log_backup_count", 7)),
+            encoding="utf-8",
+            maxBytes=int(cfg.get("log_max_bytes", 10 * 1024 * 1024)),
+        )
+        handler._la_file_path = log_path
+        handler.setFormatter(_formatter(module_mode=False))
+        logger.addHandler(handler)
+        logger.info("pipeline_logging_ready logger=%s level=%s log_path=%s",
+                    logger_name, level_name, log_path)
+    return logger
+
+
 def setup_logging(cfg):
     try:
-        level_name = str(cfg.get("log_level", "INFO")).upper()
-        level = getattr(logging, level_name, logging.INFO)
-        base_dir = str(cfg.get("log_base_dir") or cfg.get(
-            "log_dir") or _default_log_base_dir())
-        base_dir = os.path.abspath(base_dir)
-        date_dir = datetime.now().strftime("%Y-%m-%d")
-        log_dir = os.path.join(base_dir, date_dir)
+        level_name, level, log_dir = _resolve_logging_runtime(cfg)
         os.makedirs(log_dir, exist_ok=True)
         test_file = os.path.join(log_dir, ".write_check")
         with open(test_file, "w", encoding="utf-8") as f:
@@ -58,8 +101,7 @@ def setup_logging(cfg):
         logger = logging.getLogger("law_assistant")
         logger.setLevel(level)
         logger.handlers = []
-        fmt = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
+        fmt = _formatter(module_mode=True)
         stream = logging.StreamHandler()
         stream.setFormatter(fmt)
         logger.addHandler(stream)
@@ -88,8 +130,7 @@ def setup_logging(cfg):
         logger = logging.getLogger("law_assistant")
         logger.setLevel(logging.INFO)
         logger.handlers = []
-        fmt = logging.Formatter(
-            "%(asctime)s | %(levelname)s | %(threadName)s | %(module)s | %(message)s")
+        fmt = _formatter(module_mode=True)
         stream = logging.StreamHandler()
         stream.setFormatter(fmt)
         logger.addHandler(stream)

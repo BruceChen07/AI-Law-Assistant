@@ -28,15 +28,20 @@ def _attach_risk_locations(audit, clauses):
     return attach_risk_locations(audit, clauses)
 
 
-def _get_memory_embedder(lang: str = "zh"):
+def _get_memory_embedder(lang: str = "zh", cfg: Optional[Dict[str, Any]] = None):
     getter = getattr(memory_pipeline_module, "get_memory_embedder", None)
     if not callable(getter):
         return None
     try:
-        return getter(lang)
+        return getter(lang, cfg=cfg)
     except TypeError:
         try:
-            return getter()
+            return getter(lang)
+        except TypeError:
+            try:
+                return getter()
+            except Exception:
+                return None
         except Exception:
             return None
     except Exception:
@@ -88,7 +93,7 @@ def audit_contract(
     retrieval_embedder = embedder
     if retrieval_embedder is None:
         try:
-            retrieval_embedder = _get_memory_embedder(lang)
+            retrieval_embedder = _get_memory_embedder(lang, cfg)
         except TypeError:
             retrieval_embedder = _get_memory_embedder()
     if translator is None:
@@ -141,11 +146,11 @@ def audit_contract(
     custom_embedder = None
     if callable(_get_memory_embedder):
         try:
-            custom_embedder = _get_memory_embedder(lang)
+            custom_embedder = _get_memory_embedder(lang, cfg)
         except TypeError:
             custom_embedder = _get_memory_embedder()
     if custom_embedder is not None and hasattr(custom_embedder, "encode"):
-        memory_pipeline_module.get_memory_embedder = lambda _lang="zh": custom_embedder
+        memory_pipeline_module.get_memory_embedder = lambda _lang="zh", cfg=None: custom_embedder
     if HybridSearcher is not None:
         memory_pipeline_module.HybridSearcher = HybridSearcher
     _report("auditing", 70, "auditing clauses")

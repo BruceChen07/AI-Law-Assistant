@@ -2,8 +2,9 @@ import sqlite3
 
 
 def get_conn(cfg):
-    conn = sqlite3.connect(cfg["db_path"])
+    conn = sqlite3.connect(cfg["db_path"], timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
@@ -17,7 +18,8 @@ def _normalize_lang_tag(lang: str, default: str = "zh") -> str:
 
 
 def get_rag_db_path(cfg, lang: str):
-    paths = cfg.get("rag_db_paths") if isinstance(cfg.get("rag_db_paths"), dict) else {}
+    paths = cfg.get("rag_db_paths") if isinstance(
+        cfg.get("rag_db_paths"), dict) else {}
     norm_lang = _normalize_lang_tag(lang, default="zh")
     p = str(paths.get(norm_lang) or "").strip()
     if p:
@@ -28,8 +30,9 @@ def get_rag_db_path(cfg, lang: str):
 
 def get_rag_conn(cfg, lang: str):
     path = get_rag_db_path(cfg, lang)
-    conn = sqlite3.connect(path)
+    conn = sqlite3.connect(path, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 
@@ -177,7 +180,10 @@ def init_db(cfg):
         article_no TEXT,
         level_path TEXT,
         content TEXT,
-        keywords TEXT
+        keywords TEXT,
+        rule_type TEXT,
+        conditions_json TEXT,
+        constraints_json TEXT
     )
     """)
     cur.execute("""
@@ -448,6 +454,50 @@ def init_db(cfg):
         "CREATE INDEX IF NOT EXISTS idx_tax_cleanup_status ON tax_audit_cleanup_job(status)")
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_tax_cleanup_started_at ON tax_audit_cleanup_job(started_at)")
+
+    # Vector store configuration
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS vector_store_config(
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        engine TEXT NOT NULL DEFAULT 'sqlite',
+        updated_at TEXT NOT NULL
+    )
+    """)
+    # Insert default config if not exists
+    cur.execute(
+        "INSERT OR IGNORE INTO vector_store_config (id, engine, updated_at) VALUES (1, 'sqlite', CURRENT_TIMESTAMP)")
+
+    # Upload cache log
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS upload_log(
+        file_id TEXT PRIMARY KEY,
+        original_filename TEXT NOT NULL,
+        md5_hash TEXT,
+        file_path TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        engine TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_upload_log_status ON upload_log(status)")
+
+    conn.commit()
+    conn.close()
+
+
+def ensure_article_dsl_columns(cfg):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("PRAGMA table_info(article)")
+    cols = {r[1] for r in cur.fetchall()}
+    if "rule_type" not in cols:
+        cur.execute("ALTER TABLE article ADD COLUMN rule_type TEXT")
+    if "conditions_json" not in cols:
+        cur.execute("ALTER TABLE article ADD COLUMN conditions_json TEXT")
+    if "constraints_json" not in cols:
+        cur.execute("ALTER TABLE article ADD COLUMN constraints_json TEXT")
     conn.commit()
     conn.close()
 

@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_config, ensure_dirs, get_config_path
-from app.core.logger import setup_logging
+from app.core.logger import setup_logging, get_pipeline_logger
 from app.core.database import init_db, ensure_embedding_columns
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
@@ -25,15 +25,21 @@ def init_only():
     cfg = get_config()
     ensure_dirs(cfg)
     init_db(cfg)
+    from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
+    ensure_article_dsl_columns(cfg)
 
 
 def create_app():
     cfg = get_config()
     ensure_dirs(cfg)
     logger = setup_logging(cfg)
+    rag_logger = get_pipeline_logger(
+        cfg, name="rag_pipeline", filename="rag_pipeline.log")
     init_db(cfg)
+    from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
+    ensure_article_dsl_columns(cfg)
 
     embedder = EmbeddingService(default_language=str(
         cfg.get("default_language", "zh")).lower())
@@ -45,6 +51,8 @@ def create_app():
         embedder_count > 0,
         status["languages"],
     )
+    rag_logger.info("class=%s stage=service_ready db=%s",
+                    "AppFactory", cfg.get("db_path"))
 
     reranker = RerankerService(
         cfg.get("reranker_model_path"),
@@ -88,7 +96,8 @@ def create_app():
                 item.get("type", ""),
                 bool(item.get("ok", False)),
                 bool(item.get("downloaded", False)),
-                item.get("path", "") or (item.get("detail") or {}).get("path", ""),
+                item.get("path", "") or (
+                    item.get("detail") or {}).get("path", ""),
                 item.get("model_id", ""),
                 item.get("reason", ""),
                 item.get("message", ""),
@@ -163,4 +172,5 @@ def create_app():
     app.state.llm = llm
     app.state.translator = translator
     app.state.logger = logger
+    app.state.rag_logger = rag_logger
     return app
