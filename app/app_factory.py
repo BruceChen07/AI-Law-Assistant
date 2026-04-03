@@ -11,7 +11,7 @@ from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
 from app.core.llm import LLMService
 from app.core.translation import TranslationService
-from app.ensure_local_models import ensure_models
+from bin.ensure_local_models import ensure_models
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
@@ -110,7 +110,7 @@ def create_app():
             ]
             if preflight_require_all:
                 raise RuntimeError(
-                    "local model preflight failed, run: python app/ensure_local_models.py --types all --include-optional")
+                    "local model preflight failed, run: python bin/ensure_local_models.py --types all --include-optional")
             logger.warning("model_preflight_not_ready missing=%s", missing)
     else:
         logger.info("model_preflight_disabled")

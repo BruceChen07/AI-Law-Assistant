@@ -27,7 +27,7 @@ def main():
                         choices=["zh", "en", "all"])
     parser.add_argument("--target-dir", default="..\\models\\embedding")
     parser.add_argument("--onnx-name", default="")
-    parser.add_argument("--config-path", default="config.json")
+    parser.add_argument("--config-path", default="..\\app\\config.json")
     parser.add_argument("--revision", default="master")
     parser.add_argument("--reranker", action="store_true")
     args = parser.parse_args()
@@ -97,23 +97,24 @@ def main():
             copy_if_exists(src_dir, target_dir, f)
 
         cfg_path = resolve_path(app_dir, args.config_path)
+        cfg_base_dir = os.path.dirname(cfg_path)
         if os.path.exists(cfg_path):
             with open(cfg_path, "r", encoding="utf-8") as f:
                 cfg = json.load(f)
             if args.reranker:
                 cfg["reranker_model_path"] = os.path.relpath(
-                    str(target_dir), app_dir)
+                    str(target_dir), cfg_base_dir)
                 reranker_profiles = cfg.setdefault("reranker_profiles", {})
                 reranker_profiles[lang] = os.path.relpath(
-                    str(target_dir), app_dir)
+                    str(target_dir), cfg_base_dir)
             else:
                 cfg.setdefault("default_language", "zh")
                 profiles = cfg.setdefault("embedding_profiles", {})
                 profile = profiles.setdefault(lang, {})
                 profile["embedding_model"] = os.path.relpath(
-                    str(onnx_dst), app_dir)
+                    str(onnx_dst), cfg_base_dir)
                 profile["embedding_tokenizer_dir"] = os.path.relpath(
-                    str(target_dir), app_dir)
+                    str(target_dir), cfg_base_dir)
                 profile["embedding_model_id"] = model_id
                 profile["embedding_source"] = "modelscope"
                 profile.setdefault("embedding_max_seq_len", 512)

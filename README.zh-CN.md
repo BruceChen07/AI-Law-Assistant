@@ -96,7 +96,7 @@ Copy-Item app/config.example.json app/config.json
 python -m app.main --init
 
 # 方式二：使用 PowerShell 脚本（Windows）
-.\app\init.ps1
+.\bin\init.ps1
 ```
 
 ### 5. 启动服务
@@ -314,7 +314,7 @@ pytest tests/
 如果需要使用其他向量子模型，可以运行：
 
 ```bash
-python app/download_embedding_model.py
+python bin/download_embedding_model.py
 ```
 
 或将 ONNX 模型文件放入 `models/embedding/zh/` 目录。

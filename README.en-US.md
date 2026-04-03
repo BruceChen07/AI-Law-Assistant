@@ -93,7 +93,7 @@ Modify `app/config.json` as needed. For production use, keep LLM API keys in sec
 python -m app.main --init
 
 # Method 2: Using PowerShell script (Windows)
-.\app\init.ps1
+.\bin\init.ps1
 ```
 
 ### 5. Start Services
@@ -231,7 +231,7 @@ pytest tests/
 If you need to use other vector sub-models, you can run:
 
 ```bash
-python app/download_embedding_model.py
+python bin/download_embedding_model.py
 ```
 
 Or place the ONNX model file in the `models/embedding/zh/` directory.
