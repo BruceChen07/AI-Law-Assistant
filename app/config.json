@@ -78,7 +78,7 @@
     "rag_trace_max_chars": 3000,
     "rag_trace_max_rows": 20,
     "retrieval_regulation_language": "zh",
-    "jieba_user_dict_path": "../data/dict/THUOCL_law.txt",
+    "jieba_user_dict_path": "../data/dict/law_dict.txt",
     "jieba_hmm_enabled": false,
     "jieba_force_words": [
         "税收征收管理法实施细则",
