@@ -61,8 +61,13 @@ def set_llm_api_key(cfg: Dict[str, Any], api_key: str) -> bool:
             return True
         try:
             kr.delete_password(service, name)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(
+                "secure_store_delete_failed service=%s name=%s err=%s",
+                service,
+                name,
+                str(e),
+            )
         return True
     except Exception as e:
         logger.warning(

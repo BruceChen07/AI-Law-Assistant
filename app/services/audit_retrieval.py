@@ -138,8 +138,12 @@ def _cleanup_rag_debug_tree(cfg: Dict[str, Any], base_dir: str) -> None:
                 try:
                     shutil.make_archive(
                         archive_base, "zip", root_dir=root, base_dir=name)
-                except Exception:
-                    pass
+                except OSError as e:
+                    logger.warning(
+                        "rag_debug_archive_failed path=%s err=%s",
+                        path,
+                        str(e),
+                    )
             shutil.rmtree(path, ignore_errors=True)
 
 

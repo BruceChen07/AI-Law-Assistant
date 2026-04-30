@@ -130,8 +130,12 @@ class MemoryLifecycleManager:
                     try:
                         shutil.make_archive(
                             str(archive_base), "zip", root_dir=str(root), base_dir=p.name)
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        logger.warning(
+                            "memory_debug_archive_failed folder=%s err=%s",
+                            str(p),
+                            str(e),
+                        )
                 shutil.rmtree(p, ignore_errors=True)
 
     def split_contract(self, text: str) -> List[Clause]:

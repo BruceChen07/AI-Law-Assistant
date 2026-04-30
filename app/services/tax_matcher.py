@@ -115,8 +115,12 @@ def evaluate_clause_rule_match(clause: dict, rule: dict, cfg: dict = None, llm: 
     if clause.get("entities_json"):
         try:
             entities = json.loads(clause.get("entities_json"))
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "tax_match_entities_json_invalid clause_id=%s err=%s",
+                clause_id,
+                str(e),
+            )
 
     # Build TaxRuleDSL object if DB fields exist
     # Note: the current tax_rule table does not have the JSON fields yet, they are in the article table.

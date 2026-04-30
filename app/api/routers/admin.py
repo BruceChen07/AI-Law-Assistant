@@ -3,6 +3,7 @@ import uuid
 import json
 import csv
 import io
+import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Literal
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
@@ -20,6 +21,7 @@ from app.services.memory_promotion import (
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger("law_assistant")
 
 
 # ============ Document Models ============
@@ -321,8 +323,12 @@ def _iter_trace_rows(trace_dir: str, start_dt: datetime, end_dt: datetime, max_r
                             continue
                         count += 1
                         yield row
-            except Exception:
-                pass
+            except OSError as e:
+                logger.warning(
+                    "llm_trace_read_failed file=%s err=%s",
+                    file_path,
+                    str(e),
+                )
         day += timedelta(days=1)
 
 

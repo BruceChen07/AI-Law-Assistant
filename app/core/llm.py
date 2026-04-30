@@ -164,8 +164,12 @@ class LLMService:
             try:
                 extra_body["thinking_budget_tokens"] = max(
                     0, int(thinking_budget))
-            except Exception:
-                pass
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    "llm_invalid_thinking_budget_tokens value=%s err=%s",
+                    str(thinking_budget),
+                    str(e),
+                )
         reasoning_effort = str(
             cfg.get("reasoning_effort") or "").strip().lower()
         if reasoning_effort in {"low", "medium", "high"}:

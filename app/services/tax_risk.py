@@ -24,7 +24,12 @@ def _is_english_mode(doc: dict, matches: list[dict]) -> bool:
     for m in (matches or [])[:20]:
         try:
             evidence = json.loads(m.get("evidence_json") or "{}")
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "tax_risk_evidence_json_invalid_for_lang_detect clause_id=%s err=%s",
+                str(m.get("clause_id") or ""),
+                str(e),
+            )
             evidence = {}
         sample_parts.append(str(evidence.get("reason") or ""))
     sample = " ".join(x for x in sample_parts if x).strip()
@@ -87,8 +92,12 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
         evidence = {}
         try:
             evidence = json.loads(m.get("evidence_json") or "{}")
-        except Exception:
-            pass
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "tax_risk_evidence_json_invalid_for_issue clause_id=%s err=%s",
+                str(m.get("clause_id") or ""),
+                str(e),
+            )
 
         clause_text = evidence.get("clause_excerpt", "")
         rule_text = evidence.get("rule_excerpt", "")
