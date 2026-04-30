@@ -10,7 +10,8 @@ from app.services.crud import (
     replace_contract_clauses,
 )
 from app.services.tax_parser import extract_regulation_text
-from app.services.tax_common import is_tax_related_text, parse_llm_json_object
+from app.services.audit_utils import is_tax_related_text
+from app.services.tax_common import parse_llm_json_object
 
 logger = logging.getLogger("law_assistant")
 

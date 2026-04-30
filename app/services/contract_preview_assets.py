@@ -13,6 +13,7 @@ from pypdf import PdfReader
 
 from app.core.mineru_ocr import run_mineru_extract
 from app.core.utils import extract_text_with_config
+from app.services.audit_utils import _safe_int, _safe_float
 
 try:
     from pdf2image import convert_from_path
@@ -47,20 +48,6 @@ def _looks_like_heading_line(text: str) -> bool:
     if len(raw) <= 24 and not re.search(r"[。；;，,:：]", raw) and re.search(r"(合同|条款|价款|支付|期限|服务|违约|保密|发票|税率)", raw):
         return True
     return False
-
-
-def _safe_int(v: Any, default: int) -> int:
-    try:
-        return int(v)
-    except Exception:
-        return default
-
-
-def _safe_float(v: Any, default: float) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return float(default)
 
 
 def _resolve_cache_dir(cfg: Dict[str, Any], preview_cfg: Dict[str, Any]) -> str:

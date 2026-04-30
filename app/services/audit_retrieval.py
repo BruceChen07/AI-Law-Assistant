@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List, Tuple
 
 from app.api.schemas import SearchQuery
 from app.services.search import search_regulations
-from app.services.audit_utils import _safe_bool, _safe_float, _safe_int, _chunk_contract_text
+from app.services.audit_utils import _safe_bool, _safe_float, _safe_int, _chunk_contract_text, _normalize_lang
 from app.services.audit_tax import _tax_query_prefix, _tax_relevance_score
 
 logger = logging.getLogger("law_assistant")
@@ -211,15 +211,6 @@ def _normalize_retrieval_options(opts: Optional[Dict[str, Any]]) -> Dict[str, An
         "tax_filter_to_tax_only": _safe_bool(o.get("tax_filter_to_tax_only"), not relaxed),
         "require_full_coverage": _safe_bool(o.get("require_full_coverage"), False)
     }
-
-
-def _normalize_lang(v: Any, default: str = "zh") -> str:
-    s = str(v or "").strip().lower()
-    if s.startswith("en"):
-        return "en"
-    if s.startswith("zh"):
-        return "zh"
-    return default
 
 
 def _build_query_routes(

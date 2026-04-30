@@ -1,27 +1,11 @@
 from typing import Dict, Any, List
-from app.services.audit_utils import _safe_int, _normalize_risk_level, _normalize_lang
-from app.services.tax_common import is_tax_related_text
+from app.services.audit_utils import (
+    _safe_int,
+    _normalize_risk_level,
+    _normalize_lang,
+    is_tax_related_text,
+)
 
-TAX_KEYWORDS = [
-    "税",
-    "税务",
-    "税收",
-    "增值税",
-    "所得税",
-    "企业所得税",
-    "个人所得税",
-    "印花税",
-    "发票",
-    "进项",
-    "销项",
-    "代扣代缴",
-    "纳税",
-    "完税",
-    "vat",
-    "tax",
-    "withholding",
-    "invoice"
-]
 
 def _tax_relevance_score(item: Dict[str, Any]) -> int:
     text = " ".join([
@@ -32,15 +16,23 @@ def _tax_relevance_score(item: Dict[str, Any]) -> int:
     ]).lower()
     if not text.strip():
         return 0
-    return sum(1 for kw in TAX_KEYWORDS if kw.lower() in text)
+    score = 0
+    for part in [
+        item.get("title", ""),
+        item.get("article_no", ""),
+        item.get("content", ""),
+        item.get("answer", ""),
+    ]:
+        if is_tax_related_text(part):
+            score += 1
+    return score
+
 
 def _tax_query_prefix(lang: str) -> str:
     if _normalize_lang(lang, default="zh") == "en":
         return "tax compliance tax law vat withholding invoice"
     return "财税 税务 税收 增值税 所得税 发票 代扣代缴"
 
-def _is_tax_related_text(value: Any) -> bool:
-    return is_tax_related_text(value)
 
 def _is_tax_related_citation(item: Dict[str, Any]) -> bool:
     if _safe_int(item.get("tax_relevance", 0), 0) > 0:
@@ -48,7 +40,8 @@ def _is_tax_related_citation(item: Dict[str, Any]) -> bool:
     if _tax_relevance_score(item) > 0:
         return True
     industry = str(item.get("industry", "") or "")
-    return _is_tax_related_text(industry)
+    return is_tax_related_text(industry)
+
 
 def _build_tax_citation_map(citations: List[Dict[str, Any]]) -> Dict[str, bool]:
     out = {}
@@ -58,6 +51,7 @@ def _build_tax_citation_map(citations: List[Dict[str, Any]]) -> Dict[str, bool]:
             continue
         out[cid] = _is_tax_related_citation(c)
     return out
+
 
 def _is_tax_related_risk(risk: Dict[str, Any], citation_tax_map: Dict[str, bool]) -> bool:
     cid = str(risk.get("citation_id", "")
@@ -72,7 +66,8 @@ def _is_tax_related_risk(risk: Dict[str, Any], citation_tax_map: Dict[str, bool]
         risk.get("law_reference", ""),
         risk.get("citation_id", "")
     ]
-    return _is_tax_related_text(" ".join(str(p or "") for p in parts))
+    return is_tax_related_text(" ".join(str(p or "") for p in parts))
+
 
 def _filter_tax_audit_result(
     summary: str,
@@ -105,7 +100,7 @@ def _filter_tax_audit_result(
     tax_opinions = [
         str(x).strip()
         for x in executive_opinion
-        if str(x).strip() and _is_tax_related_text(x)
+        if str(x).strip() and is_tax_related_text(x)
     ]
     if not tax_opinions and tax_risks:
         tax_opinions = [
@@ -117,7 +112,7 @@ def _filter_tax_audit_result(
     for r in tax_risks:
         risk_summary[_normalize_risk_level(r.get("level"))] += 1
     tax_summary = summary
-    if not _is_tax_related_text(summary):
+    if not is_tax_related_text(summary):
         if norm_lang == "en":
             tax_summary = "No explicit tax-related risks identified. Non-tax items are filtered out."
         else:

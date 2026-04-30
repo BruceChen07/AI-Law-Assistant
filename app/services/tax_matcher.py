@@ -14,7 +14,8 @@ from app.services.crud import (
     create_clause_rule_matches,
 )
 from app.services.rule_engine import evaluate_rule, TaxRuleDSL
-from app.services.tax_common import is_tax_related_text, parse_llm_json_object
+from app.services.audit_utils import is_tax_related_text
+from app.services.tax_common import parse_llm_json_object
 
 logger = logging.getLogger("law_assistant")
 
@@ -29,13 +30,6 @@ def _cosine_similarity(vec1, vec2):
     if np.linalg.norm(v1) == 0 or np.linalg.norm(v2) == 0:
         return 0.0
     return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
-
-
-def _safe_float(v: any, default: float = 0.0) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return default
 
 
 def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLMService = None) -> dict:
