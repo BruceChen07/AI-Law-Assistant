@@ -2,7 +2,7 @@ import json
 import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
-from app.core.llm import LLMService
+from app.services.tax_common import parse_llm_json_object
 from app.services.crud import (
     get_tax_contract_document,
     list_clause_rule_matches_by_contract,
@@ -60,7 +60,7 @@ def _build_suggestion(match_item: dict, english_mode: bool = False) -> str:
     return "Keep current clauses and retain supporting regulations in appendices." if english_mode else "建议保留现有约定并在附件中保留法规依据。"
 
 
-def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "") -> dict:
+def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", llm=None) -> dict:
     doc = get_tax_contract_document(cfg, contract_id)
     if not doc:
         raise ValueError("contract document not found")
@@ -76,7 +76,8 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "") -
         len(matches),
     )
 
-    llm = LLMService(cfg)
+    if llm is None:
+        raise ValueError("llm service is required")
 
     def process_match(m):
         label = str(m.get("match_label") or "")
@@ -112,11 +113,12 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "") -
         suggestion = _build_suggestion(m, english_mode=english_mode)
 
         try:
-            response = llm.chat([{"role": "user", "content": prompt}], model=cfg.get(
-                "llm_config", {}).get("model", "qwen3.5-plus"))
-            cleaned_response = re.sub(
-                r'```json\s*|\s*```', '', response).strip()
-            result = json.loads(cleaned_response)
+            response, _ = llm.chat(
+                [{"role": "user", "content": prompt}],
+                overrides={"model": cfg.get("llm_config", {}).get(
+                    "model", "qwen3.5-plus")},
+            )
+            result = parse_llm_json_object(response)
             issue_text = result.get("issue_text", issue_text)
             suggestion = result.get("suggestion", suggestion)
         except Exception as e:
@@ -224,8 +226,10 @@ def review_audit_issue(
             risk_level=normalized_risk or issue.get("risk_level", ""),
         )
     except Exception as e:
-        logger.warning("record_user_feedback_failed issue_id=%s err=%s", issue_id, str(e))
-        feedback_meta = {"saved": False, "reason": "exception", "error": str(e)}
+        logger.warning(
+            "record_user_feedback_failed issue_id=%s err=%s", issue_id, str(e))
+        feedback_meta = {"saved": False,
+                         "reason": "exception", "error": str(e)}
     updated = get_audit_issue(cfg, issue_id)
     logger.info(
         "tax_issue_review_done issue_id=%s reviewer_status=%s risk_level=%s action=%s feedback_saved=%s outcome=%s",

@@ -14,6 +14,7 @@ from app.services.crud import (
     create_clause_rule_matches,
 )
 from app.services.rule_engine import evaluate_rule, TaxRuleDSL
+from app.services.tax_common import is_tax_related_text, parse_llm_json_object
 
 logger = logging.getLogger("law_assistant")
 
@@ -37,27 +38,6 @@ def _safe_float(v: any, default: float = 0.0) -> float:
         return default
 
 
-def _is_tax_related_clause(text: str) -> bool:
-    txt = str(text or "").strip()
-    if not txt:
-        return False
-    low = txt.lower()
-    zh_keywords = ["税", "增值税", "所得税", "发票", "纳税", "税率", "税额", "税费", "税务"]
-    en_keywords = ["vat", "cit", "pit", "tax", "invoice",
-                   "withholding", "withhold", "deduct", "remit", "levy"]
-    if any(k in txt for k in zh_keywords):
-        return True
-    if any(k in low for k in en_keywords):
-        return True
-    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*%", txt):
-        return True
-    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元)", txt):
-        return True
-    if re.search(r"(?:rmb|cny|usd|\$)\s*[0-9]+", low):
-        return True
-    return False
-
-
 def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLMService = None) -> dict:
     clause_text = str(clause.get("clause_text") or "")
     rule_text = " ".join(
@@ -70,8 +50,8 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
         ]
     ).strip()
 
-    if not llm:
-        llm = LLMService(cfg)
+    if llm is None:
+        raise ValueError("llm service is required")
 
     prompt = f"""
     You are an expert tax and legal auditor. 
@@ -98,8 +78,7 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
 
     try:
         response, _ = llm.chat([{"role": "user", "content": prompt}])
-        cleaned_response = re.sub(r'```json\s*|\s*```', '', response).strip()
-        result = json.loads(cleaned_response)
+        result = parse_llm_json_object(response)
         label = result.get("label", "not_mentioned")
         score = float(result.get("score", 0.5))
         reason = result.get("reason", "")
@@ -192,7 +171,14 @@ def _pick_matches_for_clause(evaluated: list[dict], top_k: int = 5) -> list[dict
     return selected + extra
 
 
-def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", top_k_per_clause: int = 5) -> dict:
+def match_contract_against_rules(
+    cfg,
+    contract_id: str,
+    operator_id: str = "",
+    top_k_per_clause: int = 5,
+    llm: LLMService = None,
+    embedder: EmbeddingService = None,
+) -> dict:
     contract = get_tax_contract_document(cfg, contract_id)
     if not contract:
         raise ValueError("contract document not found")
@@ -212,10 +198,10 @@ def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", t
     )
 
     # 1. Initialize services
-    embedder = EmbeddingService(default_language=str(
-        cfg.get("default_language", "zh")).lower())
-    embedder.load_embedders(cfg)
-    llm = LLMService(cfg)
+    if embedder is None:
+        raise ValueError("embedding service is required")
+    if llm is None:
+        raise ValueError("llm service is required")
 
     # 2. Get embeddings for rules
     rule_texts = [
@@ -247,7 +233,7 @@ def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", t
     # 3. Process clauses concurrently
     def process_clause(clause):
         clause_text = str(clause.get("clause_text") or "")
-        if not _is_tax_related_clause(clause_text):
+        if not is_tax_related_text(clause_text):
             fallback_rule = rules[0] if rules else {}
             evidence = {
                 "reason": "fast_path_not_tax_related_clause",

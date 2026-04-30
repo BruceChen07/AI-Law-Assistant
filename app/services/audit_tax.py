@@ -1,5 +1,6 @@
 from typing import Dict, Any, List
 from app.services.audit_utils import _safe_int, _normalize_risk_level, _normalize_lang
+from app.services.tax_common import is_tax_related_text
 
 TAX_KEYWORDS = [
     "税",
@@ -39,10 +40,7 @@ def _tax_query_prefix(lang: str) -> str:
     return "财税 税务 税收 增值税 所得税 发票 代扣代缴"
 
 def _is_tax_related_text(value: Any) -> bool:
-    text = str(value or "").strip().lower()
-    if not text:
-        return False
-    return any(kw.lower() in text for kw in TAX_KEYWORDS)
+    return is_tax_related_text(value)
 
 def _is_tax_related_citation(item: Dict[str, Any]) -> bool:
     if _safe_int(item.get("tax_relevance", 0), 0) > 0:

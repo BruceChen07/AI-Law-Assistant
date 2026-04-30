@@ -10,6 +10,7 @@ from app.services.crud import (
     replace_contract_clauses,
 )
 from app.services.tax_parser import extract_regulation_text
+from app.services.tax_common import is_tax_related_text, parse_llm_json_object
 
 logger = logging.getLogger("law_assistant")
 
@@ -72,30 +73,7 @@ def _extract_first(pattern: str, text: str) -> str:
     return m.group(1).strip() if m else ""
 
 
-def _is_tax_related_clause(text: str) -> bool:
-    txt = str(text or "").strip()
-    if not txt:
-        return False
-    low = txt.lower()
-    keywords = [
-        "税", "增值税", "所得税", "发票", "纳税", "税率", "税额", "税费", "税务",
-        "vat", "cit", "pit", "tax", "invoice", "withholding", "withhold",
-        "deduct", "remit", "levy",
-    ]
-    if any(k in txt for k in keywords[:9]):
-        return True
-    if any(k in low for k in keywords[9:]):
-        return True
-    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*%", txt):
-        return True
-    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元)", txt):
-        return True
-    if re.search(r"(?:rmb|cny|usd|\$)\s*[0-9]+", low):
-        return True
-    return False
-
-
-def extract_clause_entities(clause_text: str, cfg: dict = None) -> dict:
+def extract_clause_entities(clause_text: str, cfg: dict = None, llm=None) -> dict:
     """
     Extract business entities from a contract clause.
     Upgraded to use LLM for structured extraction if cfg is provided,
@@ -105,9 +83,7 @@ def extract_clause_entities(clause_text: str, cfg: dict = None) -> dict:
     if not txt:
         return {}
 
-    if cfg and _is_tax_related_clause(txt):
-        from app.core.llm import LLMService
-        llm = LLMService(cfg)
+    if cfg and llm is not None and is_tax_related_text(txt):
         prompt = f"""
         你是一个合同实体抽取助手。请从以下合同条款中提取财税相关实体，并以JSON格式返回。
         
@@ -129,12 +105,9 @@ def extract_clause_entities(clause_text: str, cfg: dict = None) -> dict:
         try:
             response, _ = llm.chat([{"role": "user", "content": prompt}], overrides={
                                    "temperature": 0.1})
-            text = response.strip()
-            if "```json" in text:
-                text = text.split("```json")[1].split("```")[0].strip()
-            elif "```" in text:
-                text = text.split("```")[1].split("```")[0].strip()
-            return json.loads(text)
+            result = parse_llm_json_object(response)
+            if result:
+                return result
         except Exception as e:
             logger.warning(
                 f"LLM entity extraction failed: {e}, falling back to regex")
@@ -185,9 +158,10 @@ def extract_clause_entities(clause_text: str, cfg: dict = None) -> dict:
     return {k: v for k, v in entities.items() if v is not None}
 
 
-def enrich_contract_clauses(clauses: list[dict], cfg: dict = None) -> list[dict]:
+def enrich_contract_clauses(clauses: list[dict], cfg: dict = None, llm=None) -> list[dict]:
     def _build_item(c: dict) -> dict:
-        entities = extract_clause_entities(c.get("clause_text", ""), cfg)
+        entities = extract_clause_entities(
+            c.get("clause_text", ""), cfg, llm=llm)
         item = dict(c)
         item["entities_json"] = json.dumps(entities, ensure_ascii=False)
         return item
@@ -207,7 +181,7 @@ def enrich_contract_clauses(clauses: list[dict], cfg: dict = None) -> list[dict]
         return list(executor.map(_build_item, clauses))
 
 
-def analyze_contract_document(cfg, contract_id: str, operator_id: str = "") -> dict:
+def analyze_contract_document(cfg, contract_id: str, operator_id: str = "", llm=None) -> dict:
     doc = get_tax_contract_document(cfg, contract_id)
     if not doc:
         raise ValueError("contract document not found")
@@ -234,7 +208,7 @@ def analyze_contract_document(cfg, contract_id: str, operator_id: str = "") -> d
                 meta.get("ext", ""),
             )
         clauses = split_contract_clauses(text)
-        clauses = enrich_contract_clauses(clauses, cfg)
+        clauses = enrich_contract_clauses(clauses, cfg, llm=llm)
         replace_contract_clauses(
             cfg, contract_id, clauses, created_by=operator_id)
         update_tax_contract_document_status(
