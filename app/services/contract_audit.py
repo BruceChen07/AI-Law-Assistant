@@ -423,10 +423,16 @@ def audit_contract(
                 custom_embedder = _get_memory_embedder(lang, cfg)
             except TypeError:
                 custom_embedder = _get_memory_embedder()
-        if custom_embedder is not None and hasattr(custom_embedder, "encode"):
-            memory_pipeline_module.get_memory_embedder = lambda _lang="zh", cfg=None: custom_embedder
-        if HybridSearcher is not None:
-            memory_pipeline_module.HybridSearcher = HybridSearcher
+        if (custom_embedder is not None and hasattr(custom_embedder, "encode")) or HybridSearcher is not None:
+            runtime_getter = (lambda _lang="zh", cfg=None: custom_embedder) if (
+                custom_embedder is not None and hasattr(custom_embedder, "encode")
+            ) else None
+            setter = getattr(memory_pipeline_module, "set_runtime_overrides", None)
+            if callable(setter):
+                setter(
+                    get_memory_embedder=runtime_getter,
+                    hybrid_searcher=HybridSearcher if HybridSearcher is not None else None,
+                )
         try:
             memory_result = execute_memory_audit(
                 cfg=cfg,

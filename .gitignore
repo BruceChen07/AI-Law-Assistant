@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+app/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -32,6 +33,8 @@ yarn-debug.log*
 yarn-error.log*
 web/dist/
 web/.vite/
+web/.vite/deps/
+web/storybook-static/
 
 # IDE
 .idea/
@@ -42,6 +45,8 @@ web/.vite/
 
 # Data & Logs
 data/files/
+data/chroma_db/
+data/contracts/
 data/uploads/
 data/logs/
 data/memory/
@@ -67,3 +72,6 @@ Thumbs.db
 # Config (private)
 app/config.json
 !app/config.example.json
+
+# Runtime state
+.runtime/services.pids.json

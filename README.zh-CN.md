@@ -190,6 +190,21 @@ npm run storybook
 - 如果出现条款被跳过，检查 `memory_llm_guard_skipped_low_priority_calls` 指标
 - 如果想快速止损，直接在 Admin 关闭 `启用经验记忆审计`
 
+### 记忆审计模块拆分说明
+
+当前记忆审计管线已拆分为目录化结构，旧导入路径保持兼容：
+
+- 兼容入口：`app/services/contract_audit_modules/memory_pipeline/__init__.py`
+- 审核主流程：`memory_pipeline/audit_loop.py`
+- 证据构建：`memory_pipeline/evidence_builder.py`
+- 风险归并：`memory_pipeline/risk_reconciliation.py`
+- 调试清理：`memory_pipeline/cleanup.py`
+
+说明：
+
+- 仍可通过 `from app.services.contract_audit_modules.memory_pipeline import execute_memory_audit` 调用主流程
+- 对历史私有符号（如 `_resolve_risk_citation_id`）保留兼容导出，便于测试与过渡
+
 ### OCR 验证
 
 ```bash

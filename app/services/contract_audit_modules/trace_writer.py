@@ -6,14 +6,12 @@ Trace Writer.
 """
 import os
 import json
-import shutil
 import structlog
-import time
 from datetime import datetime
 from typing import Dict, Any, Tuple
+from app.services.contract_audit_modules.memory_pipeline.cleanup import cleanup_debug_tree
 
 logger = structlog.get_logger(__name__)
-_LAST_DEBUG_CLEANUP_AT: Dict[str, float] = {}
 
 
 def memory_paths(cfg: Dict[str, Any]) -> Tuple[str, str]:
@@ -94,60 +92,11 @@ def _audit_file_tag(v: Any) -> str:
     return "".join(out).strip("_")
 
 
-def _cleanup_debug_tree(cfg: Dict[str, Any], base_dir: str) -> None:
-    root = os.path.abspath(str(base_dir or "").strip())
-    if not root:
-        return
-    interval = max(
-        60, int(cfg.get("contract_audit_debug_cleanup_interval_sec") or 1800))
-    now_ts = time.time()
-    last_ts = float(_LAST_DEBUG_CLEANUP_AT.get(root) or 0.0)
-    if now_ts - last_ts < interval:
-        return
-    _LAST_DEBUG_CLEANUP_AT[root] = now_ts
-    retention_days = max(
-        1, int(cfg.get("contract_audit_debug_retention_days") or 7))
-    archive_enabled = bool(
-        cfg.get("contract_audit_debug_archive_before_delete", False))
-    archive_dir = str(
-        cfg.get("contract_audit_debug_archive_dir") or "").strip()
-    archive_root = archive_dir if archive_dir else os.path.join(
-        root, "_archive")
-    if archive_enabled:
-        os.makedirs(archive_root, exist_ok=True)
-    now = datetime.utcnow()
-    cutoff = now.toordinal() - retention_days
-    if not os.path.isdir(root):
-        return
-    try:
-        names = os.listdir(root)
-    except Exception:
-        return
-    for name in names:
-        path = os.path.join(root, name)
-        if not os.path.isdir(path):
-            continue
-        try:
-            day = datetime.strptime(name, "%Y-%m-%d")
-        except Exception:
-            continue
-        if day.toordinal() <= cutoff:
-            if archive_enabled:
-                archive_base = os.path.join(
-                    archive_root, f"{os.path.basename(root)}_{name}")
-                try:
-                    shutil.make_archive(
-                        archive_base, "zip", root_dir=root, base_dir=name)
-                except Exception:
-                    pass
-            shutil.rmtree(path, ignore_errors=True)
-
-
 def write_round_trace(cfg: Dict[str, Any], round_no: int, action: str, payload: Dict[str, Any], memory_dir: str = "") -> None:
     opts = round_trace_options(cfg, memory_dir)
     if not opts["enabled"]:
         return
-    _cleanup_debug_tree(cfg, opts["dir"])
+    cleanup_debug_tree(cfg, opts["dir"])
     rn = int(round_no or 0)
     if rn <= 0:
         return
@@ -175,7 +124,7 @@ def write_audit_trace(cfg: Dict[str, Any], event: str, payload: Dict[str, Any], 
     opts = audit_trace_options(cfg, memory_dir)
     if not opts["enabled"]:
         return
-    _cleanup_debug_tree(cfg, opts["dir"])
+    cleanup_debug_tree(cfg, opts["dir"])
     day = datetime.utcnow().strftime("%Y-%m-%d")
     target_dir = os.path.join(opts["dir"], day)
     os.makedirs(target_dir, exist_ok=True)
