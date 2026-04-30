@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -9,6 +10,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 _PROMOTION_LOCK = threading.Lock()
+logger = logging.getLogger("law_assistant")
 
 
 def _utc_now_iso() -> str:
@@ -143,8 +145,13 @@ def _feedback_support(feedback_rows: List[Dict[str, Any]], episode: Dict[str, An
     for row in matched:
         try:
             quality_values.append(float(row.get("memory_quality_score") or 0.0))
-        except Exception:
-            pass
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                "memory_promotion_invalid_quality_score memory_id=%s value=%s err=%s",
+                str(row.get("memory_id") or ""),
+                str(row.get("memory_quality_score")),
+                str(e),
+            )
         if str(row.get("outcome") or "").strip().lower() == "success":
             success_count += 1
     avg_quality = (sum(quality_values) / len(quality_values)) if quality_values else 0.0

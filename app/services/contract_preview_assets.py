@@ -16,7 +16,11 @@ from app.core.utils import extract_text_with_config
 
 try:
     from pdf2image import convert_from_path
-except Exception:
+except ImportError as e:
+    logging.getLogger("law_assistant").warning(
+        "preview_pdf2image_unavailable err=%s",
+        str(e),
+    )
     convert_from_path = None
 
 
@@ -362,8 +366,12 @@ def _convert_docx_to_pdf(docx_path: str, output_pdf: str) -> Tuple[str, str]:
     if os.path.exists(output_pdf):
         try:
             os.remove(output_pdf)
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning(
+                "preview_docx_pdf_remove_failed file=%s err=%s",
+                output_pdf,
+                str(e),
+            )
     tried: List[str] = []
     for method in ("docx2pdf", "win32com"):
         try:
@@ -410,8 +418,13 @@ def _load_preview_font(size: int) -> Any:
         try:
             if os.path.exists(path):
                 return ImageFont.truetype(path, size=size)
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning(
+                "preview_font_load_failed path=%s size=%s err=%s",
+                path,
+                int(size),
+                str(e),
+            )
     return ImageFont.load_default()
 
 
@@ -631,8 +644,12 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
                     cached["mime_type"] = str(
                         mime_type or cached.get("mime_type") or "")
                     return cached
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                "preview_manifest_cache_read_failed path=%s err=%s",
+                manifest_path,
+                str(e),
+            )
 
     if os.path.exists(cache_dir):
         shutil.rmtree(cache_dir, ignore_errors=True)
@@ -759,8 +776,12 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
                 if not docx_pdf_keep_file and os.path.exists(converted_pdf):
                     try:
                         os.remove(converted_pdf)
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        logger.warning(
+                            "preview_docx_temp_pdf_remove_failed file=%s err=%s",
+                            converted_pdf,
+                            str(e),
+                        )
             except Exception:
                 logger.exception(
                     "preview_docx_mineru_build_failed file=%s", file_path)

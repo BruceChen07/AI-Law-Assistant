@@ -123,10 +123,15 @@ def setup_logging(cfg):
         return logger
     except Exception as e:
         fallback_dir = _default_log_base_dir()
+        fallback_logger = logging.getLogger("law_assistant")
         try:
             os.makedirs(fallback_dir, exist_ok=True)
-        except Exception:
-            pass
+        except OSError as dir_err:
+            fallback_logger.warning(
+                "logging_fallback_dir_create_failed dir=%s err=%s",
+                fallback_dir,
+                str(dir_err),
+            )
         logger = logging.getLogger("law_assistant")
         logger.setLevel(logging.INFO)
         logger.handlers = []
@@ -139,7 +144,11 @@ def setup_logging(cfg):
             fh = logging.FileHandler(fallback_path, encoding="utf-8")
             fh.setFormatter(fmt)
             logger.addHandler(fh)
-        except Exception:
-            pass
+        except OSError as file_err:
+            logger.warning(
+                "logging_fallback_file_handler_failed path=%s err=%s",
+                os.path.join(fallback_dir, "fallback.log"),
+                str(file_err),
+            )
         logger.error("Logging initialization failed: %s", str(e))
         return logger

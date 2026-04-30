@@ -1,4 +1,5 @@
 import os
+import logging
 import zipfile
 import xml.etree.ElementTree as ET
 from datetime import datetime
@@ -13,6 +14,9 @@ NAMESPACES = {
 
 for prefix, uri in NAMESPACES.items():
     ET.register_namespace(prefix, uri)
+
+
+logger = logging.getLogger("law_assistant")
 
 
 def prepare_docx_for_comments(input_path: str, output_path: str):
@@ -63,8 +67,12 @@ def prepare_docx_for_comments(input_path: str, output_path: str):
                                 try:
                                     num = int(rid[3:])
                                     max_id = max(max_id, num)
-                                except Exception:
-                                    pass
+                                except ValueError as e:
+                                    logger.warning(
+                                        "docx_modifier_invalid_relationship_id rid=%s err=%s",
+                                        rid,
+                                        str(e),
+                                    )
                         new_rid = f"rId{max_id + 1}"
                         rel = ET.Element(f"{{{NAMESPACES['pr']}}}Relationship")
                         rel.set('Id', new_rid)
@@ -130,8 +138,12 @@ def insert_risk_comments(input_path: str, output_path: str, risks: list):
                         if rid.startswith('rId'):
                             try:
                                 max_id = max(max_id, int(rid[3:]))
-                            except Exception:
-                                pass
+                            except ValueError as e:
+                                logger.warning(
+                                    "docx_modifier_invalid_relationship_id rid=%s err=%s",
+                                    rid,
+                                    str(e),
+                                )
                     new_rid = f"rId{max_id + 1}"
                     rel = ET.Element(f"{{{NAMESPACES['pr']}}}Relationship")
                     rel.set('Id', new_rid)
@@ -155,8 +167,12 @@ def insert_risk_comments(input_path: str, output_path: str, risks: list):
             if cid is not None:
                 try:
                     max_comment_id = max(max_comment_id, int(cid))
-                except Exception:
-                    pass
+                except ValueError as e:
+                    logger.warning(
+                        "docx_modifier_invalid_comment_id comment_id=%s err=%s",
+                        str(cid),
+                        str(e),
+                    )
 
         # 4. Handle document.xml
         doc_root = ET.fromstring(content_map['word/document.xml'])
