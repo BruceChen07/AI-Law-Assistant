@@ -157,13 +157,12 @@ def create_app():
                              request.method, request.url.path, ms)
             raise
 
-    app.include_router(build_health_router(embedder))
-    app.include_router(build_embedding_router(embedder))
-    app.include_router(build_regulations_router(cfg, embedder, reranker))
+    app.include_router(build_health_router())
+    app.include_router(build_embedding_router())
+    app.include_router(build_regulations_router(cfg))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
-    app.include_router(build_contracts_router(
-        cfg, llm, embedder, reranker, translator))
+    app.include_router(build_contracts_router(cfg))
     app.include_router(build_tax_audit_router(cfg))
 
     app.state.cfg = cfg

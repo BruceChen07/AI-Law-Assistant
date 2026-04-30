@@ -8,10 +8,9 @@ from typing import Optional, List, Literal
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
 from pydantic import BaseModel
 from app.core.auth import get_all_users, update_user_role, log_audit
-from app.api.dependencies import require_admin
+from app.api.dependencies import require_admin, get_app_llm
 from app.core.database import get_conn
 from app.core.config import get_config, update_config_patch
-from app.core.llm import LLMService
 from app.core.secure_store import has_llm_api_key, set_llm_api_key, delete_llm_api_key
 from app.vector_store.factory import VectorStoreFactory
 from app.services.memory_promotion import (
@@ -939,10 +938,11 @@ def review_pending_memory_rule(
 
 
 @router.post("/llm-test", response_model=LLMTestResponse)
-def test_llm(payload: Optional[LLMTestRequest] = None, request: Request = None, current_user: dict = Depends(require_admin)):
-    cfg = get_config()
-    llm = request.app.state.llm if request is not None and hasattr(
-        request.app.state, "llm") else LLMService(cfg)
+def test_llm(
+    payload: Optional[LLMTestRequest] = None,
+    current_user: dict = Depends(require_admin),
+    llm=Depends(get_app_llm),
+):
     prompt = ""
     if payload:
         prompt = str(payload.prompt or "").strip()

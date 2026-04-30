@@ -1,11 +1,12 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.api.dependencies import get_app_embedder
 
 
-def build_router(embedder):
+def build_router():
     router = APIRouter()
 
     @router.get("/health")
-    def health():
+    def health(embedder=Depends(get_app_embedder)):
         status = embedder.get_registry_status()
         return {
             "status": "ok",

@@ -9,10 +9,10 @@ from app.services.importer import process_import
 from app.services.crud import insert_job, insert_document, backfill_legal_document_categories
 from app.services.search import search_regulations
 from app.api.schemas import SearchQuery
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_app_embedder, get_app_reranker
 
 
-def build_router(cfg, embedder, reranker=None):
+def build_router(cfg):
     router = APIRouter()
     logger = logging.getLogger("law_assistant")
     rag_logger = get_pipeline_logger(
@@ -34,6 +34,7 @@ def build_router(cfg, embedder, reranker=None):
         regulation_id: str = Form(""),
         language: str = Form("zh"),
         current_user: dict = Depends(get_current_user),
+        embedder=Depends(get_app_embedder),
     ):
         class_name = "RegulationsRouter"
         job_id = str(uuid.uuid4())
@@ -136,7 +137,11 @@ def build_router(cfg, embedder, reranker=None):
         return rows
 
     @router.post("/regulations/search")
-    def search(q: SearchQuery):
+    def search(
+        q: SearchQuery,
+        embedder=Depends(get_app_embedder),
+        reranker=Depends(get_app_reranker),
+    ):
         rag_logger.info(
             "class=%s stage=search_request query=%s lang=%s top_k=%s semantic=%s",
             "RegulationsRouter", str(q.query or "")[:80], q.language, q.top_k, q.use_semantic)

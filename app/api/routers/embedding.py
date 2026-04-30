@@ -1,12 +1,13 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from app.api.schemas import EmbeddingRequest
+from app.api.dependencies import get_app_embedder
 
 
-def build_router(embedder):
+def build_router():
     router = APIRouter()
 
     @router.get("/embeddings/info")
-    def embedding_info():
+    def embedding_info(embedder=Depends(get_app_embedder)):
         status = embedder.get_registry_status()
         models = {}
         for k, v in status["registry"].items():
@@ -26,7 +27,7 @@ def build_router(embedder):
         }
 
     @router.post("/embeddings/encode")
-    def encode_embedding(req: EmbeddingRequest):
+    def encode_embedding(req: EmbeddingRequest, embedder=Depends(get_app_embedder)):
         v = embedder.compute_embedding(
             req.text, is_query=req.is_query, lang=req.language)
         prof = embedder.get_embed_profile(req.language)
