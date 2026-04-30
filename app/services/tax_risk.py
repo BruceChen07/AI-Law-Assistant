@@ -12,6 +12,7 @@ from app.services.crud import (
     update_audit_issue_review,
     insert_audit_trace,
 )
+from app.memory_system.experience_repo import record_user_feedback
 
 logger = logging.getLogger("law_assistant")
 
@@ -212,14 +213,29 @@ def review_audit_issue(
         payload_json=payload,
         created_by=operator_id,
     )
+    feedback_meta = {}
+    try:
+        feedback_meta = record_user_feedback(
+            cfg=cfg,
+            issue=issue,
+            reviewer_status=status,
+            reviewer_note=reviewer_note,
+            operator_id=operator_id,
+            risk_level=normalized_risk or issue.get("risk_level", ""),
+        )
+    except Exception as e:
+        logger.warning("record_user_feedback_failed issue_id=%s err=%s", issue_id, str(e))
+        feedback_meta = {"saved": False, "reason": "exception", "error": str(e)}
     updated = get_audit_issue(cfg, issue_id)
     logger.info(
-        "tax_issue_review_done issue_id=%s reviewer_status=%s risk_level=%s action=%s",
+        "tax_issue_review_done issue_id=%s reviewer_status=%s risk_level=%s action=%s feedback_saved=%s outcome=%s",
         issue_id,
         updated.get("reviewer_status", status),
         updated.get("risk_level", normalized_risk or issue.get(
             "risk_level", "")),
         action,
+        bool(feedback_meta.get("saved", False)),
+        str(feedback_meta.get("outcome", "")),
     )
     return {
         "issue_id": issue_id,

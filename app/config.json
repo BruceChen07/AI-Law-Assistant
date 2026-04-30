@@ -35,7 +35,7 @@
             "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:"
         }
     },
-    "log_level": "INFO",
+    "log_level": "DEBUG",
     "log_base_dir": "../logs",
     "log_dir": "../logs",
     "log_max_bytes": 10485760,
@@ -134,5 +134,6 @@
     "ui_config": {
         "show_citation_source": false,
         "default_theme": "dark"
-    }
+    },
+    "memory_runtime_config": {}
 }

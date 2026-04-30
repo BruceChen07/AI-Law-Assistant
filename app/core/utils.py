@@ -11,6 +11,11 @@ from app.core.config import get_config
 
 logger = logging.getLogger("law_assistant")
 
+
+class OCRExtractionError(RuntimeError):
+    """Raised when OCR is required for PDF extraction but OCR pipeline fails."""
+
+
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _JIEBA_READY = False
@@ -115,8 +120,17 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
                     len(ocr_text)
                 )
                 return ocr_text, meta
-        except Exception:
+            logger.error("ocr_empty_result file=%s engine=%s", path, engine)
+            raise OCRExtractionError(
+                "OCR_PARSE_FAILED: OCR returned empty text for scanned PDF"
+            )
+        except OCRExtractionError:
+            raise
+        except Exception as e:
             logger.exception("ocr_failed file=%s", path)
+            raise OCRExtractionError(
+                f"OCR_PARSE_FAILED: {type(e).__name__}: {e}"
+            ) from e
     return text, meta
 
 

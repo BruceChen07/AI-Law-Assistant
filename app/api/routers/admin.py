@@ -14,6 +14,11 @@ from app.core.config import get_config, update_config_patch
 from app.core.llm import LLMService
 from app.core.secure_store import has_llm_api_key, set_llm_api_key, delete_llm_api_key
 from app.vector_store.factory import VectorStoreFactory
+from app.services.memory_promotion import (
+    list_pending_rule_memories,
+    promote_episode_to_rule,
+    review_rule_memory,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -86,6 +91,25 @@ class UIConfigUpdate(BaseModel):
     default_theme: Optional[str] = None
 
 
+class MemoryRuntimeConfigResponse(BaseModel):
+    memory_module_enabled: bool
+    memory_mode_when_disabled: str
+    memory_disable_fallback_on_error: bool
+    memory_token_guard_enabled: bool
+    memory_max_llm_calls_per_audit: int
+    memory_max_prompt_chars_per_clause: int
+    risk_notice: str
+
+
+class MemoryRuntimeConfigUpdate(BaseModel):
+    memory_module_enabled: Optional[bool] = None
+    memory_mode_when_disabled: Optional[str] = None
+    memory_disable_fallback_on_error: Optional[bool] = None
+    memory_token_guard_enabled: Optional[bool] = None
+    memory_max_llm_calls_per_audit: Optional[int] = None
+    memory_max_prompt_chars_per_clause: Optional[int] = None
+
+
 class LLMTestRequest(BaseModel):
     prompt: Optional[str] = None
 
@@ -138,6 +162,18 @@ class TokenUsageResponse(BaseModel):
     rankings: List[TokenUsageRankingItem]
     alerts: List[TokenUsageAlert]
     last_updated: str
+
+
+class MemoryPromotionRunRequest(BaseModel):
+    episode_id: Optional[str] = None
+    min_support_count: Optional[int] = None
+    min_quality_score: Optional[float] = None
+    high_impact_threshold: Optional[float] = None
+
+
+class MemoryRuleReviewRequest(BaseModel):
+    action: Literal["approve", "reject"]
+    note: Optional[str] = None
 
 
 def _clean_text(v: str) -> str:
@@ -200,6 +236,29 @@ def _get_ui_config(cfg: dict) -> dict:
     return {
         "show_citation_source": bool(ui_cfg.get("show_citation_source", False)),
         "default_theme": _normalize_theme(ui_cfg.get("default_theme")),
+    }
+
+
+def _get_memory_runtime_config(cfg: dict) -> dict:
+    raw = cfg.get("memory_runtime_config") if isinstance(
+        cfg.get("memory_runtime_config"), dict) else {}
+    mode = str(raw.get("memory_mode_when_disabled")
+               or "classic").strip().lower()
+    if mode not in {"classic"}:
+        mode = "classic"
+    max_calls = int(raw.get("memory_max_llm_calls_per_audit") or 12)
+    max_prompt_chars = int(
+        raw.get("memory_max_prompt_chars_per_clause") or 2400)
+    max_calls = max(1, min(max_calls, 200))
+    max_prompt_chars = max(300, min(max_prompt_chars, 12000))
+    return {
+        "memory_module_enabled": bool(raw.get("memory_module_enabled", True)),
+        "memory_mode_when_disabled": mode,
+        "memory_disable_fallback_on_error": bool(raw.get("memory_disable_fallback_on_error", True)),
+        "memory_token_guard_enabled": bool(raw.get("memory_token_guard_enabled", True)),
+        "memory_max_llm_calls_per_audit": max_calls,
+        "memory_max_prompt_chars_per_clause": max_prompt_chars,
+        "risk_notice": "Enabling memory mode may increase LLM calls and token cost; disable it for lower-cost audits with potentially reduced recall quality.",
     }
 
 
@@ -415,7 +474,8 @@ def delete_user(
     current_user: dict = Depends(require_admin)
 ):
     if str(current_user.get("id")) == str(user_id):
-        raise HTTPException(status_code=400, detail="Cannot delete current user")
+        raise HTTPException(
+            status_code=400, detail="Cannot delete current user")
 
     conn = get_conn(get_config())
     cur = conn.cursor()
@@ -627,6 +687,48 @@ def update_ui_config(payload: UIConfigUpdate, current_user: dict = Depends(requi
     return UIConfigResponse(**ui_cfg)
 
 
+@router.get("/memory-config", response_model=MemoryRuntimeConfigResponse)
+def get_memory_runtime_config(current_user: dict = Depends(require_admin)):
+    cfg = get_config()
+    mem_cfg = _get_memory_runtime_config(cfg)
+    return MemoryRuntimeConfigResponse(**mem_cfg)
+
+
+@router.put("/memory-config", response_model=MemoryRuntimeConfigResponse)
+def update_memory_runtime_config(payload: MemoryRuntimeConfigUpdate, current_user: dict = Depends(require_admin)):
+    cfg_current = get_config()
+    current = _get_memory_runtime_config(cfg_current)
+    patch = payload.model_dump(exclude_unset=True)
+    merged = dict(current)
+    for k, v in patch.items():
+        merged[k] = v
+    mode = str(merged.get("memory_mode_when_disabled")
+               or "classic").strip().lower()
+    if mode not in {"classic"}:
+        raise HTTPException(
+            status_code=400, detail="memory_mode_when_disabled must be 'classic'")
+    max_calls = int(merged.get("memory_max_llm_calls_per_audit") or 12)
+    max_prompt_chars = int(merged.get(
+        "memory_max_prompt_chars_per_clause") or 2400)
+    if max_calls <= 0:
+        raise HTTPException(
+            status_code=400, detail="memory_max_llm_calls_per_audit must be positive")
+    if max_prompt_chars < 300:
+        raise HTTPException(
+            status_code=400, detail="memory_max_prompt_chars_per_clause must be >= 300")
+    save_payload = {
+        "memory_module_enabled": bool(merged.get("memory_module_enabled", True)),
+        "memory_mode_when_disabled": mode,
+        "memory_disable_fallback_on_error": bool(merged.get("memory_disable_fallback_on_error", True)),
+        "memory_token_guard_enabled": bool(merged.get("memory_token_guard_enabled", True)),
+        "memory_max_llm_calls_per_audit": max_calls,
+        "memory_max_prompt_chars_per_clause": max_prompt_chars,
+    }
+    cfg = update_config_patch({"memory_runtime_config": save_payload})
+    out = _get_memory_runtime_config(cfg)
+    return MemoryRuntimeConfigResponse(**out)
+
+
 @router.get("/token-usage", response_model=TokenUsageResponse)
 def get_token_usage(
     start: Optional[str] = None,
@@ -783,6 +885,57 @@ def export_token_usage_csv(
     content = csv_buf.getvalue()
     headers = {"Content-Disposition": "attachment; filename=token_usage.csv"}
     return Response(content=content, media_type="text/csv", headers=headers)
+
+
+@router.post("/memory/promotion/run")
+def run_memory_promotion(
+    payload: Optional[MemoryPromotionRunRequest] = None,
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    req = payload or MemoryPromotionRunRequest()
+    result = promote_episode_to_rule(
+        cfg=cfg,
+        episode_id=str(req.episode_id or ""),
+        min_support_count=req.min_support_count,
+        min_quality_score=req.min_quality_score,
+        high_impact_threshold=req.high_impact_threshold,
+    )
+    if not bool(result.get("ok", False)):
+        raise HTTPException(status_code=400, detail=str(
+            result.get("reason") or "promotion_failed"))
+    return result
+
+
+@router.get("/memory/rules/pending")
+def get_pending_memory_rules(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    items = list_pending_rule_memories(cfg=cfg, limit=limit)
+    return {"items": items, "total": len(items)}
+
+
+@router.post("/memory/rules/{rule_id}/review")
+def review_pending_memory_rule(
+    rule_id: str,
+    payload: MemoryRuleReviewRequest,
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    result = review_rule_memory(
+        cfg=cfg,
+        rule_id=rule_id,
+        action=payload.action,
+        reviewer_id=str(current_user.get("id") or ""),
+        note=str(payload.note or ""),
+    )
+    if not bool(result.get("ok", False)):
+        reason = str(result.get("reason") or "review_failed")
+        status = 404 if reason == "not_found" else 400
+        raise HTTPException(status_code=status, detail=reason)
+    return result
 
 
 @router.post("/llm-test", response_model=LLMTestResponse)

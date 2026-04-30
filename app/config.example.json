@@ -26,7 +26,7 @@
             "embedding_threads": 2
         }
     },
-    "log_level": "INFO",
+    "log_level": "DEBUG",
     "log_base_dir": "../logs",
     "log_dir": "../logs",
     "log_max_bytes": 10485760,
@@ -52,7 +52,12 @@
         }
     },
     "mineru": {
-        "backend": "hybrid-auto-engine",
+        "mode": "auto",
+        "backend": "pipeline",
+        "fallback_backends": [
+            "pipeline"
+        ],
+        "probe_cache_ttl_sec": 300,
         "method": "auto",
         "lang": "ch",
         "device": "cpu",

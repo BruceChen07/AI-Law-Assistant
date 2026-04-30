@@ -1,4 +1,5 @@
 import uuid
+import json
 from datetime import datetime
 from app.core.database import init_db, get_conn
 from app.services.crud import (
@@ -14,7 +15,10 @@ from app.services.tax_risk import generate_issues_from_matches, review_audit_iss
 
 def test_generate_and_review_tax_audit_issues(tmp_path):
     db_path = tmp_path / "test.db"
-    cfg = {"db_path": str(db_path)}
+    cfg = {
+        "db_path": str(db_path),
+        "memory_dir": str(tmp_path / "memory"),
+    }
     init_db(cfg)
 
     reg_id = str(uuid.uuid4())
@@ -113,3 +117,13 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
     traces = list_audit_trace_by_issue(cfg, issue_id, limit=20)
     assert len(traces) == 1
     assert traces[0]["action_type"] == "reviewer_confirm"
+    feedback_file = tmp_path / "memory" / "experience" / "feedback_events.jsonl"
+    assert feedback_file.exists()
+    rows = [json.loads(x) for x in feedback_file.read_text(
+        encoding="utf-8").splitlines() if x.strip()]
+    assert len(rows) >= 1
+    row = rows[-1]
+    assert row["issue_id"] == issue_id
+    assert row["outcome"] == "success"
+    assert row["feedback_source"] == "user_confirmed"
+    assert float(row["memory_quality_score"]) > 0.5

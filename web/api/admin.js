@@ -75,6 +75,20 @@ export async function adminUpdateUIConfig(payload) {
   })
 }
 
+export async function adminGetMemoryConfig() {
+  return requestJson(`${API_BASE}/api/admin/memory-config`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminUpdateMemoryConfig(payload) {
+  return requestJson(`${API_BASE}/api/admin/memory-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload || {})
+  })
+}
+
 export async function adminGetVectorStoreConfig() {
   return requestJson(`${API_BASE}/api/admin/vector-store/config`, {
     headers: { ...getAuthHeaders() }

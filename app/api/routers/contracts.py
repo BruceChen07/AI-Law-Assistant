@@ -43,6 +43,10 @@ def _build_audit_error_detail(err: Exception, language: str) -> str:
         if is_zh:
             return "本地安全密钥存储不可用。请安装 keyring 依赖或改用环境变量配置 LLM_API_KEY 后重试。"
         return "Local secure key storage is unavailable. Install keyring or use LLM_API_KEY environment variable, then retry."
+    if "ocr_parse_failed" in low or "ocr_failed" in low or "torchvision" in low:
+        if is_zh:
+            return "OCR 解析失败，未能正确抽取 PDF 文本，审计流程已中止。请检查 OCR 依赖（如 torchvision）和 MinerU 配置后重试。"
+        return "OCR parsing failed and PDF text was not extracted correctly. Audit flow has been stopped. Check OCR dependencies (e.g., torchvision) and MinerU configuration, then retry."
     if is_zh:
         return "合同审计失败。请检查【Admin -> 模型配置】中的 LLM 参数后重试。"
     return "Contract audit failed. Check LLM settings in Admin -> Model Config and retry."

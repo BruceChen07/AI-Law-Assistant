@@ -19,7 +19,9 @@ from app.services.contract_audit_modules.async_bridge import run_coro_sync
 from app.memory_system.manager import MemoryLifecycleManager, MemoryManagerConfig
 from app.memory_system.search import HybridSearcher, HybridSearchConfig
 from app.memory_system.indexer import IndexerConfig, MemoryIndexer, SentenceTransformerEmbedder
+from app.memory_system.rerank import rerank_memory_candidates, apply_context_budget
 from app.services.audit_utils import _normalize_risk_level, _enrich_citations, _normalize_lang
+from app.memory_system.experience_repo import recall_failure_patterns, recall_similar_audit_memories, recall_workflow_memories
 from typing import Dict, Any, List, Optional, Tuple
 import json
 import os
@@ -31,6 +33,58 @@ from app.core.utils import resolve_path
 
 logger = structlog.get_logger(__name__)
 _MEMORY_EMBEDDERS: Dict[str, Any] = {}
+
+
+def _format_failure_patterns(patterns: List[Dict[str, Any]], lang: str) -> str:
+    rows: List[str] = []
+    for idx, item in enumerate(list(patterns or []), start=1):
+        status = str(item.get("reviewer_status")
+                     or item.get("outcome") or "").strip()
+        label = str(item.get("risk_label") or "").strip()
+        text = str(item.get("pattern_text") or "").strip()
+        if not text:
+            continue
+        rows.append(f"- F{idx} [{status}/{label}] {text}")
+    if not rows:
+        return ""
+    if str(lang or "").lower() == "en":
+        return "Failure Memory Patterns:\n" + "\n".join(rows) + "\n\n"
+    return "失败经验模式:\n" + "\n".join(rows) + "\n\n"
+
+
+def _format_case_memories(hits: List[Dict[str, Any]], lang: str) -> str:
+    rows: List[str] = []
+    for idx, item in enumerate(list(hits or []), start=1):
+        label = str(item.get("risk_label") or "").strip()
+        excerpt = str(item.get("clause_text_excerpt") or "").strip()
+        reasoning = str(item.get("risk_reasoning") or "").strip()
+        basis = ",".join([str(x).strip() for x in (
+            item.get("legal_basis") or []) if str(x).strip()][:2])
+        text = " | ".join([x for x in [excerpt, reasoning, basis] if x])
+        if not text:
+            continue
+        rows.append(f"- M{idx} [{label}] {text}")
+    if not rows:
+        return ""
+    if str(lang or "").lower() == "en":
+        return "Case Memory Hits:\n" + "\n".join(rows) + "\n\n"
+    return "案例记忆命中:\n" + "\n".join(rows) + "\n\n"
+
+
+def _format_workflow_memories(hits: List[Dict[str, Any]], lang: str) -> str:
+    rows: List[str] = []
+    for idx, item in enumerate(list(hits or []), start=1):
+        title = str(item.get("workflow_title") or "").strip()
+        steps = str(item.get("workflow_steps") or "").strip()
+        if not title and not steps:
+            continue
+        text = " | ".join([x for x in [title, steps] if x])
+        rows.append(f"- W{idx} {text}")
+    if not rows:
+        return ""
+    if str(lang or "").lower() == "en":
+        return "Workflow Memory (Planning):\n" + "\n".join(rows) + "\n\n"
+    return "工作流记忆(审计规划):\n" + "\n".join(rows) + "\n\n"
 
 
 def _estimate_text_tokens(text: str) -> int:
@@ -91,8 +145,10 @@ def _load_llm_json_object(raw_text: str) -> Dict[str, Any]:
     s = str(raw_text or "").strip()
     if not s:
         return json.loads(s)
-    fenced = re.sub(r"^\s*```(?:json)?\s*", "", s, count=1, flags=re.IGNORECASE)
-    fenced = re.sub(r"\s*```\s*$", "", fenced, count=1, flags=re.IGNORECASE).strip()
+    fenced = re.sub(r"^\s*```(?:json)?\s*", "", s,
+                    count=1, flags=re.IGNORECASE)
+    fenced = re.sub(r"\s*```\s*$", "", fenced, count=1,
+                    flags=re.IGNORECASE).strip()
     candidates: List[str] = []
     if fenced:
         candidates.append(fenced)
@@ -115,6 +171,7 @@ def _load_llm_json_object(raw_text: str) -> Dict[str, Any]:
     if last_error is not None:
         raise last_error
     return json.loads(fenced)
+
 
 def _build_compact_whitelist(evidence_items: List[Dict[str, Any]], limit: int = 40):
     lines: List[str] = []
@@ -351,8 +408,10 @@ def _dedupe_similar_risks(risks: List[Dict[str, Any]], log_limit: int = 30) -> T
 def _memory_model_ref(cfg: Optional[Dict[str, Any]], lang: str) -> str:
     norm_lang = _normalize_lang(lang, default="zh")
     c = cfg or {}
-    profile = c.get("embedding_profiles") if isinstance(c.get("embedding_profiles"), dict) else {}
-    p = profile.get(norm_lang) if isinstance(profile.get(norm_lang), dict) else {}
+    profile = c.get("embedding_profiles") if isinstance(
+        c.get("embedding_profiles"), dict) else {}
+    p = profile.get(norm_lang) if isinstance(
+        profile.get(norm_lang), dict) else {}
     local_dir = str(
         c.get(f"memory_embedding_model_dir_{norm_lang}")
         or c.get("memory_embedding_model_dir")
@@ -379,7 +438,8 @@ def get_memory_embedder(lang: str = "zh", cfg: Optional[Dict[str, Any]] = None):
             os.environ["HF_HUB_OFFLINE"] = "1"
             os.environ["TRANSFORMERS_OFFLINE"] = "1"
         local_only = force_local or os.path.isdir(str(model_ref))
-        embedder = SentenceTransformerEmbedder(model_ref, local_files_only=local_only)
+        embedder = SentenceTransformerEmbedder(
+            model_ref, local_files_only=local_only)
         _MEMORY_EMBEDDERS[cache_key] = embedder
         logger.info("memory_embedder_ready",
                     provider="sentence_transformers", lang=norm_lang, model=model_ref, local_only=local_only, force_local=force_local)
@@ -506,6 +566,60 @@ def execute_memory_audit(
     global_tax_context_text = format_global_tax_context(
         global_tax_context, per_topic_limit=2)
 
+    trace_seed = dict(trace_context or {})
+    seed_pack_id = str(trace_seed.get("regulation_pack_id") or "")
+    workflow_top_k = max(1, min(int(cfg.get("memory_workflow_top_k") or 2), 3))
+    workflow_memories = recall_workflow_memories(
+        cfg=cfg,
+        query_text=f"{str(text or '')[:800]}",
+        top_k=workflow_top_k,
+        regulation_pack_id=seed_pack_id,
+        jurisdiction=str(retrieval_opts.get("region") or ""),
+        industry=str(retrieval_opts.get("industry") or ""),
+        contract_type=str(retrieval_opts.get("contract_type") or ""),
+    )
+    workflow_memories = rerank_memory_candidates(
+        workflow_memories,
+        query_text=f"{str(text or '')[:800]}",
+        regulation_pack_id=seed_pack_id,
+    )
+    workflow_memories = apply_context_budget(
+        workflow_memories,
+        max_items=workflow_top_k,
+        max_chars=max(
+            160, int(cfg.get("memory_workflow_budget_chars") or 420)),
+    )
+    workflow_memory_block = _format_workflow_memories(
+        workflow_memories, norm_lang)
+
+    def _clause_priority_score(clause_id: str, title: str, body: str, clause_path: str) -> int:
+        text = " ".join([str(clause_id or ""), str(title or ""),
+                        str(body or ""), str(clause_path or "")]).lower()
+        keywords = [
+            "税", "tax", "vat", "invoice", "发票", "税率", "计税", "纳税",
+            "付款", "payment", "结算", "liability", "违约", "赔偿",
+            "termination", "解除", "jurisdiction", "管辖",
+        ]
+        return sum(1 for k in keywords if k in text)
+
+    preview_order_map: Dict[str, int] = {}
+    preview_priority_orders: List[int] = []
+    preview_priority_clause_ids = set()
+    for idx, pc in enumerate(list(preview_clauses or []), start=1):
+        pcid = str(pc.get("clause_id") or "").strip()
+        if pcid:
+            preview_order_map[pcid] = idx
+        pscore = _clause_priority_score(
+            pcid,
+            str(pc.get("title") or ""),
+            str(pc.get("clause_text") or pc.get("text") or ""),
+            str(pc.get("clause_path") or ""),
+        )
+        if pscore > 0:
+            preview_priority_orders.append(idx)
+            if pcid:
+                preview_priority_clause_ids.add(pcid)
+
     clause_parse_state = {"count": 0, "clause_ids": []}
     base_trace_meta = dict(trace_context or {})
     audit_id = str(base_trace_meta.get("audit_id") or "").strip()
@@ -513,6 +627,23 @@ def execute_memory_audit(
         audit_id = f"audit_{datetime.utcnow().strftime('%Y%m%d%H%M%S%f')}"
     base_trace_meta["audit_id"] = audit_id
     round_runtime = {"round": 0, "clause_id": ""}
+    runtime_cfg = cfg.get("memory_runtime_config") if isinstance(
+        cfg.get("memory_runtime_config"), dict) else {}
+    llm_call_budget_limit = int(
+        runtime_cfg.get("memory_max_llm_calls_per_audit")
+        or cfg.get("memory_max_llm_calls_per_audit")
+        or 12
+    )
+    llm_call_budget_limit = max(1, min(llm_call_budget_limit, 200))
+    llm_budget = {
+        "limit": llm_call_budget_limit,
+        "calls": 0,
+        "guard_hit": False,
+        "skipped_clause_calls": 0,
+        "skipped_flush_calls": 0,
+        "skipped_low_priority_calls": 0,
+        "called_high_priority_clauses": 0,
+    }
 
     def _write_round(action: str, payload: Dict[str, Any], round_no: int = 0) -> None:
         rn = int(round_no or round_runtime.get("round") or 0)
@@ -540,6 +671,19 @@ def execute_memory_audit(
             "global_tax_context_items": sum(len(v) for v in global_tax_context.values() if isinstance(v, list)),
             "memory_cfg": memory_cfg.model_dump(),
             "memory_filter_unverifiable_risks": filter_unverifiable_risks,
+            "memory_llm_call_budget_limit": llm_call_budget_limit,
+            "memory_priority_clause_count": len(preview_priority_orders),
+        },
+        memory_dir=memory_dir,
+    )
+    write_audit_trace(
+        cfg,
+        "workflow_memory_recall",
+        {
+            **base_trace_meta,
+            "workflow_memory_count": len(workflow_memories),
+            "workflow_memories_preview": workflow_memories,
+            "workflow_memory_budget_chars": int(cfg.get("memory_workflow_budget_chars") or 420),
         },
         memory_dir=memory_dir,
     )
@@ -551,6 +695,62 @@ def execute_memory_audit(
             payload.get("long_memory_hits") or "").strip()
         clause_text = str(clause.get("text") or "")
         clause_title = str(clause.get("title") or "")
+        case_top_k = max(1, min(int(cfg.get("memory_case_top_k") or 3), 5))
+        case_memories = recall_similar_audit_memories(
+            cfg=cfg,
+            query_text=f"{clause_title}\n{clause_text[:360]}",
+            top_k=case_top_k,
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
+            clause_category=str(clause.get("clause_path") or ""),
+            jurisdiction=str(retrieval_opts.get("region") or ""),
+            industry=str(retrieval_opts.get("industry") or ""),
+            contract_type=str(retrieval_opts.get("contract_type") or ""),
+        )
+        case_memories = rerank_memory_candidates(
+            case_memories,
+            query_text=f"{clause_title}\n{clause_text[:360]}",
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
+        )
+        failure_top_k = max(
+            1, min(int(cfg.get("memory_failure_top_k") or 3), 3))
+        failure_patterns = recall_failure_patterns(
+            cfg=cfg,
+            query_text=f"{clause_title}\n{clause_text[:360]}",
+            top_k=failure_top_k,
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
+            clause_category=str(clause.get("clause_path") or ""),
+            jurisdiction=str(retrieval_opts.get("region") or ""),
+            industry=str(retrieval_opts.get("industry") or ""),
+            contract_type=str(retrieval_opts.get("contract_type") or ""),
+        )
+        failure_patterns = rerank_memory_candidates(
+            failure_patterns,
+            query_text=f"{clause_title}\n{clause_text[:360]}",
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
+        )
+        recall_total_budget_chars = max(
+            500, int(cfg.get("memory_recall_budget_chars") or 1200))
+        case_budget_chars = int(recall_total_budget_chars * 0.6)
+        failure_budget_chars = max(
+            160, recall_total_budget_chars - case_budget_chars)
+        case_memories = apply_context_budget(
+            case_memories,
+            max_items=max(1, min(int(cfg.get("memory_case_top_k") or 3), 5)),
+            max_chars=case_budget_chars,
+        )
+        failure_patterns = apply_context_budget(
+            failure_patterns,
+            max_items=max(
+                1, min(int(cfg.get("memory_failure_top_k") or 3), 3)),
+            max_chars=failure_budget_chars,
+        )
+        case_memory_block = _format_case_memories(case_memories, norm_lang)
+        failure_patterns_block = _format_failure_patterns(
+            failure_patterns, norm_lang)
         short_prompt_max_chars = int(
             cfg.get("memory_prompt_short_max_chars") or (900 if is_relaxed else 760))
         long_prompt_max_chars = int(
@@ -581,12 +781,16 @@ def execute_memory_audit(
             user = (
                 f"Language: {norm_lang}\n"
                 "Audit strictly based on the input; prioritize the whitelisted laws; output MUST be JSON.\n"
+                "Check whether this clause matches any known false-positive or false-negative pattern before finalizing.\n"
                 "Short memory and long-term hits are for factual reference only; do not directly reuse their historical conclusions.\n"
                 "For risk items, if a whitelist item can be matched, you MUST fill citation_id with an exact whitelist ID and MUST NOT invent any ID; only leave citation_id blank when no match can be determined, and still fill law_title and article_no for post-processing mapping and verification.\n"
                 "If outputting 'unclear/unspecified/unmentioned/missing' risks, refer to the short memory, long-term hits, and the current clause; suppress this risk ONLY if the same element has been covered by explicit and enforceable provisions.\n"
                 "Do NOT output reasoning processes, analysis processes, or extra explanations. ONLY output the final JSON.\n"
                 f"Whitelist:\n{evidence_whitelist_text}\n\n"
                 f"Short Memory:\n{short_memory}\n\n"
+                f"{case_memory_block}"
+                f"{failure_patterns_block}"
+                f"{workflow_memory_block}"
                 f"{global_context_block}"
                 f"{long_memory_block}"
                 f"Clause Title: {clause_title}\n"
@@ -598,12 +802,16 @@ def execute_memory_audit(
             user = (
                 f"语言:{norm_lang}\n"
                 "仅根据输入审计；优先参考白名单法条；输出必须是JSON。\n"
+                "Check whether this clause matches any known false-positive or false-negative pattern before finalizing.\n"
                 "短记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n"
                 "风险项如能匹配白名单，必须填写与白名单完全一致的 citation_id，且不得编造ID；仅在确实无法匹配时才可留空，并必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
                 "若要输出‘未明确/未约定/未提及/缺失’风险，可参考短记忆、长期命中与当前条款；仅在同一要素已被明确且可执行约定覆盖时才抑制该风险。\n"
                 "禁止输出推理过程、分析过程与额外解释，只输出最终JSON。\n"
                 f"白名单:\n{evidence_whitelist_text}\n\n"
                 f"短记忆:\n{short_memory}\n\n"
+                f"{case_memory_block}"
+                f"{failure_patterns_block}"
+                f"{workflow_memory_block}"
                 f"{global_context_block}"
                 f"{long_memory_block}"
                 f"条款标题:{clause_title}\n"
@@ -632,6 +840,13 @@ def execute_memory_audit(
                 "short_memory_len": len(short_memory_full),
                 "long_memory_hits_len": len(long_memory_hits_full),
                 "global_context_len": len(global_tax_context_text),
+                "memory_recall_budget_chars": recall_total_budget_chars,
+                "case_memory_count": len(case_memories),
+                "case_memories_preview": case_memories,
+                "failure_pattern_count": len(failure_patterns),
+                "failure_patterns_preview": failure_patterns,
+                "workflow_memory_count": len(workflow_memories),
+                "workflow_memories_preview": workflow_memories,
                 "short_memory_preview": short_memory_full,
                 "long_memory_preview": long_memory_hits_full,
                 "prompt_short_memory_len": len(short_memory),
@@ -658,6 +873,94 @@ def execute_memory_audit(
             },
             int(payload.get("round") or 0),
         )
+        current_clause_id = str(clause.get("clause_id") or "").strip()
+        current_order = int(preview_order_map.get(
+            current_clause_id) or int(payload.get("round") or 0) or 0)
+        current_priority_score = _clause_priority_score(
+            current_clause_id,
+            clause_title,
+            clause_text,
+            str(clause.get("clause_path") or ""),
+        )
+        is_high_priority_clause = bool(
+            current_clause_id in preview_priority_clause_ids or current_priority_score > 0)
+        remaining_calls = int(llm_budget.get("limit") or 0) - \
+            int(llm_budget.get("calls") or 0)
+        unseen_high_priority_calls = sum(
+            1 for o in preview_priority_orders if int(o or 0) > current_order
+        )
+        if (not is_high_priority_clause) and unseen_high_priority_calls > 0 and remaining_calls <= unseen_high_priority_calls:
+            llm_budget["guard_hit"] = True
+            llm_budget["skipped_clause_calls"] = int(
+                llm_budget.get("skipped_clause_calls") or 0) + 1
+            llm_budget["skipped_low_priority_calls"] = int(
+                llm_budget.get("skipped_low_priority_calls") or 0) + 1
+            write_audit_trace(
+                cfg,
+                "clause_round_result",
+                {
+                    **clause_trace_meta,
+                    "ok": False,
+                    "reason": "llm_call_budget_reserved_for_high_priority",
+                    "llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+                    "llm_call_count_actual": int(llm_budget.get("calls") or 0),
+                    "remaining_calls": remaining_calls,
+                    "unseen_high_priority_calls": unseen_high_priority_calls,
+                    "token_usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                },
+                memory_dir=memory_dir,
+            )
+            _write_round(
+                "clause_budget_reserved_skip",
+                {
+                    "clause_id": current_clause_id,
+                    "llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+                    "llm_call_count_actual": int(llm_budget.get("calls") or 0),
+                    "remaining_calls": remaining_calls,
+                    "unseen_high_priority_calls": unseen_high_priority_calls,
+                },
+                int(payload.get("round") or 0),
+            )
+            return {"summary": "", "risks": []}
+        if int(llm_budget.get("calls") or 0) >= int(llm_budget.get("limit") or 1):
+            llm_budget["guard_hit"] = True
+            llm_budget["skipped_clause_calls"] = int(
+                llm_budget.get("skipped_clause_calls") or 0) + 1
+            write_audit_trace(
+                cfg,
+                "clause_round_result",
+                {
+                    **clause_trace_meta,
+                    "ok": False,
+                    "reason": "llm_call_budget_exceeded",
+                    "llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+                    "llm_call_count_actual": int(llm_budget.get("calls") or 0),
+                    "token_usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                },
+                memory_dir=memory_dir,
+            )
+            _write_round(
+                "clause_budget_skipped",
+                {
+                    "clause_id": str(clause.get("clause_id") or ""),
+                    "llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+                    "llm_call_count_actual": int(llm_budget.get("calls") or 0),
+                },
+                int(payload.get("round") or 0),
+            )
+            return {"summary": "", "risks": []}
+        llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
+        if is_high_priority_clause:
+            llm_budget["called_high_priority_clauses"] = int(
+                llm_budget.get("called_high_priority_clauses") or 0) + 1
         try:
             result_text, llm_raw = llm.chat([{"role": "system", "content": system}, {
                 "role": "user", "content": user}], overrides={"max_tokens": 600 if is_relaxed else 600, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": clause_trace_meta})
@@ -849,8 +1152,30 @@ def execute_memory_audit(
         )
         _write_round("flush_prompt", {"clause_id": str(round_runtime.get(
             "clause_id") or ""), "prompt": prompt, "llm_system": "你是记忆压缩助手。", "llm_user": content}, flush_round)
+        if int(llm_budget.get("calls") or 0) >= int(llm_budget.get("limit") or 1):
+            llm_budget["guard_hit"] = True
+            llm_budget["skipped_flush_calls"] = int(
+                llm_budget.get("skipped_flush_calls") or 0) + 1
+            out = str(prompt or "")[:220]
+            write_audit_trace(
+                cfg,
+                "memory_flush_result",
+                {
+                    **flush_trace_meta,
+                    "result_len": len(out),
+                    "result_preview": trace_clip(out, 260),
+                    "reason": "llm_call_budget_exceeded",
+                    "llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+                    "llm_call_count_actual": int(llm_budget.get("calls") or 0),
+                },
+                memory_dir=memory_dir,
+            )
+            _write_round("flush_budget_skipped", {"clause_id": str(
+                round_runtime.get("clause_id") or ""), "result": out}, flush_round)
+            return out
+        llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
         result_text, _ = llm.chat([{"role": "system", "content": "你是记忆压缩助手。"}, {
-                                  "role": "user", "content": content}], overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": flush_trace_meta})
+            "role": "user", "content": content}], overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": flush_trace_meta})
         out = str(result_text or "").strip()
         write_audit_trace(
             cfg,
@@ -1066,7 +1391,8 @@ def execute_memory_audit(
     parse_failed_count = int(clause_parse_state.get("count") or 0)
     fail_on_parse_and_no_risk = bool(
         cfg.get("memory_fail_on_parse_and_no_risk", False))
-    require_full_coverage = bool(retrieval_opts.get("require_full_coverage", False))
+    require_full_coverage = bool(
+        retrieval_opts.get("require_full_coverage", False))
     if parse_failed_count > 0 and not normalized_risks:
         if fail_on_parse_and_no_risk or require_full_coverage:
             raise RuntimeError(
@@ -1135,6 +1461,13 @@ def execute_memory_audit(
             "deduped_similar_risk_hits": deduped_similar_risk_hits[:20],
             "suppressed_missing_risk_hits": suppressed_missing_risk_hits[:20],
             "reconciled_suppressed_risk_hits": reconciled_removed_hits[:20],
+            "memory_llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+            "memory_llm_call_count_actual": int(llm_budget.get("calls") or 0),
+            "memory_llm_call_guard_hit": bool(llm_budget.get("guard_hit")),
+            "memory_llm_guard_skipped_clause_calls": int(llm_budget.get("skipped_clause_calls") or 0),
+            "memory_llm_guard_skipped_flush_calls": int(llm_budget.get("skipped_flush_calls") or 0),
+            "memory_llm_guard_skipped_low_priority_calls": int(llm_budget.get("skipped_low_priority_calls") or 0),
+            "memory_llm_called_high_priority_clauses": int(llm_budget.get("called_high_priority_clauses") or 0),
         },
         memory_dir=memory_dir,
     )
@@ -1186,5 +1519,13 @@ def execute_memory_audit(
             "reconciled_suppressed_risk_hits": reconciled_removed_hits[:20],
             "parse_failed_clauses": parse_failed_count,
             "memory_degraded": parse_failed_count > 0,
+            "memory_llm_call_budget_limit": int(llm_budget.get("limit") or 0),
+            "memory_llm_call_count": int(llm_budget.get("calls") or 0),
+            "memory_llm_call_count_actual": int(llm_budget.get("calls") or 0),
+            "memory_llm_call_guard_hit": bool(llm_budget.get("guard_hit")),
+            "memory_llm_guard_skipped_clause_calls": int(llm_budget.get("skipped_clause_calls") or 0),
+            "memory_llm_guard_skipped_flush_calls": int(llm_budget.get("skipped_flush_calls") or 0),
+            "memory_llm_guard_skipped_low_priority_calls": int(llm_budget.get("skipped_low_priority_calls") or 0),
+            "memory_llm_called_high_priority_clauses": int(llm_budget.get("called_high_priority_clauses") or 0),
         },
     }

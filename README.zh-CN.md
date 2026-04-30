@@ -166,6 +166,30 @@ npm run storybook
 2. 填写 API 端点、模型、温度、最大 Token 等
 3. 保存后立即生效
 
+### 记忆模块开关与成本控制（Admin 页面）
+
+1. 进入 Admin → 「模型配置」→「记忆审计配置」
+2. 开关 `启用经验记忆审计`：关闭后走 `classic` 低成本路径
+3. 勾选 `启用记忆 Token 守卫`，并设置预算上限
+
+建议参数（生产默认）：
+
+- `memory_module_enabled`: `true`（如需严格控成本可设为 `false`）
+- `memory_max_llm_calls_per_audit`: `8-16`（合同较长建议上调）
+- `memory_max_prompt_chars_per_clause`: `1600-2800`
+
+风险提示：
+
+- 启用记忆模式会增加 LLM 调用次数与 Token 消耗，成本通常高于 classic 模式
+- 关闭记忆模式后，复杂场景的跨条款召回与经验修正能力会下降
+- 预算过低时系统会优先高风险条款，低优先级条款可能被跳过（可在 trace 中观测）
+
+常见排查：
+
+- 如果发现命中率下降，先检查 `memory_max_llm_calls_per_audit` 是否过小
+- 如果出现条款被跳过，检查 `memory_llm_guard_skipped_low_priority_calls` 指标
+- 如果想快速止损，直接在 Admin 关闭 `启用经验记忆审计`
+
 ### OCR 验证
 
 ```bash
@@ -216,6 +240,8 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 | POST | `/embedding/compute`           | 计算向量      |
 | GET  | `/api/admin/llm-config`        | 获取 LLM 配置 |
 | PUT  | `/api/admin/llm-config`        | 更新 LLM 配置 |
+| GET  | `/api/admin/memory-config`     | 获取记忆运行配置 |
+| PUT  | `/api/admin/memory-config`     | 更新记忆运行配置 |
 
 ## 配置说明
 
@@ -243,6 +269,14 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
         "max_tokens": 2048,
         "timeout": 60,
         "headers": {}
+    },
+    "memory_runtime_config": {
+        "memory_module_enabled": true,
+        "memory_mode_when_disabled": "classic",
+        "memory_disable_fallback_on_error": true,
+        "memory_token_guard_enabled": true,
+        "memory_max_llm_calls_per_audit": 12,
+        "memory_max_prompt_chars_per_clause": 2400
     },
     "reranker_enabled": true,
     "reranker_model_path": "../models/reranker/zh",
@@ -277,6 +311,12 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 | `ocr_engine`             | string  | OCR 引擎（auto/tesseract/其他） |
 | `ocr_engine_order`       | array   | OCR 引擎优先级                 |
 | `llm_config`             | object  | LLM 参数配置                  |
+| `memory_runtime_config`  | object  | 记忆模块运行时开关与预算配置            |
+| `memory_module_enabled`  | boolean | 是否启用经验记忆审计（关闭后走 classic）    |
+| `memory_mode_when_disabled` | string | 禁用记忆后的模式（当前支持 `classic`） |
+| `memory_token_guard_enabled` | boolean | 是否启用记忆调用预算守卫             |
+| `memory_max_llm_calls_per_audit` | int | 单次审计允许的记忆路径最大 LLM 调用次数 |
+| `memory_max_prompt_chars_per_clause` | int | 单条款 prompt 最大字符数上限    |
 | `reranker_enabled`       | boolean | 是否启用重排                    |
 | `reranker_model_path`    | string  | 默认重排模型路径                  |
 | `reranker_profiles`      | object  | 重排模型多语言路径                 |
