@@ -331,3 +331,11 @@ class TaxAuditIssueListResponse(BaseModel):
     language: str = "zh"
     total: int
     items: List[TaxAuditIssueItem]
+
+
+class TaxAuditPipelineRunResponse(BaseModel):
+    contract_id: str
+    analyze: TaxAuditContractAnalyzeResponse
+    match: TaxAuditMatchRunResponse
+    issues: TaxAuditIssueGenerateResponse
+    report: TaxAuditReportResponse

@@ -7,9 +7,15 @@ from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query, Body
 from fastapi.responses import FileResponse
-from app.api.dependencies import get_current_user
+from app.api.dependencies import (
+    get_current_user,
+    get_app_llm,
+    get_app_embedder,
+    get_app_reranker,
+    get_app_translator,
+)
 from app.services.crud import insert_document, insert_contract_audit, get_document_by_id_for_user, get_latest_contract_audit_by_document
-from app.services.contract_audit import audit_contract
+from app.services.audit_orchestrator import AuditServices, run_contract_pipeline_bundle
 from app.services.contract_preview_assets import build_contract_preview_manifest, find_preview_page
 from app.services.docx_renderer import render_tax_audit_docx
 from app.services.audit_utils import _normalize_lang
@@ -70,7 +76,30 @@ def _get_audit_progress(audit_id: str) -> Optional[Dict[str, Any]]:
         return _audit_progress.get(audit_id)
 
 
-def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
+def _build_retrieval_options(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "audit_mode": payload.get("audit_mode", "rag"),
+        "risk_detection_mode": payload.get("risk_detection_mode", "balanced"),
+        "region": payload.get("region", ""),
+        "date": payload.get("date", ""),
+        "industry": payload.get("industry", ""),
+        "tax_focus": payload.get("tax_focus", "true"),
+        "use_semantic": payload.get("use_semantic"),
+        "semantic_weight": payload.get("semantic_weight"),
+        "bm25_weight": payload.get("bm25_weight"),
+        "candidate_size": payload.get("candidate_size", "25"),
+        "rerank_enabled": payload.get("rerank_enabled"),
+        "rerank_top_n": payload.get("rerank_top_n", "25"),
+        "rerank_mode": payload.get("rerank_mode", "on"),
+        "top_k_evidence": payload.get("top_k_evidence"),
+        "query_char_limit": payload.get("query_char_limit"),
+        "contract_chunk_size": payload.get("contract_chunk_size"),
+        "contract_chunk_max": payload.get("contract_chunk_max", "5"),
+        "per_chunk_top_k": payload.get("per_chunk_top_k", "5"),
+    }
+
+
+def build_router(cfg):
     router = APIRouter()
 
     @router.post("/contracts/audit")
@@ -98,6 +127,10 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
         contract_chunk_max: Optional[str] = Form("5"),
         per_chunk_top_k: Optional[str] = Form("5"),
         current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+        embedder=Depends(get_app_embedder),
+        reranker=Depends(get_app_reranker),
+        translator=Depends(get_app_translator),
     ):
         language = _normalize_lang(language, default="zh")
         ext = os.path.splitext(file.filename)[1].lower()
@@ -156,7 +189,7 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
             audit_mode,
             risk_detection_mode
         )
-        retrieval_options = {
+        retrieval_options = _build_retrieval_options({
             "audit_mode": audit_mode,
             "risk_detection_mode": risk_detection_mode,
             "region": region,
@@ -175,20 +208,23 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
             "contract_chunk_size": contract_chunk_size,
             "contract_chunk_max": contract_chunk_max,
             "per_chunk_top_k": per_chunk_top_k,
-        }
+        })
 
         def _progress_cb(stage: str, percent: int, message: str = "") -> None:
             _set_audit_progress(audit_id, "running", percent, stage, message)
 
         try:
-            result = audit_contract(
-                cfg,
-                llm,
-                file_path=save_path,
-                lang=language,
+            services = AuditServices(
+                llm=llm,
                 embedder=embedder,
                 reranker=reranker,
                 translator=translator,
+            )
+            result = run_contract_pipeline_bundle(
+                cfg,
+                services,
+                file_path=save_path,
+                lang=language,
                 retrieval_options=retrieval_options,
                 progress_cb=_progress_cb
             )
@@ -239,8 +275,96 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
             "audit_id": audit_id,
             "document_id": doc_id,
             "result": result.get("audit"),
-            "meta": result.get("meta")
+            "meta": result.get("meta"),
+            "risk_summary": result.get("risk_summary"),
         }
+
+    @router.post("/contracts/{document_id}/pipeline/run")
+    def rerun_contract_pipeline(
+        document_id: str,
+        payload: Dict[str, Any] = Body(default={}),
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+        embedder=Depends(get_app_embedder),
+        reranker=Depends(get_app_reranker),
+        translator=Depends(get_app_translator),
+    ):
+        doc = get_document_by_id_for_user(cfg, document_id, current_user["id"])
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+        file_path = str(doc.get("file_path") or "")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=404, detail="document file not found")
+
+        language = _normalize_lang(
+            str((payload or {}).get("language") or "zh"), default="zh")
+        audit_id = str((payload or {}).get("audit_id")
+                       or "").strip() or str(uuid.uuid4())
+        _set_audit_progress(audit_id, "running", 5,
+                            "received", "pipeline rerun started")
+
+        model_cfg = cfg.get("llm_config") or {}
+        retrieval_options = _build_retrieval_options(payload or {})
+
+        def _progress_cb(stage: str, percent: int, message: str = "") -> None:
+            _set_audit_progress(audit_id, "running", percent, stage, message)
+
+        try:
+            services = AuditServices(
+                llm=llm,
+                embedder=embedder,
+                reranker=reranker,
+                translator=translator,
+            )
+            result = run_contract_pipeline_bundle(
+                cfg,
+                services,
+                file_path=file_path,
+                lang=language,
+                retrieval_options=retrieval_options,
+                progress_cb=_progress_cb,
+            )
+            insert_contract_audit(
+                cfg,
+                audit_id=audit_id,
+                document_id=document_id,
+                status="done",
+                result_json=json.dumps(result.get(
+                    "audit"), ensure_ascii=False),
+                model_provider=str(model_cfg.get("provider", "")),
+                model_name=str(model_cfg.get("model", "")),
+                created_at=datetime.utcnow().isoformat(),
+            )
+            _set_audit_progress(audit_id, "done", 100, "done", "completed")
+            return {
+                "audit_id": audit_id,
+                "document_id": document_id,
+                "result": result.get("audit"),
+                "meta": result.get("meta"),
+                "risk_summary": result.get("risk_summary"),
+            }
+        except Exception as e:
+            logger.exception(
+                "contract_pipeline_rerun_failed audit_id=%s document_id=%s file=%s",
+                audit_id,
+                document_id,
+                file_path,
+            )
+            detail = _build_audit_error_detail(e, language)
+            _set_audit_progress(audit_id, "failed", 100, "failed", detail)
+            insert_contract_audit(
+                cfg,
+                audit_id=audit_id,
+                document_id=document_id,
+                status="failed",
+                result_json=json.dumps(
+                    {"error": str(e), "detail": detail}, ensure_ascii=False),
+                model_provider=str(model_cfg.get("provider", "")),
+                model_name=str(model_cfg.get("model", "")),
+                created_at=datetime.utcnow().isoformat(),
+            )
+            raise HTTPException(status_code=500, detail=detail)
 
     @router.get("/contracts/audit/{audit_id}/progress")
     def get_contract_audit_progress(audit_id: str, current_user: dict = Depends(get_current_user)):
@@ -398,8 +522,7 @@ def build_router(cfg, llm, embedder=None, reranker=None, translator=None):
             audit.get("risks"), list) else []
         citations = audit.get("citations") if isinstance(
             audit.get("citations"), list) else []
-        citation_map = {str(c.get("citation_id") or "")
-                            : c for c in citations if isinstance(c, dict)}
+        citation_map = {str(c.get("citation_id") or "")                        : c for c in citations if isinstance(c, dict)}
         risk_summary = {"high": 0, "medium": 0, "low": 0}
         risk_items = []
         evidence_items = []

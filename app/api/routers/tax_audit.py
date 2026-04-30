@@ -4,7 +4,7 @@ import uuid
 import hashlib
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from fastapi.responses import FileResponse
-from app.api.dependencies import get_current_user
+from app.api.dependencies import get_current_user, get_app_llm, get_app_embedder
 from app.api.schemas import (
     TaxAuditRegulationImportResponse,
     TaxAuditRegulationParseResponse,
@@ -26,12 +26,11 @@ from app.api.schemas import (
     TaxAuditCleanupRunResponse,
     TaxAuditCleanupJobListResponse,
     TaxAuditArchiveRecordListResponse,
+    TaxAuditPipelineRunResponse,
 )
 from app.services.crud import (
     create_tax_regulation_document,
     create_tax_contract_document,
-    get_tax_contract_document,
-    list_contract_clauses,
     list_clause_rule_matches_by_contract,
     list_audit_trace_by_issue,
     list_audit_trace_by_contract,
@@ -40,10 +39,16 @@ from app.services.crud import (
     list_tax_archive_records,
 )
 from app.services.tax_parser import parse_regulation_document
-from app.services.tax_contract_parser import analyze_contract_document, detect_text_language
-from app.services.tax_matcher import match_contract_against_rules
-from app.services.tax_risk import generate_issues_from_matches, review_audit_issue
-from app.services.tax_report import build_tax_audit_report
+from app.services.tax_risk import review_audit_issue
+from app.services.audit_orchestrator import (
+    AuditServices,
+    tax_analyze_contract,
+    tax_match_contract,
+    tax_generate_issues,
+    tax_build_report,
+    resolve_tax_contract_language,
+    run_tax_pipeline_bundle,
+)
 from app.services.tax_lifecycle import run_tax_cleanup, retry_tax_cleanup
 from app.services.export_jobs import submit_tax_report_export_job, get_tax_report_export_job
 
@@ -93,16 +98,6 @@ async def _save_upload(cfg: dict, file: UploadFile, prefix: str):
         conn.commit()
 
     return file_id, save_path, len(content), ext, digest
-
-
-def _resolve_contract_language(cfg, contract_id: str) -> str:
-    contract = get_tax_contract_document(cfg, contract_id) or {}
-    clauses = list_contract_clauses(cfg, contract_id, limit=300)
-    source = "\n".join([str(x.get("clause_text") or "") for x in clauses])
-    if not source:
-        source = str(contract.get("original_filename") or "")
-    lang = detect_text_language(source, default="zh")
-    return "en" if lang == "en" else "zh"
 
 
 def build_router(cfg):
@@ -162,10 +157,16 @@ def build_router(cfg):
             raise HTTPException(status_code=400, detail=msg)
 
     @router.post("/tax-audit/contracts/{contract_id}/analyze", response_model=TaxAuditContractAnalyzeResponse)
-    def analyze_tax_contract(contract_id: str, current_user: dict = Depends(get_current_user)):
+    def analyze_tax_contract(
+        contract_id: str,
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+    ):
         try:
-            analyzed = analyze_contract_document(
+            services = AuditServices(llm=llm)
+            analyzed = tax_analyze_contract(
                 cfg,
+                services,
                 contract_id=contract_id,
                 operator_id=current_user["id"],
             )
@@ -179,15 +180,23 @@ def build_router(cfg):
     @router.get("/tax-audit/contracts/{contract_id}/clauses", response_model=TaxAuditClauseListResponse)
     def list_tax_contract_clauses(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
+        from app.services.crud import list_contract_clauses
         items = list_contract_clauses(cfg, contract_id)
-        language = _resolve_contract_language(cfg, contract_id)
+        language = resolve_tax_contract_language(cfg, contract_id=contract_id)
         return TaxAuditClauseListResponse(contract_id=contract_id, language=language, total=len(items), items=items)
 
     @router.post("/tax-audit/contracts/{contract_id}/match", response_model=TaxAuditMatchRunResponse)
-    def run_tax_contract_match(contract_id: str, current_user: dict = Depends(get_current_user)):
+    def run_tax_contract_match(
+        contract_id: str,
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+        embedder=Depends(get_app_embedder),
+    ):
         try:
-            result = match_contract_against_rules(
+            services = AuditServices(llm=llm, embedder=embedder)
+            result = tax_match_contract(
                 cfg,
+                services,
                 contract_id=contract_id,
                 operator_id=current_user["id"],
             )
@@ -202,14 +211,19 @@ def build_router(cfg):
     def list_tax_contract_matches(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         items = list_clause_rule_matches_by_contract(cfg, contract_id)
-        language = _resolve_contract_language(cfg, contract_id)
+        language = resolve_tax_contract_language(cfg, contract_id=contract_id)
         return TaxAuditMatchListResponse(contract_id=contract_id, language=language, total=len(items), items=items)
 
     @router.post("/tax-audit/contracts/{contract_id}/issues/generate", response_model=TaxAuditIssueGenerateResponse)
-    def generate_tax_audit_issues(contract_id: str, current_user: dict = Depends(get_current_user)):
+    def generate_tax_audit_issues(
+        contract_id: str,
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+    ):
         try:
-            result = generate_issues_from_matches(
-                cfg, contract_id, operator_id=current_user["id"])
+            services = AuditServices(llm=llm)
+            result = tax_generate_issues(
+                cfg, services, contract_id=contract_id, operator_id=current_user["id"])
             return TaxAuditIssueGenerateResponse(**result)
         except ValueError as e:
             msg = str(e)
@@ -221,13 +235,35 @@ def build_router(cfg):
     def list_tax_contract_issues(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         items = list_tax_audit_issues_by_contract(cfg, contract_id)
-        language = _resolve_contract_language(cfg, contract_id)
+        language = resolve_tax_contract_language(cfg, contract_id=contract_id)
         return TaxAuditIssueListResponse(
             contract_id=contract_id,
             language=language,
             total=len(items),
             items=items,
         )
+
+    @router.post("/tax-audit/contracts/{contract_id}/pipeline/run", response_model=TaxAuditPipelineRunResponse)
+    def run_tax_pipeline(
+        contract_id: str,
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+        embedder=Depends(get_app_embedder),
+    ):
+        try:
+            services = AuditServices(llm=llm, embedder=embedder)
+            result = run_tax_pipeline_bundle(
+                cfg,
+                services,
+                contract_id=contract_id,
+                operator_id=current_user["id"],
+            )
+            return TaxAuditPipelineRunResponse(**result)
+        except ValueError as e:
+            msg = str(e)
+            if "not found" in msg:
+                raise HTTPException(status_code=404, detail=msg)
+            raise HTTPException(status_code=400, detail=msg)
 
     @router.post("/tax-audit/issues/{issue_id}/review", response_model=TaxAuditIssueReviewResponse)
     def review_tax_issue(issue_id: str, payload: TaxAuditIssueReviewRequest, current_user: dict = Depends(get_current_user)):
@@ -263,7 +299,7 @@ def build_router(cfg):
     def get_tax_contract_report(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         try:
-            report = build_tax_audit_report(cfg, contract_id)
+            report = tax_build_report(cfg, contract_id=contract_id)
             return TaxAuditReportResponse(**report)
         except ValueError as e:
             msg = str(e)
@@ -275,7 +311,7 @@ def build_router(cfg):
     def generate_tax_contract_report(contract_id: str, current_user: dict = Depends(get_current_user)):
         _ = current_user
         try:
-            report = build_tax_audit_report(cfg, contract_id)
+            report = tax_build_report(cfg, contract_id=contract_id)
             return TaxAuditReportResponse(**report)
         except ValueError as e:
             msg = str(e)
