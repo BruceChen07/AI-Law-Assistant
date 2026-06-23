@@ -37,7 +37,7 @@
 
 ### 3.2 外部模型与部署依据
 - 端侧主模型优先候选：`Qwen3.6-27B`、`Mistral Small 3.2 24B`。
-- 端侧轻量侧车模型优先候选：`Granite 4.1-3B`、`Llama 3.2-3B`。
+- 端侧轻量侧车模型优先候选：`Llama 3.2-3B`。
 - 纯 CPU 部署优先使用 `GGUF + llama.cpp server`，原因是：
   - 对 CPU 量化推理最成熟。
   - 原生提供 OpenAI-compatible API。
@@ -95,7 +95,7 @@ Persistence / API Response / Trace
   - 推荐：`Qwen3.6-27B Q4_K_M`
   - 部署方式：`llama.cpp server`
 - 本地推理服务 2：轻量模型服务
-  - 推荐：`Granite 4.1-3B` 或 `Llama 3.2-3B`
+  - 推荐：`Llama 3.2-3B`
   - 部署方式：`llama.cpp server` 或 `Ollama`
 - 应用服务：
   - 复用现有 FastAPI。
@@ -116,7 +116,7 @@ Persistence / API Response / Trace
 | 角色 | 模型 | 负责任务 | 设计原因 |
 |---|---|---|---|
 | 主审计模型 | `Qwen3.6-27B` 或 `Mistral Small 3.2 24B` | 合同审计、复杂税规判断、最终风险生成 | 推理、长上下文、结构化输出能力更强 |
-| 轻量侧车模型 | `Granite 4.1-3B` 或 `Llama 3.2-3B` | 实体抽取、条款预分类、简单三态分类、低风险解释 | 降低主模型负载，提高整体吞吐 |
+| 轻量侧车模型 | `Llama 3.2-3B` | 实体抽取、条款预分类、简单三态分类、低风险解释 | 降低主模型负载，提高整体吞吐 |
 | 云端兜底模型 | 保留现有云端兼容模型 | 高风险复核、超时重试、异常 JSON 修复 | 避免极端场景精度塌陷 |
 
 ### 6.2 路由规则
@@ -178,7 +178,7 @@ Persistence / API Response / Trace
     "small_model": {
       "provider": "openai_compatible",
       "api_base": "http://127.0.0.1:8012/v1",
-      "model": "granite-4.1-3b-q4"
+      "model": "llama-3.2-3b-q4"
     },
     "routing": {
       "tax_match_use_small_model": true,
@@ -298,7 +298,7 @@ LLM raw output
 
 #### 轻量模型服务
 - 框架：`llama.cpp server` 或 `Ollama`
-- 模型：`Granite 4.1-3B GGUF Q4_K_M`
+- 模型：`Llama 3.2-3B GGUF Q4_K_M`
 - 端口：`8012`
 - 作用：抽取、预判、轻量匹配
 

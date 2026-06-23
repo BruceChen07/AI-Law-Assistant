@@ -256,7 +256,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
         "timeout": 60
     },
     "small_model": {
-        "model": "granite-4.1-3b-q4_k_m",
+        "model": "llama-3.2-3b-q4_k_m",
         "api_base": "http://127.0.0.1:8082/v1",
         "max_tokens": 400,
         "timeout": 30
@@ -306,7 +306,7 @@ python -m app.main
 | 角色 | 推荐模型 | 量化 | 硬件要求 |
 |------|---------|------|---------|
 | 主审计模型 | Qwen3.6-27B | Q4_K_M | 64-128 GB RAM, 16-24 物理核 |
-| 侧车模型 | Granite 4.1-3B | Q4_K_M | 8-16 GB RAM, 8 物理核 |
+| 侧车模型 | Llama 3.2-3B | Q4_K_M | 8-12 GB RAM, 4-8 物理核 |
 | 云端兜底 | GPT-4o-mini | - | 网络连接 |
 
 **回归测试**：

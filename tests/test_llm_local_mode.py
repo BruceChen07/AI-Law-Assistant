@@ -7,7 +7,8 @@ from app.core.llm import LLMService
 
 class _FakeResponse:
     def __init__(self, content: str):
-        self.choices = [SimpleNamespace(message=SimpleNamespace(content=content))]
+        self.choices = [SimpleNamespace(
+            message=SimpleNamespace(content=content))]
 
     def model_dump(self):
         return {
@@ -48,7 +49,7 @@ class LLMLocalModeTests(unittest.TestCase):
                     "provider": "openai_compatible",
                     "api_base": "http://127.0.0.1:8012/v1",
                     "api_key": "",
-                    "model": "granite-4.1-3b-q4",
+                    "model": "llama-3.2-3b-q4",
                     "timeout": 20,
                     "headers": {},
                 },
@@ -76,7 +77,7 @@ class LLMLocalModeTests(unittest.TestCase):
                 )
 
         self.assertEqual(content, '{"ok": true}')
-        self.assertEqual(captured["model"], "granite-4.1-3b-q4")
+        self.assertEqual(captured["model"], "llama-3.2-3b-q4")
         self.assertEqual(raw["_route"]["selected_role"], "small")
         self.assertEqual(raw["_route"]["task_profile"], "tax_match_small")
 

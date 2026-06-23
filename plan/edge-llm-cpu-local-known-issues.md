@@ -68,7 +68,7 @@ The current implementation has not yet completed:
 - Description:
   The regression script uses placeholder model names:
   - `qwen3.6-27b-q4`
-  - `granite-4.1-3b-q4`
+  - `llama-3.2-3b-q4`
 - Impact:
   If the actual deployed server registers a different model name, smoke validation may fail even when the endpoint is healthy.
 - Suggested Action:

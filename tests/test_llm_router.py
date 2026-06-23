@@ -28,7 +28,7 @@ class LLMRouterTests(unittest.TestCase):
                 },
                 "small_model": {
                     "api_base": "http://127.0.0.1:8012/v1",
-                    "model": "granite-4.1-3b-q4",
+                    "model": "llama-3.2-3b-q4",
                     "headers": {"X-Model": "small"},
                 },
                 "routing": {
@@ -48,7 +48,7 @@ class LLMRouterTests(unittest.TestCase):
 
     def test_small_task_routes_to_small_model(self):
         cfg, meta = resolve_llm_route(self.cfg, task_profile="tax_match_small")
-        self.assertEqual(cfg["model"], "granite-4.1-3b-q4")
+        self.assertEqual(cfg["model"], "llama-3.2-3b-q4")
         self.assertEqual(cfg["headers"]["X-Base"], "base")
         self.assertEqual(cfg["headers"]["X-Model"], "small")
         self.assertEqual(meta["selected_role"], "small")

@@ -96,7 +96,7 @@
             "provider": "openai_compatible",
             "api_base": "http://127.0.0.1:8012/v1",
             "api_key": "",
-            "model": "granite-4.1-3b-q4",
+            "model": "llama-3.2-3b-q4",
             "temperature": 0.1,
             "max_tokens": 1024,
             "timeout": 20,

@@ -67,7 +67,7 @@ if ($IncludeLocalSmoke) {
   }
 
   try {
-    $null = Test-ChatCompletionEndpoint -ApiBase $LocalSmallApiBase -Model "granite-4.1-3b-q4"
+    $null = Test-ChatCompletionEndpoint -ApiBase $LocalSmallApiBase -Model "llama-3.2-3b-q4"
     $smokeSmallStatus = "passed"
   } catch {
     $smokeSmallStatus = "failed"

@@ -24,7 +24,7 @@ This document is the phase 4 delivery runbook. It does not claim that the target
 Recommended model mapping:
 
 - Main model: `qwen3.6-27b-q4`
-- Small model: `granite-4.1-3b-q4`
+- Small model: `llama-3.2-3b-q4`
 - Cloud fallback: `gpt-4o-mini` or compatible OpenAI-style provider
 
 ## 3. Prerequisites
@@ -84,7 +84,7 @@ Key settings in `app/config.json`:
     "small_model": {
       "provider": "openai_compatible",
       "api_base": "http://127.0.0.1:8012/v1",
-      "model": "granite-4.1-3b-q4"
+      "model": "llama-3.2-3b-q4"
     }
   }
 }
@@ -116,7 +116,7 @@ llama-server.exe `
 ```powershell
 # Small model example
 llama-server.exe `
-  -m D:\models\granite-4.1-3b-q4.gguf `
+  -m D:\models\llama-3.2-3b-q4.gguf `
   --host 127.0.0.1 `
   --port 8012 `
   -c 4096 `
