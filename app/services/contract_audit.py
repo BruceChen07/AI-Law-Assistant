@@ -32,6 +32,14 @@ def _attach_risk_locations(audit, clauses):
     return attach_risk_locations(audit, clauses)
 
 
+def _chat_with_task_profile(llm, messages, task_profile: str, overrides=None):
+    if hasattr(llm, "chat_with_profile"):
+        return llm.chat_with_profile(messages, task_profile, overrides=overrides)
+    next_overrides = dict(overrides or {})
+    next_overrides["_task_profile"] = task_profile
+    return llm.chat(messages, overrides=next_overrides)
+
+
 def _get_memory_embedder(lang: str = "zh", cfg: Optional[Dict[str, Any]] = None):
     getter = getattr(memory_pipeline_module, "get_memory_embedder", None)
     if not callable(getter):
@@ -154,9 +162,11 @@ def _build_classic_audit(
         "lang": norm_lang,
         "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
     }
-    result_text, _raw = llm.chat(
+    result_text, _raw = _chat_with_task_profile(
+        llm,
         [{"role": "system", "content": system},
-            {"role": "user", "content": user}],
+         {"role": "user", "content": user}],
+        "contract_audit_main",
         overrides={"max_tokens": 900, "enable_thinking": False, "reasoning_effort": "low",
                    "thinking_budget_tokens": 0, "_trace_meta": trace_meta},
     )
@@ -425,9 +435,11 @@ def audit_contract(
                 custom_embedder = _get_memory_embedder()
         if (custom_embedder is not None and hasattr(custom_embedder, "encode")) or HybridSearcher is not None:
             runtime_getter = (lambda _lang="zh", cfg=None: custom_embedder) if (
-                custom_embedder is not None and hasattr(custom_embedder, "encode")
+                custom_embedder is not None and hasattr(
+                    custom_embedder, "encode")
             ) else None
-            setter = getattr(memory_pipeline_module, "set_runtime_overrides", None)
+            setter = getattr(memory_pipeline_module,
+                             "set_runtime_overrides", None)
             if callable(setter):
                 setter(
                     get_memory_embedder=runtime_getter,

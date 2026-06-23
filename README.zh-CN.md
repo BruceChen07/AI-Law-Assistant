@@ -240,6 +240,86 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 }
 ```
 
+### 端侧大模型 CPU 本地部署（Phase 0-4）
+
+系统已支持在纯 CPU 环境下接入本地大模型，通过 OpenAI-compatible 接口进行推理，无需云端 API。
+
+**本地模型配置示例**（`app/config.json` 中新增 `local_llm` 字段）：
+
+```json
+"local_llm": {
+    "routing_enabled": true,
+    "main_model": {
+        "model": "qwen3.6-27b-q4_k_m",
+        "api_base": "http://127.0.0.1:8081/v1",
+        "max_tokens": 900,
+        "timeout": 60
+    },
+    "small_model": {
+        "model": "granite-4.1-3b-q4_k_m",
+        "api_base": "http://127.0.0.1:8082/v1",
+        "max_tokens": 400,
+        "timeout": 30
+    },
+    "cloud_fallback": {
+        "model": "gpt-4o-mini",
+        "api_base": "https://api.openai.com/v1",
+        "timeout": 45
+    },
+    "routing": {
+        "task_profiles": {
+            "contract_audit_main": "main",
+            "contract_clause_audit": "main",
+            "tax_risk_main": "main",
+            "memory_flush": "small",
+            "entity_extract_small": "small",
+            "tax_match_small": "small"
+        }
+    },
+    "execution": {
+        "fallback_on_error": true,
+        "fallback_on_invalid_json": true,
+        "tax_match_cloud_review_labels": ["non_compliant"],
+        "tax_match_min_confidence": 0.7,
+        "tax_match_max_workers": 2,
+        "tax_risk_max_workers": 2
+    }
+}
+```
+
+**核心能力**：
+- **任务画像路由**：合同审计主流程走 `main` 模型，实体抽取与规则匹配走 `small` 模型
+- **失败回退**：本地模型异常或返回坏 JSON 时自动回退 `cloud_fallback`
+- **高风险复核**：`non_compliant` 税务匹配项可强制升级云端复核
+- **JSON 容错**：自动修复 fenced JSON / 尾逗号 / 包裹文本等本地模型常见脏输出
+- **并发约束**：本地模式可独立限制 worker 上限，避免 CPU 过载
+
+**启动方式**：
+```bash
+# 1) 启动本地主模型服务（需先部署 llama.cpp 或 Ollama）
+# 2) 编辑 app/config.json，填入 local_llm 配置
+# 3) 启动系统
+python -m app.main
+```
+
+**推荐模型选型**：
+| 角色 | 推荐模型 | 量化 | 硬件要求 |
+|------|---------|------|---------|
+| 主审计模型 | Qwen3.6-27B | Q4_K_M | 64-128 GB RAM, 16-24 物理核 |
+| 侧车模型 | Granite 4.1-3B | Q4_K_M | 8-16 GB RAM, 8 物理核 |
+| 云端兜底 | GPT-4o-mini | - | 网络连接 |
+
+**回归测试**：
+```powershell
+.\bin\run-edge-llm-regression.ps1            # 核心回归（53 项）
+.\bin\run-edge-llm-regression.ps1 -IncludeLocalSmoke  # 含本地模型 smoke
+```
+
+详细文档：
+- `plan/edge-llm-cpu-local-deployment-detailed-design.md` — 详细设计文档
+- `plan/edge-llm-cpu-local-deployment-runbook.md` — 部署与联调手册
+- `plan/edge-llm-cpu-local-known-issues.md` — 已知问题清单
+
 ### API 接口
 
 | 方法   | 路径                             | 描述        |

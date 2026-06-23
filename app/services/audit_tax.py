@@ -7,6 +7,10 @@ from app.services.audit_utils import (
 )
 
 
+def _is_tax_related_text(value):
+    return is_tax_related_text(value)
+
+
 def _tax_relevance_score(item: Dict[str, Any]) -> int:
     text = " ".join([
         str(item.get("title", "") or ""),

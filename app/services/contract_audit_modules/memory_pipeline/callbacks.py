@@ -19,6 +19,7 @@ from app.memory_system.experience_repo import (
     recall_failure_patterns,
     recall_similar_audit_memories,
 )
+from app.services.local_llm_runtime import call_with_fallback, get_execution_flag
 
 logger = structlog.get_logger(__name__)
 
@@ -77,6 +78,18 @@ def _dedupe_long_memory_hits(text: str, max_blocks: int, max_chars: int) -> str:
     return out
 
 
+def _is_valid_clause_result(raw_text: str) -> bool:
+    try:
+        parsed = load_llm_json_object(raw_text)
+    except Exception:
+        return False
+    return isinstance(parsed, dict)
+
+
+def _is_valid_flush_result(raw_text: str) -> bool:
+    return bool(str(raw_text or "").strip())
+
+
 def create_memory_callbacks(
     *,
     cfg: Dict[str, Any],
@@ -101,12 +114,14 @@ def create_memory_callbacks(
     round_runtime: Dict[str, Any],
     write_round: Callable[[str, Dict[str, Any], int], None],
 ) -> Tuple[Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]], Callable[[str], Awaitable[str]]]:
-    risk_detection_mode = str(retrieval_opts.get("risk_detection_mode", "relaxed"))
+    risk_detection_mode = str(retrieval_opts.get(
+        "risk_detection_mode", "relaxed"))
 
     async def _clause_cb(payload: Dict[str, Any]) -> Dict[str, Any]:
         clause = payload.get("clause") or {}
         short_memory_full = str(payload.get("short_memory") or "")
-        long_memory_hits_full = str(payload.get("long_memory_hits") or "").strip()
+        long_memory_hits_full = str(
+            payload.get("long_memory_hits") or "").strip()
         clause_text = str(clause.get("text") or "")
         clause_title = str(clause.get("title") or "")
         case_top_k = max(1, min(int(cfg.get("memory_case_top_k") or 3), 5))
@@ -114,7 +129,8 @@ def create_memory_callbacks(
             cfg=cfg,
             query_text=f"{clause_title}\n{clause_text[:360]}",
             top_k=case_top_k,
-            regulation_pack_id=str(base_trace_meta.get("regulation_pack_id") or ""),
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
             clause_category=str(clause.get("clause_path") or ""),
             jurisdiction=str(retrieval_opts.get("region") or ""),
             industry=str(retrieval_opts.get("industry") or ""),
@@ -123,14 +139,17 @@ def create_memory_callbacks(
         case_memories = rerank_memory_candidates(
             case_memories,
             query_text=f"{clause_title}\n{clause_text[:360]}",
-            regulation_pack_id=str(base_trace_meta.get("regulation_pack_id") or ""),
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
         )
-        failure_top_k = max(1, min(int(cfg.get("memory_failure_top_k") or 3), 3))
+        failure_top_k = max(
+            1, min(int(cfg.get("memory_failure_top_k") or 3), 3))
         failure_patterns = recall_failure_patterns(
             cfg=cfg,
             query_text=f"{clause_title}\n{clause_text[:360]}",
             top_k=failure_top_k,
-            regulation_pack_id=str(base_trace_meta.get("regulation_pack_id") or ""),
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
             clause_category=str(clause.get("clause_path") or ""),
             jurisdiction=str(retrieval_opts.get("region") or ""),
             industry=str(retrieval_opts.get("industry") or ""),
@@ -139,11 +158,14 @@ def create_memory_callbacks(
         failure_patterns = rerank_memory_candidates(
             failure_patterns,
             query_text=f"{clause_title}\n{clause_text[:360]}",
-            regulation_pack_id=str(base_trace_meta.get("regulation_pack_id") or ""),
+            regulation_pack_id=str(
+                base_trace_meta.get("regulation_pack_id") or ""),
         )
-        recall_total_budget_chars = max(500, int(cfg.get("memory_recall_budget_chars") or 1200))
+        recall_total_budget_chars = max(
+            500, int(cfg.get("memory_recall_budget_chars") or 1200))
         case_budget_chars = int(recall_total_budget_chars * 0.6)
-        failure_budget_chars = max(160, recall_total_budget_chars - case_budget_chars)
+        failure_budget_chars = max(
+            160, recall_total_budget_chars - case_budget_chars)
         case_memories = apply_context_budget(
             case_memories,
             max_items=max(1, min(int(cfg.get("memory_case_top_k") or 3), 5)),
@@ -151,16 +173,23 @@ def create_memory_callbacks(
         )
         failure_patterns = apply_context_budget(
             failure_patterns,
-            max_items=max(1, min(int(cfg.get("memory_failure_top_k") or 3), 3)),
+            max_items=max(
+                1, min(int(cfg.get("memory_failure_top_k") or 3), 3)),
             max_chars=failure_budget_chars,
         )
         case_memory_block = format_case_memories(case_memories, norm_lang)
-        failure_patterns_block = format_failure_patterns(failure_patterns, norm_lang)
-        short_prompt_max_chars = int(cfg.get("memory_prompt_short_max_chars") or (900 if is_relaxed else 760))
-        long_prompt_max_chars = int(cfg.get("memory_prompt_long_max_chars") or (700 if is_relaxed else 560))
-        long_prompt_max_blocks = int(cfg.get("memory_prompt_long_max_blocks") or 2)
-        short_memory = _tail_by_chars(short_memory_full, short_prompt_max_chars)
-        long_memory_hits = _dedupe_long_memory_hits(long_memory_hits_full, long_prompt_max_blocks, long_prompt_max_chars)
+        failure_patterns_block = format_failure_patterns(
+            failure_patterns, norm_lang)
+        short_prompt_max_chars = int(
+            cfg.get("memory_prompt_short_max_chars") or (900 if is_relaxed else 760))
+        long_prompt_max_chars = int(
+            cfg.get("memory_prompt_long_max_chars") or (700 if is_relaxed else 560))
+        long_prompt_max_blocks = int(
+            cfg.get("memory_prompt_long_max_blocks") or 2)
+        short_memory = _tail_by_chars(
+            short_memory_full, short_prompt_max_chars)
+        long_memory_hits = _dedupe_long_memory_hits(
+            long_memory_hits_full, long_prompt_max_blocks, long_prompt_max_chars)
 
         long_memory_block = ""
         if memory_use_long_hits and long_memory_hits:
@@ -244,20 +273,26 @@ def create_memory_callbacks(
             int(payload.get("round") or 0),
         )
         current_clause_id = str(clause.get("clause_id") or "").strip()
-        current_order = int(preview_order_map.get(current_clause_id) or int(payload.get("round") or 0) or 0)
+        current_order = int(preview_order_map.get(
+            current_clause_id) or int(payload.get("round") or 0) or 0)
         current_priority_score = clause_priority_score(
             current_clause_id,
             clause_title,
             clause_text,
             str(clause.get("clause_path") or ""),
         )
-        is_high_priority_clause = bool(current_clause_id in preview_priority_clause_ids or current_priority_score > 0)
-        remaining_calls = int(llm_budget.get("limit") or 0) - int(llm_budget.get("calls") or 0)
-        unseen_high_priority_calls = sum(1 for o in preview_priority_orders if int(o or 0) > current_order)
+        is_high_priority_clause = bool(
+            current_clause_id in preview_priority_clause_ids or current_priority_score > 0)
+        remaining_calls = int(llm_budget.get("limit") or 0) - \
+            int(llm_budget.get("calls") or 0)
+        unseen_high_priority_calls = sum(
+            1 for o in preview_priority_orders if int(o or 0) > current_order)
         if (not is_high_priority_clause) and unseen_high_priority_calls > 0 and remaining_calls <= unseen_high_priority_calls:
             llm_budget["guard_hit"] = True
-            llm_budget["skipped_clause_calls"] = int(llm_budget.get("skipped_clause_calls") or 0) + 1
-            llm_budget["skipped_low_priority_calls"] = int(llm_budget.get("skipped_low_priority_calls") or 0) + 1
+            llm_budget["skipped_clause_calls"] = int(
+                llm_budget.get("skipped_clause_calls") or 0) + 1
+            llm_budget["skipped_low_priority_calls"] = int(
+                llm_budget.get("skipped_low_priority_calls") or 0) + 1
             write_audit_trace(
                 cfg,
                 "clause_round_result",
@@ -287,7 +322,8 @@ def create_memory_callbacks(
             return {"summary": "", "risks": []}
         if int(llm_budget.get("calls") or 0) >= int(llm_budget.get("limit") or 1):
             llm_budget["guard_hit"] = True
-            llm_budget["skipped_clause_calls"] = int(llm_budget.get("skipped_clause_calls") or 0) + 1
+            llm_budget["skipped_clause_calls"] = int(
+                llm_budget.get("skipped_clause_calls") or 0) + 1
             write_audit_trace(
                 cfg,
                 "clause_round_result",
@@ -313,15 +349,29 @@ def create_memory_callbacks(
             return {"summary": "", "risks": []}
         llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
         if is_high_priority_clause:
-            llm_budget["called_high_priority_clauses"] = int(llm_budget.get("called_high_priority_clauses") or 0) + 1
+            llm_budget["called_high_priority_clauses"] = int(
+                llm_budget.get("called_high_priority_clauses") or 0) + 1
         try:
-            result_text, llm_raw = llm.chat(
-                [{"role": "system", "content": system}, {"role": "user", "content": user}],
-                overrides={"max_tokens": 600, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": clause_trace_meta},
+            force_cloud = bool(
+                is_high_priority_clause
+                and get_execution_flag(
+                    cfg, "memory_clause_force_cloud_for_priority", False)
+            )
+            result_text, llm_raw, fallback_meta = call_with_fallback(
+                llm,
+                cfg,
+                [{"role": "system", "content": system},
+                 {"role": "user", "content": user}],
+                "contract_clause_audit",
+                overrides={"max_tokens": 600, "enable_thinking": False, "reasoning_effort": "low",
+                           "thinking_budget_tokens": 0, "_trace_meta": clause_trace_meta},
+                validator=lambda text, _raw: _is_valid_clause_result(text),
+                force_cloud=force_cloud,
             )
         except Exception as e:
             clause_parse_state["count"] += 1
-            clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+            clause_parse_state["clause_ids"].append(
+                str(clause.get("clause_id") or ""))
             write_audit_trace(
                 cfg,
                 "clause_round_result",
@@ -332,17 +382,22 @@ def create_memory_callbacks(
                     "error": str(e),
                     "raw_len": 0,
                     "llm_response": "",
+                    "fallback_used": False,
                     "token_usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
                 },
                 memory_dir=memory_dir,
             )
-            logger.warning("memory_clause_call_failed", round=payload.get("round"), clause_id=str(clause.get("clause_id") or ""), error=str(e))
-            write_round("clause_llm_error", {"clause_id": str(clause.get("clause_id") or ""), "error": str(e)})
+            logger.warning("memory_clause_call_failed", round=payload.get(
+                "round"), clause_id=str(clause.get("clause_id") or ""), error=str(e))
+            write_round("clause_llm_error", {"clause_id": str(
+                clause.get("clause_id") or ""), "error": str(e)})
             return {"summary": "", "risks": []}
-        usage = llm_raw.get("usage") if isinstance(llm_raw.get("usage"), dict) else {}
+        usage = llm_raw.get("usage") if isinstance(
+            llm_raw.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
         completion_tokens = int(usage.get("completion_tokens") or 0)
-        total_tokens = int(usage.get("total_tokens") or (prompt_tokens + completion_tokens))
+        total_tokens = int(usage.get("total_tokens") or (
+            prompt_tokens + completion_tokens))
         segment_est_tokens = {
             "short_memory": _estimate_text_tokens(short_memory),
             "long_memory_hits": _estimate_text_tokens(long_memory_hits),
@@ -358,11 +413,14 @@ def create_memory_callbacks(
                 + _estimate_text_tokens(clause_text)
             ),
         }
-        segment_est_tokens["instruction_scaffold"] = max(0, int(segment_est_tokens["instruction_scaffold"] or 0))
-        prompt_est_total = sum(int(v or 0) for v in segment_est_tokens.values())
+        segment_est_tokens["instruction_scaffold"] = max(
+            0, int(segment_est_tokens["instruction_scaffold"] or 0))
+        prompt_est_total = sum(int(v or 0)
+                               for v in segment_est_tokens.values())
         token_share_analysis = {
             "prompt_side": {
-                k: {"est_tokens": int(v or 0), "ratio_in_prompt_tokens": _safe_ratio(int(v or 0), prompt_tokens)}
+                k: {"est_tokens": int(v or 0), "ratio_in_prompt_tokens": _safe_ratio(
+                    int(v or 0), prompt_tokens)}
                 for k, v in segment_est_tokens.items()
             },
             "overall": {
@@ -376,7 +434,8 @@ def create_memory_callbacks(
             parsed = load_llm_json_object(result_text)
             if not isinstance(parsed, dict):
                 clause_parse_state["count"] += 1
-                clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+                clause_parse_state["clause_ids"].append(
+                    str(clause.get("clause_id") or ""))
                 write_audit_trace(
                     cfg,
                     "clause_round_result",
@@ -386,12 +445,16 @@ def create_memory_callbacks(
                         "reason": "non_dict_json",
                         "raw_len": len(str(result_text or "")),
                         "llm_response": str(result_text or ""),
+                        "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+                        "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
+                        "final_model_role": str(fallback_meta.get("final_model_role", "")),
                         "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                         "token_share_analysis": token_share_analysis,
                     },
                     memory_dir=memory_dir,
                 )
-                logger.warning("memory_clause_parse_failed", round=payload.get("round"), clause_id=str(clause.get("clause_id") or ""), reason="non_dict_json")
+                logger.warning("memory_clause_parse_failed", round=payload.get(
+                    "round"), clause_id=str(clause.get("clause_id") or ""), reason="non_dict_json")
                 write_round(
                     "clause_result_non_dict",
                     {
@@ -401,7 +464,8 @@ def create_memory_callbacks(
                     },
                 )
                 return {"summary": "", "risks": []}
-            risks_out = parsed.get("risks") if isinstance(parsed.get("risks"), list) else []
+            risks_out = parsed.get("risks") if isinstance(
+                parsed.get("risks"), list) else []
             for r in risks_out:
                 if not isinstance(r, dict):
                     continue
@@ -418,6 +482,9 @@ def create_memory_callbacks(
                     "summary_len": len(str(parsed.get("summary") or "")),
                     "risk_count": len(risks_out),
                     "llm_response": str(result_text or ""),
+                    "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+                    "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
+                    "final_model_role": str(fallback_meta.get("final_model_role", "")),
                     "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                     "token_share_analysis": token_share_analysis,
                 },
@@ -429,6 +496,8 @@ def create_memory_callbacks(
                     "clause_id": str(clause.get("clause_id") or ""),
                     "summary": str(parsed.get("summary") or ""),
                     "risks": risks_out,
+                    "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+                    "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
                     "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                     "llm_response": str(result_text or ""),
                 },
@@ -436,7 +505,8 @@ def create_memory_callbacks(
             return parsed
         except Exception as e:
             clause_parse_state["count"] += 1
-            clause_parse_state["clause_ids"].append(str(clause.get("clause_id") or ""))
+            clause_parse_state["clause_ids"].append(
+                str(clause.get("clause_id") or ""))
             write_audit_trace(
                 cfg,
                 "clause_round_result",
@@ -446,6 +516,9 @@ def create_memory_callbacks(
                     "reason": "json_decode_error",
                     "error": str(e),
                     "llm_response": str(result_text or ""),
+                    "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+                    "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
+                    "final_model_role": str(fallback_meta.get("final_model_role", "")),
                     "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                     "token_share_analysis": token_share_analysis,
                 },
@@ -464,6 +537,8 @@ def create_memory_callbacks(
                 {
                     "clause_id": str(clause.get("clause_id") or ""),
                     "error": str(e),
+                    "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+                    "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
                     "llm_response": str(result_text or ""),
                     "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                 },
@@ -485,17 +560,20 @@ def create_memory_callbacks(
         write_audit_trace(
             cfg,
             "memory_flush_prompt",
-            {**flush_trace_meta, "prompt_len": len(prompt), "prompt_preview": trace_clip(prompt, 260)},
+            {**flush_trace_meta,
+                "prompt_len": len(prompt), "prompt_preview": trace_clip(prompt, 260)},
             memory_dir=memory_dir,
         )
         write_round(
             "flush_prompt",
-            {"clause_id": str(round_runtime.get("clause_id") or ""), "prompt": prompt, "llm_system": "你是记忆压缩助手。", "llm_user": content},
+            {"clause_id": str(round_runtime.get("clause_id") or ""),
+             "prompt": prompt, "llm_system": "你是记忆压缩助手。", "llm_user": content},
             flush_round,
         )
         if int(llm_budget.get("calls") or 0) >= int(llm_budget.get("limit") or 1):
             llm_budget["guard_hit"] = True
-            llm_budget["skipped_flush_calls"] = int(llm_budget.get("skipped_flush_calls") or 0) + 1
+            llm_budget["skipped_flush_calls"] = int(
+                llm_budget.get("skipped_flush_calls") or 0) + 1
             out = str(prompt or "")[:220]
             write_audit_trace(
                 cfg,
@@ -510,21 +588,61 @@ def create_memory_callbacks(
                 },
                 memory_dir=memory_dir,
             )
-            write_round("flush_budget_skipped", {"clause_id": str(round_runtime.get("clause_id") or ""), "result": out}, flush_round)
+            write_round("flush_budget_skipped", {"clause_id": str(
+                round_runtime.get("clause_id") or ""), "result": out}, flush_round)
             return out
         llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
-        result_text, _ = llm.chat(
-            [{"role": "system", "content": "你是记忆压缩助手。"}, {"role": "user", "content": content}],
-            overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low", "thinking_budget_tokens": 0, "_trace_meta": flush_trace_meta},
-        )
-        out = str(result_text or "").strip()
+        force_cloud = get_execution_flag(
+            cfg, "memory_flush_force_cloud", False)
+        try:
+            result_text, _raw, fallback_meta = call_with_fallback(
+                llm,
+                cfg,
+                [{"role": "system", "content": "你是记忆压缩助手。"},
+                 {"role": "user", "content": content}],
+                "memory_flush",
+                overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low",
+                           "thinking_budget_tokens": 0, "_trace_meta": flush_trace_meta},
+                validator=lambda text, _raw: _is_valid_flush_result(text),
+                force_cloud=force_cloud,
+            )
+            out = str(result_text or "").strip()
+        except Exception as e:
+            out = str(prompt or "")[:220]
+            fallback_meta = {
+                "fallback_used": False,
+                "fallback_reason": "exception",
+                "final_model_role": "",
+            }
+            write_audit_trace(
+                cfg,
+                "memory_flush_result",
+                {
+                    **flush_trace_meta,
+                    "result_len": len(out),
+                    "result_preview": trace_clip(out, 260),
+                    "reason": "llm_call_failed",
+                    "error": str(e),
+                    "fallback_used": False,
+                },
+                memory_dir=memory_dir,
+            )
+            write_round("flush_llm_error", {"clause_id": str(
+                round_runtime.get("clause_id") or ""), "error": str(e), "result": out}, flush_round)
+            return out
         write_audit_trace(
             cfg,
             "memory_flush_result",
-            {**flush_trace_meta, "result_len": len(out), "result_preview": trace_clip(out, 260)},
+            {**flush_trace_meta,
+                "result_len": len(out),
+                "result_preview": trace_clip(out, 260),
+                "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+                "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
+                "final_model_role": str(fallback_meta.get("final_model_role", ""))},
             memory_dir=memory_dir,
         )
-        write_round("flush_result", {"clause_id": str(round_runtime.get("clause_id") or ""), "result": out}, flush_round)
+        write_round("flush_result", {"clause_id": str(
+            round_runtime.get("clause_id") or ""), "result": out, "fallback_used": bool(fallback_meta.get("fallback_used", False)), "fallback_reason": str(fallback_meta.get("fallback_reason", ""))}, flush_round)
         return out
 
     return _clause_cb, _flush_cb

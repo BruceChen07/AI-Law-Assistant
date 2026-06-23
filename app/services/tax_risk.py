@@ -3,6 +3,11 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from app.services.tax_common import parse_llm_json_object
+from app.services.local_llm_runtime import (
+    call_with_fallback,
+    get_local_worker_limit,
+    is_high_risk_force_cloud,
+)
 from app.services.crud import (
     get_tax_contract_document,
     list_clause_rule_matches_by_contract,
@@ -15,6 +20,12 @@ from app.services.crud import (
 from app.memory_system.experience_repo import record_user_feedback
 
 logger = logging.getLogger("law_assistant")
+
+
+def _is_valid_risk_result(parsed: dict) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    return bool(str(parsed.get("issue_text") or "").strip() and str(parsed.get("suggestion") or "").strip())
 
 
 def _is_english_mode(doc: dict, matches: list[dict]) -> bool:
@@ -122,16 +133,26 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
         suggestion = _build_suggestion(m, english_mode=english_mode)
 
         try:
-            response, _ = llm.chat(
+            response, _raw, fallback_meta = call_with_fallback(
+                llm,
+                cfg,
                 [{"role": "user", "content": prompt}],
-                overrides={"model": cfg.get("llm_config", {}).get(
-                    "model", "qwen3.5-plus")},
+                "tax_risk_main",
+                force_cloud=(
+                    label == "non_compliant" and is_high_risk_force_cloud(cfg)),
+                validator=lambda text, _raw: _is_valid_risk_result(
+                    parse_llm_json_object(text)),
             )
             result = parse_llm_json_object(response)
-            issue_text = result.get("issue_text", issue_text)
-            suggestion = result.get("suggestion", suggestion)
+            issue_text = str(result.get("issue_text") or issue_text)
+            suggestion = str(result.get("suggestion") or suggestion)
         except Exception as e:
             logger.error(f"LLM risk generation failed: {e}")
+            fallback_meta = {
+                "fallback_used": False,
+                "fallback_reason": "exception",
+                "final_model_role": "",
+            }
 
         return {
             "contract_document_id": contract_id,
@@ -141,11 +162,24 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
             "issue_text": issue_text,
             "suggestion": suggestion,
             "reviewer_status": "pending",
-            "reviewer_note": evidence.get("reason", ""),
+            "reviewer_note": " | ".join(
+                [x for x in [
+                    str(evidence.get("reason") or "").strip(),
+                    f"fallback_reason={fallback_meta.get('fallback_reason', '')}" if fallback_meta.get(
+                        "fallback_used") else "",
+                ] if x]
+            ),
         }
 
     issue_items = []
-    with ThreadPoolExecutor(max_workers=cfg.get("tax_audit_max_workers", 4)) as executor:
+    max_workers = get_local_worker_limit(
+        cfg,
+        local_key="tax_risk_max_workers",
+        global_key="tax_audit_max_workers",
+        default=4,
+        task_count=len(matches),
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = executor.map(process_match, matches)
         for item in results:
             if item is not None:

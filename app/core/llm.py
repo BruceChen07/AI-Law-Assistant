@@ -3,10 +3,11 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlsplit
 from openai import OpenAI, APITimeoutError
+from app.core.llm_router import resolve_llm_route
 from app.core.secure_store import get_llm_api_key
 
 logger = logging.getLogger("law_assistant")
@@ -28,6 +29,36 @@ class LLMService:
         if isinstance(llm_cfg, dict):
             return llm_cfg
         return {}
+
+    def _resolve_chat_target(
+        self, overrides: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        merged_overrides = dict(overrides or {})
+        trace_meta = merged_overrides.get("_trace_meta") if isinstance(
+            merged_overrides.get("_trace_meta"), dict) else {}
+        task_profile = self._clean_text(
+            merged_overrides.pop("_task_profile", "")
+            or merged_overrides.pop("task_profile", "")
+        ) or "default"
+        model_role = self._clean_text(
+            merged_overrides.pop("_model_role", "")
+            or merged_overrides.pop("model_role", "")
+        )
+        cfg, route_meta = resolve_llm_route(
+            self.cfg,
+            task_profile=task_profile,
+            model_role=model_role,
+        )
+        visible_overrides = {
+            k: v for k, v in merged_overrides.items()
+            if not str(k).startswith("_")
+        }
+        cfg.update(visible_overrides)
+        route_trace = dict(route_meta)
+        route_trace["task_profile"] = task_profile
+        merged_trace_meta = dict(trace_meta)
+        merged_trace_meta["llm_route"] = route_trace
+        return cfg, route_meta, merged_trace_meta
 
     def _resolve_api_key(self, cfg: Dict[str, Any]) -> str:
         key = self._clean_text(cfg.get("api_key", ""))
@@ -142,7 +173,7 @@ class LLMService:
         opts = self._trace_options()
         if not opts["enabled"]:
             return
-        day = datetime.utcnow().strftime("%Y-%m-%d")
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         trace_dir = os.path.join(opts["dir"], day)
         os.makedirs(trace_dir, exist_ok=True)
         file_path = os.path.join(trace_dir, "llm_trace.jsonl")
@@ -200,13 +231,7 @@ class LLMService:
             raise
 
     def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
-        cfg = dict(self._get_llm_config())
-        trace_meta = {}
-        if overrides:
-            trace_meta = overrides.get("_trace_meta") if isinstance(
-                overrides.get("_trace_meta"), dict) else {}
-            cfg.update(
-                {k: v for k, v in overrides.items() if k != "_trace_meta"})
+        cfg, route_meta, trace_meta = self._resolve_chat_target(overrides)
         api_base_raw = cfg.get("api_base", "")
         api_base = self._build_base_url(str(api_base_raw or ""))
         api_key = self._resolve_api_key(cfg)
@@ -224,10 +249,12 @@ class LLMService:
         input_tokens_est = self._estimate_input_tokens(messages)
         t0 = time.perf_counter()
         logger.info(
-            "llm_request_start api_base=%s base_url=%s model=%s temperature=%s max_tokens=%s timeout=%s retries=%s input_tokens_est=%s message_count=%s",
+            "llm_request_start api_base=%s base_url=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s retries=%s input_tokens_est=%s message_count=%s",
             api_base,
             base_url,
             model,
+            route_meta.get("selected_role", ""),
+            route_meta.get("task_profile", "default"),
             temperature,
             max_tokens,
             timeout,
@@ -313,10 +340,11 @@ class LLMService:
                 host = urlsplit(base_url).netloc
                 dns_hint = f" (dns resolve failed for host: {host})"
             self._write_trace({
-                "ts": datetime.utcnow().isoformat(),
+                "ts": datetime.now(timezone.utc).isoformat(),
                 "ok": False,
                 "model": model,
                 "meta": trace_meta,
+                "route": route_meta,
                 "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
                 "error": self._clip(self._mask_text(str(e)), self._trace_options()["max_chars"]),
             })
@@ -345,14 +373,26 @@ class LLMService:
         except Exception:
             content = json.dumps(parsed, ensure_ascii=False)
         self._write_trace({
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "ok": True,
             "model": model,
             "meta": trace_meta,
+            "route": route_meta,
             "latency_ms": latency_ms,
             "input_tokens_est": input_tokens_est,
             "usage": usage,
             "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
             "response": self._clip(self._mask_text(content), self._trace_options()["max_chars"]),
         })
+        parsed["_route"] = route_meta
         return content, parsed
+
+    def chat_with_profile(
+        self,
+        messages: List[Dict[str, str]],
+        task_profile: str,
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        next_overrides = dict(overrides or {})
+        next_overrides["_task_profile"] = task_profile
+        return self.chat(messages, overrides=next_overrides)

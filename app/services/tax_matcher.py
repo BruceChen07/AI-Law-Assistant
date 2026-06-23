@@ -16,12 +16,32 @@ from app.services.crud import (
 from app.services.rule_engine import evaluate_rule, TaxRuleDSL
 from app.services.audit_utils import is_tax_related_text
 from app.services.tax_common import parse_llm_json_object
+from app.services.local_llm_runtime import (
+    call_with_fallback,
+    get_cloud_review_labels,
+    get_local_worker_limit,
+    get_tax_match_min_confidence,
+    is_high_risk_force_cloud,
+)
 
 logger = logging.getLogger("law_assistant")
 
 
 def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
+
+
+def _is_valid_match_result(parsed: dict) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    label = str(parsed.get("label") or "").strip().lower()
+    if label not in {"compliant", "non_compliant", "not_mentioned"}:
+        return False
+    try:
+        score = float(parsed.get("score", 0.0))
+    except Exception:
+        return False
+    return 0.0 <= score <= 1.0
 
 
 def _cosine_similarity(vec1, vec2):
@@ -71,13 +91,55 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
     reason = "LLM analysis failed or timeout"
 
     try:
-        response, _ = llm.chat([{"role": "user", "content": prompt}])
+        response, raw, fallback_meta = call_with_fallback(
+            llm,
+            cfg,
+            [{"role": "user", "content": prompt}],
+            "tax_match_small",
+            validator=lambda text, _raw: _is_valid_match_result(
+                parse_llm_json_object(text)),
+        )
         result = parse_llm_json_object(response)
-        label = result.get("label", "not_mentioned")
+        label = str(result.get("label", "not_mentioned") or "not_mentioned")
         score = float(result.get("score", 0.5))
-        reason = result.get("reason", "")
+        reason = str(result.get("reason") or "")
+        route = raw.get("_route") if isinstance(
+            raw, dict) and isinstance(raw.get("_route"), dict) else {}
+        needs_cloud_review = (
+            is_high_risk_force_cloud(cfg)
+            and str(label).lower() in set(get_cloud_review_labels(cfg))
+            and str(route.get("selected_role") or "") != "cloud_fallback"
+        )
+        if needs_cloud_review or float(score) < get_tax_match_min_confidence(cfg):
+            review_response, review_raw, review_meta = call_with_fallback(
+                llm,
+                cfg,
+                [{"role": "user", "content": prompt}],
+                "tax_match_small",
+                force_cloud=True,
+                retry_on_error=False,
+                retry_on_invalid=False,
+                validator=lambda text, _raw: _is_valid_match_result(
+                    parse_llm_json_object(text)),
+            )
+            review_result = parse_llm_json_object(review_response)
+            if _is_valid_match_result(review_result):
+                label = str(review_result.get("label") or label)
+                score = float(review_result.get("score", score))
+                reason = str(review_result.get("reason") or reason)
+                fallback_meta = {
+                    "fallback_used": True,
+                    "fallback_reason": "high_risk_review" if needs_cloud_review else "low_confidence_review",
+                    "final_model_role": "cloud_fallback",
+                    "review_meta": review_meta,
+                }
     except Exception as e:
         logger.error(f"LLM match evaluation failed: {e}")
+        fallback_meta = {
+            "fallback_used": False,
+            "fallback_reason": "exception",
+            "final_model_role": "",
+        }
 
     evidence = {
         "reason": reason,
@@ -86,6 +148,9 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
         "rule_type": rule.get("rule_type", ""),
         "rule_article_no": rule.get("article_no", ""),
         "evaluated_at": _utc_now_iso(),
+        "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+        "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
+        "final_model_role": str(fallback_meta.get("final_model_role", "")),
     }
     return {
         "clause_id": clause.get("id", ""),
@@ -282,7 +347,14 @@ def match_contract_against_rules(
 
         return _pick_matches_for_clause(evaluated, top_k=top_k_per_clause)
 
-    with ThreadPoolExecutor(max_workers=cfg.get("tax_audit_max_workers", 4)) as executor:
+    max_workers = get_local_worker_limit(
+        cfg,
+        local_key="tax_match_max_workers",
+        global_key="tax_audit_max_workers",
+        default=4,
+        task_count=len(clauses),
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = executor.map(process_clause, clauses)
         for matches in results:
             all_matches.extend(matches)

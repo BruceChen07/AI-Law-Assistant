@@ -2,7 +2,7 @@ import os
 import re
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor
 from app.services.crud import (
     get_tax_contract_document,
@@ -14,6 +14,18 @@ from app.services.audit_utils import is_tax_related_text
 from app.services.tax_common import parse_llm_json_object
 
 logger = logging.getLogger("law_assistant")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _chat_with_task_profile(llm, messages: list[dict], task_profile: str, overrides: dict | None = None):
+    if hasattr(llm, "chat_with_profile"):
+        return llm.chat_with_profile(messages, task_profile, overrides=overrides)
+    next_overrides = dict(overrides or {})
+    next_overrides["_task_profile"] = task_profile
+    return llm.chat(messages, overrides=next_overrides)
 
 
 def _is_english_text(text: str) -> bool:
@@ -104,8 +116,12 @@ def extract_clause_entities(clause_text: str, cfg: dict = None, llm=None) -> dic
         请仅返回纯JSON对象，不要有任何其他说明：
         """
         try:
-            response, _ = llm.chat([{"role": "user", "content": prompt}], overrides={
-                                   "temperature": 0.1})
+            response, _ = _chat_with_task_profile(
+                llm,
+                [{"role": "user", "content": prompt}],
+                "entity_extract_small",
+                overrides={"temperature": 0.1},
+            )
             result = parse_llm_json_object(response)
             if result:
                 return result
@@ -190,7 +206,7 @@ def analyze_contract_document(cfg, contract_id: str, operator_id: str = "", llm=
     if not path or not os.path.exists(path):
         raise ValueError("contract file not found")
     update_tax_contract_document_status(cfg, contract_id, "parsing")
-    started_at = datetime.utcnow().isoformat()
+    started_at = _utc_now_iso()
     logger.info(
         "tax_contract_analyze_start contract_id=%s operator=%s file_type=%s file_path=%s",
         contract_id,
@@ -228,7 +244,7 @@ def analyze_contract_document(cfg, contract_id: str, operator_id: str = "", llm=
             "clause_count": len(clauses),
             "ocr_used": bool(meta.get("ocr_used")),
             "started_at": started_at,
-            "finished_at": datetime.utcnow().isoformat(),
+            "finished_at": _utc_now_iso(),
         }
     except Exception:
         update_tax_contract_document_status(cfg, contract_id, "failed")
