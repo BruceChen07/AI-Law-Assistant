@@ -6,6 +6,7 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlsplit
+import httpx
 from openai import OpenAI, APITimeoutError
 from app.core.llm_router import resolve_llm_route
 from app.core.secure_store import get_llm_api_key
@@ -87,6 +88,13 @@ class LLMService:
         if not p.scheme or not p.netloc:
             raise RuntimeError("llm_config api_base invalid")
         return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+
+    def _build_ollama_base_url(self, base: str) -> str:
+        s = self._build_base_url(base)
+        for suffix in ("/chat/completions", "/api/chat", "/api/generate", "/v1"):
+            if s.endswith(suffix):
+                s = s[: -len(suffix)]
+        return s.rstrip("/")
 
     def _build_headers(self, api_key: Optional[str], extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -230,11 +238,135 @@ class LLMService:
                 return client.chat.completions.create(**fallback_kwargs)
             raise
 
+    def _build_ollama_chat_body(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        options: Dict[str, Any] = {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+        }
+        if cfg.get("num_ctx") not in {None, ""}:
+            try:
+                options["num_ctx"] = int(cfg.get("num_ctx"))
+            except (TypeError, ValueError):
+                logger.warning("ollama_invalid_num_ctx value=%s",
+                               cfg.get("num_ctx"))
+        if cfg.get("top_p") not in {None, ""}:
+            try:
+                options["top_p"] = float(cfg.get("top_p"))
+            except (TypeError, ValueError):
+                logger.warning("ollama_invalid_top_p value=%s",
+                               cfg.get("top_p"))
+        body: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": options,
+        }
+        body["think"] = bool(cfg.get("enable_thinking", False))
+        keep_alive = cfg.get("keep_alive")
+        if keep_alive not in {None, ""}:
+            body["keep_alive"] = keep_alive
+        return body
+
+    def _post_ollama_chat(
+        self,
+        url: str,
+        body: Dict[str, Any],
+        headers: Dict[str, str],
+        timeout: int,
+    ) -> Dict[str, Any]:
+        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
+    def _chat_via_ollama(
+        self,
+        api_base: str,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        cfg: Dict[str, Any],
+        extra_headers: Optional[Dict[str, str]],
+    ) -> Tuple[str, Dict[str, Any]]:
+        base_url = self._build_ollama_base_url(api_base)
+        request_url = f"{base_url}/api/chat"
+        request_headers = self._build_headers(None, extra_headers)
+        request_body = self._build_ollama_chat_body(
+            model, messages, temperature, max_tokens, cfg
+        )
+        try:
+            raw = self._post_ollama_chat(
+                request_url, request_body, request_headers, timeout
+            )
+        except httpx.TimeoutException as e:
+            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
+            retry_cfg = dict(cfg)
+            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
+            retry_body = self._build_ollama_chat_body(
+                model, messages, temperature, retry_max_tokens, retry_cfg
+            )
+            logger.warning(
+                "ollama_request_timeout_retry url=%s model=%s timeout=%s->%s max_tokens=%s->%s",
+                request_url,
+                model,
+                timeout,
+                retry_timeout,
+                max_tokens,
+                retry_max_tokens,
+            )
+            try:
+                raw = self._post_ollama_chat(
+                    request_url, retry_body, request_headers, retry_timeout
+                )
+            except Exception as e2:
+                raise RuntimeError(
+                    f"ollama request failed after timeout retry: {str(e2)}"
+                ) from e2
+        message = raw.get("message") if isinstance(
+            raw.get("message"), dict) else {}
+        content = str(message.get("content") or "")
+        prompt_tokens = int(raw.get("prompt_eval_count") or 0)
+        completion_tokens = int(raw.get("eval_count") or 0)
+        parsed = {
+            "model": raw.get("model") or model,
+            "done": bool(raw.get("done", True)),
+            "done_reason": raw.get("done_reason") or "",
+            "message": {
+                "role": message.get("role") or "assistant",
+                "content": content,
+            },
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+            "ollama_raw": raw,
+            "choices": [
+                {
+                    "message": {
+                        "role": message.get("role") or "assistant",
+                        "content": content,
+                    }
+                }
+            ],
+        }
+        return content, parsed
+
     def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         cfg, route_meta, trace_meta = self._resolve_chat_target(overrides)
         api_base_raw = cfg.get("api_base", "")
         api_base = self._build_base_url(str(api_base_raw or ""))
-        api_key = self._resolve_api_key(cfg)
+        provider = self._clean_text(
+            cfg.get("provider", "openai_compatible")).lower()
+        api_key = "" if provider == "ollama" else self._resolve_api_key(cfg)
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
         max_tokens = int(cfg.get("max_tokens", 2048))
@@ -263,23 +395,41 @@ class LLMService:
             len(messages)
         )
         logger.debug(
-            "llm_request_debug api_key=%s raw_api_base=%r headers=%s message_count=%s",
+            "llm_request_debug provider=%s api_key=%s raw_api_base=%r headers=%s message_count=%s",
+            provider,
             self._mask_secret(api_key),
             cfg.get("api_base", ""),
             list((extra_headers or {}).keys()),
             len(messages)
         )
-        client = OpenAI(
-            api_key=api_key or None,
-            base_url=base_url,
-            timeout=timeout,
-            max_retries=max(0, retries - 1),
-            default_headers=extra_headers or None
-        )
-        request_kwargs = self._build_chat_kwargs(
-            model, messages, temperature, max_tokens, cfg)
         try:
-            resp = self._create_chat_completion(client, request_kwargs)
+            if provider == "ollama":
+                content, parsed = self._chat_via_ollama(
+                    api_base,
+                    model,
+                    messages,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    cfg,
+                    extra_headers,
+                )
+            else:
+                client = OpenAI(
+                    api_key=api_key or None,
+                    base_url=base_url,
+                    timeout=timeout,
+                    max_retries=max(0, retries - 1),
+                    default_headers=extra_headers or None
+                )
+                request_kwargs = self._build_chat_kwargs(
+                    model, messages, temperature, max_tokens, cfg)
+                resp = self._create_chat_completion(client, request_kwargs)
+                parsed = resp.model_dump()
+                try:
+                    content = resp.choices[0].message.content or ""
+                except Exception:
+                    content = json.dumps(parsed, ensure_ascii=False)
         except APITimeoutError as e:
             fallback_model = self._clean_text(cfg.get("fallback_model", ""))
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
@@ -308,6 +458,11 @@ class LLMService:
             try:
                 resp = self._create_chat_completion(
                     retry_client, retry_request_kwargs)
+                parsed = resp.model_dump()
+                try:
+                    content = resp.choices[0].message.content or ""
+                except Exception:
+                    content = json.dumps(parsed, ensure_ascii=False)
             except Exception as e2:
                 logger.exception(
                     "llm_request_failed_after_retry api_base=%s base_url=%s model=%s retry_model=%s timeout=%s retry_timeout=%s raw_api_base=%r api_key=%s headers=%s",
@@ -325,7 +480,8 @@ class LLMService:
                     f"llm request failed after timeout retry: {str(e2)}") from e2
         except Exception as e:
             logger.exception(
-                "llm_request_failed api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
+                "llm_request_failed provider=%s api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
+                provider,
                 api_base,
                 base_url,
                 model,
@@ -350,7 +506,6 @@ class LLMService:
             })
             raise RuntimeError(
                 f"llm request failed: {str(e)}{dns_hint}") from e
-        parsed = resp.model_dump()
         usage = parsed.get("usage") if isinstance(
             parsed.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -367,11 +522,6 @@ class LLMService:
             total_tokens,
             latency_ms
         )
-        content = ""
-        try:
-            content = resp.choices[0].message.content or ""
-        except Exception:
-            content = json.dumps(parsed, ensure_ascii=False)
         self._write_trace({
             "ts": datetime.now(timezone.utc).isoformat(),
             "ok": True,

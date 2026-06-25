@@ -11,20 +11,20 @@ Scope:
 - Cloud fallback connectivity check
 - Regression execution
 
-This document is the phase 4 delivery runbook. It does not claim that the target machine already has the required GGUF files or local model servers installed.
+This document is the phase 4 delivery runbook. It assumes the repository uses Ollama as the only local LLM runtime.
 
 ## 2. Target Topology
 
-- Main model endpoint: `http://127.0.0.1:8011/v1`
-- Small model endpoint: `http://127.0.0.1:8012/v1`
+- Main model endpoint: `http://127.0.0.1:11434/v1`
+- Small model endpoint: `http://127.0.0.1:11434/v1`
 - Cloud fallback endpoint: configured by `llm_config.api_base`
 - App backend: `http://127.0.0.1:8000`
 - App frontend: `http://127.0.0.1:5173`
 
 Recommended model mapping:
 
-- Main model: `qwen3.6-27b-q4`
-- Small model: `llama-3.2-3b-q4`
+- Main model: `qwen3.6:27b`
+- Small model: `llama3.2:3b`
 - Cloud fallback: `gpt-4o-mini` or compatible OpenAI-style provider
 
 ## 3. Prerequisites
@@ -37,17 +37,16 @@ Recommended model mapping:
 
 ### 3.2 Software
 
-- Windows PowerShell 5+
 - Python environment already used by this repository
-- Local OpenAI-compatible server, such as `llama.cpp server`
-- Model weights prepared on disk
+- Ollama installed locally
+- Ollama API reachable on `http://127.0.0.1:11434`
 
 ### 3.3 Repository Preparation
 
 Run:
 
-```powershell
-.\bin\init.ps1
+```bash
+python .\bin\init.py
 ```
 
 If needed, copy:
@@ -77,14 +76,14 @@ Key settings in `app/config.json`:
     "routing_enabled": true,
     "cloud_fallback_enabled": true,
     "main_model": {
-      "provider": "openai_compatible",
-      "api_base": "http://127.0.0.1:8011/v1",
-      "model": "qwen3.6-27b-q4"
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "model": "qwen3.6:27b"
     },
     "small_model": {
-      "provider": "openai_compatible",
-      "api_base": "http://127.0.0.1:8012/v1",
-      "model": "llama-3.2-3b-q4"
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "model": "llama3.2:3b"
     }
   }
 }
@@ -101,45 +100,36 @@ Important execution controls:
 
 ## 5. Local Model Startup
 
-Example placeholder flow for local model services:
+Start Ollama and ensure required models are installed:
 
-```powershell
-# Main model example
-llama-server.exe `
-  -m D:\models\qwen3.6-27b-q4.gguf `
-  --host 127.0.0.1 `
-  --port 8011 `
-  -c 8192 `
-  -ngl 0
+```bash
+python .\bin\start-local-llm-servers.py
+python .\bin\download-local-llm-models.py
 ```
 
-```powershell
-# Small model example
-llama-server.exe `
-  -m D:\models\llama-3.2-3b-q4.gguf `
-  --host 127.0.0.1 `
-  --port 8012 `
-  -c 4096 `
-  -ngl 0
+Optional manual verification:
+
+```bash
+ollama list
 ```
 
 Notes:
 
-- The exact executable and flags depend on the local serving framework you choose.
-- This repository only requires the server to expose an OpenAI-compatible `/v1/chat/completions` interface.
+- Both local roles use the same Ollama API endpoint and are distinguished by model name.
+- The application uses Ollama official runtime management and Ollama-compatible inference configuration.
 
 ## 6. App Startup
 
 Start backend and frontend:
 
-```powershell
-.\bin\start-services.ps1
+```bash
+python .\bin\start-services.py
 ```
 
 Stop them:
 
-```powershell
-.\bin\stop-services.ps1
+```bash
+Use the PID information in `.runtime/services.pids.json` and terminate the processes manually if needed.
 ```
 
 ## 7. Validation Steps
@@ -148,8 +138,8 @@ Stop them:
 
 Run:
 
-```powershell
-.\bin\run-edge-llm-regression.ps1
+```bash
+python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
 ```
 
 Expected output:
@@ -161,19 +151,16 @@ Expected output:
 
 Run:
 
-```powershell
-.\bin\run-edge-llm-regression.ps1 `
-  -IncludeLocalSmoke `
-  -LocalMainApiBase "http://127.0.0.1:8011/v1" `
-  -LocalSmallApiBase "http://127.0.0.1:8012/v1"
+```bash
+python .\bin\start-local-llm-servers.py
+python .\bin\download-local-llm-models.py
+python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
 ```
 
 Optional cloud validation:
 
-```powershell
-.\bin\run-edge-llm-regression.ps1 `
-  -IncludeLocalSmoke `
-  -CloudApiBase "https://api.openai.com/v1"
+```bash
+python .\bin\apply-local-llm-config.py
 ```
 
 ## 8. Acceptance Checklist
@@ -200,12 +187,14 @@ If local edge mode is unstable:
 - Keep `llm_config` pointing to the cloud endpoint
 - Re-run:
 
-```powershell
-.\bin\run-edge-llm-regression.ps1
+```bash
+python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
 ```
 
-## 11. Deliverables Produced In Phase 4
+## 11. Deliverables Produced In Phase 4-5
 
+- Python startup helpers: `bin/init.py`、`bin/start-services.py`
+- Ollama helpers: `bin/start-local-llm-servers.py`、`bin/download-local-llm-models.py`、`bin/apply-local-llm-config.py`
 - Regression script: `bin/run-edge-llm-regression.ps1`
 - Regression report: `plan/edge-llm-cpu-local-regression-report.md`
 - Known issues list: `plan/edge-llm-cpu-local-known-issues.md`

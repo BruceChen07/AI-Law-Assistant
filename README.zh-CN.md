@@ -240,24 +240,27 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 }
 ```
 
-### 端侧大模型 CPU 本地部署（Phase 0-4）
+### 端侧大模型 CPU 本地部署（Phase 0-5）
 
-系统已支持在纯 CPU 环境下接入本地大模型，通过 OpenAI-compatible 接口进行推理，无需云端 API。
+系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，支持主模型/轻量模型路由与云端兜底。
 
 **本地模型配置示例**（`app/config.json` 中新增 `local_llm` 字段）：
 
 ```json
 "local_llm": {
+    "enabled": true,
     "routing_enabled": true,
     "main_model": {
-        "model": "qwen3.6-27b-q4_k_m",
-        "api_base": "http://127.0.0.1:8081/v1",
+        "provider": "ollama",
+        "model": "qwen3.6:27b",
+        "api_base": "http://127.0.0.1:11434/v1",
         "max_tokens": 900,
         "timeout": 60
     },
     "small_model": {
-        "model": "llama-3.2-3b-q4_k_m",
-        "api_base": "http://127.0.0.1:8082/v1",
+        "provider": "ollama",
+        "model": "llama3.2:3b",
+        "api_base": "http://127.0.0.1:11434/v1",
         "max_tokens": 400,
         "timeout": 30
     },
@@ -296,23 +299,30 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 **启动方式**：
 ```bash
-# 1) 启动本地主模型服务（需先部署 llama.cpp 或 Ollama）
-# 2) 编辑 app/config.json，填入 local_llm 配置
-# 3) 启动系统
-python -m app.main
+# 1) 初始化项目
+python .\bin\init.py
+
+# 2) 启动 Ollama 并确保模型已安装
+python .\bin\start-local-llm-servers.py
+python .\bin\download-local-llm-models.py
+
+# 3) 写入本地 LLM 配置
+python .\bin\apply-local-llm-config.py
+
+# 4) 启动后端与前端
+python .\bin\start-services.py
 ```
 
 **推荐模型选型**：
 | 角色 | 推荐模型 | 量化 | 硬件要求 |
 |------|---------|------|---------|
-| 主审计模型 | Qwen3.6-27B | Q4_K_M | 64-128 GB RAM, 16-24 物理核 |
-| 侧车模型 | Llama 3.2-3B | Q4_K_M | 8-12 GB RAM, 4-8 物理核 |
+| 主审计模型 | `qwen3.6:27b` | Ollama | 64-128 GB RAM, 16-24 物理核 |
+| 侧车模型 | `llama3.2:3b` | Ollama | 8-12 GB RAM, 4-8 物理核 |
 | 云端兜底 | GPT-4o-mini | - | 网络连接 |
 
 **回归测试**：
-```powershell
-.\bin\run-edge-llm-regression.ps1            # 核心回归（53 项）
-.\bin\run-edge-llm-regression.ps1 -IncludeLocalSmoke  # 含本地模型 smoke
+```bash
+python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
 ```
 
 详细文档：

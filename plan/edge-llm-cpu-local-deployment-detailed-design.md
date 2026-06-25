@@ -36,12 +36,12 @@
 - 当前模型接入层优先兼容 OpenAI-compatible `/v1/chat/completions`。
 
 ### 3.2 外部模型与部署依据
-- 端侧主模型优先候选：`Qwen3.6-27B`、`Mistral Small 3.2 24B`。
-- 端侧轻量侧车模型优先候选：`Llama 3.2-3B`。
-- 纯 CPU 部署优先使用 `GGUF + llama.cpp server`，原因是：
-  - 对 CPU 量化推理最成熟。
-  - 原生提供 OpenAI-compatible API。
-  - 便于在 Windows 本地交付。
+- 端侧主模型优先候选：`qwen3.6:27b`。
+- 端侧轻量侧车模型优先候选：`llama3.2:3b`。
+- 纯 CPU 部署统一通过 `Ollama` 交付，原因是：
+  - 提供标准化的模型拉取、运行与状态管理。
+  - 本地运行入口一致，减少环境差异。
+  - 更适合当前项目在 Windows 环境下的统一部署与运维。
 
 ### 3.3 关键约束
 - 仅支持纯 CPU。
@@ -92,11 +92,11 @@ Persistence / API Response / Trace
 
 ### 5.2 目标部署形态
 - 本地推理服务 1：主模型服务
-  - 推荐：`Qwen3.6-27B Q4_K_M`
-  - 部署方式：`llama.cpp server`
+  - 推荐：`qwen3.6:27b`
+  - 部署方式：`Ollama`
 - 本地推理服务 2：轻量模型服务
-  - 推荐：`Llama 3.2-3B`
-  - 部署方式：`llama.cpp server` 或 `Ollama`
+  - 推荐：`llama3.2:3b`
+  - 部署方式：`Ollama`
 - 应用服务：
   - 复用现有 FastAPI。
   - 新增模型路由、降级、回退、追踪模块。
@@ -171,14 +171,14 @@ Persistence / API Response / Trace
     "cloud_fallback_enabled": true,
     "json_repair_enabled": true,
     "main_model": {
-      "provider": "openai_compatible",
-      "api_base": "http://127.0.0.1:8011/v1",
-      "model": "qwen3.6-27b-q4"
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "model": "qwen3.6:27b"
     },
     "small_model": {
-      "provider": "openai_compatible",
-      "api_base": "http://127.0.0.1:8012/v1",
-      "model": "llama-3.2-3b-q4"
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "model": "llama3.2:3b"
     },
     "routing": {
       "tax_match_use_small_model": true,
@@ -291,15 +291,15 @@ LLM raw output
 ### 8.1 本地模型服务建议
 
 #### 主模型服务
-- 框架：`llama.cpp server`
-- 模型：`Qwen3.6-27B GGUF Q4_K_M`
-- 端口：`8011`
+- 框架：`Ollama`
+- 模型：`qwen3.6:27b`
+- 端口：`11434`
 - 作用：主审计和复杂推理
 
 #### 轻量模型服务
-- 框架：`llama.cpp server` 或 `Ollama`
-- 模型：`Llama 3.2-3B GGUF Q4_K_M`
-- 端口：`8012`
+- 框架：`Ollama`
+- 模型：`llama3.2:3b`
+- 端口：`11434`
 - 作用：抽取、预判、轻量匹配
 
 ### 8.2 建议运行策略
@@ -408,11 +408,12 @@ LLM raw output
 
 | 阶段 | 状态 | 负责人 | 计划开始 | 计划完成 | 实际完成 | 阶段目标 | 当前进展 | 阻塞项 | 下一步 |
 |---|---|---|---|---|---|---|---|---|---|
-| 阶段 0 | 进行中 | AI Agent | 2026-06-23 | 2026-06-24 |  | 固化本地模型配置模板、选型与验证入口 | 已补充 `local_llm` 配置结构，已确定主模型/侧车模型和端口约定 | 尚未完成真实本地模型下载与联通验证 | 启动本地 `llama.cpp server` 并补基线记录 |
+| 阶段 0 | 进行中 | AI Agent | 2026-06-23 | 2026-06-24 |  | 固化本地模型配置模板、选型与验证入口 | 已补充 `local_llm` 配置结构，已确定主模型/侧车模型和 Ollama 端口约定 | 尚未完成真实本地模型下载与联通验证 | 启动本地 `Ollama` 服务并补基线记录 |
 | 阶段 1 | 基础骨架完成 | AI Agent | 2026-06-23 | 2026-06-24 | 2026-06-23 | 接入本地主模型/侧车模型路由，扩展 LLM 接入层 | 已新增 `llm_router.py`，`LLMService` 支持 `task_profile` / `model_role` 路由与 trace，单元测试 9 项通过 | 业务链路尚未逐个切换到任务画像调用 | 进入阶段 2，开始改造合同审计与财税链路 |
 | 阶段 2 | 进行中 | AI Agent | 2026-06-23 | 2026-06-25 |  | 将关键业务链路切到任务画像路由，并完成首批结构化稳定化能力 | 已完成 `tax_contract_parser`、`tax_matcher`、`contract_audit classic`、`memory callbacks`、`tax_risk` 的任务画像接入；已新增 `JSON Guard` 并接入 `tax_common`/`tax_risk` | 统一重试/升级策略、真实本地模型联调仍未完成 | 继续实现失败升级策略，并补更广泛的本地联调用例 |
 | 阶段 3 | 进行中 | AI Agent | 2026-06-23 | 2026-06-26 |  | 完成统一失败升级策略、高风险云端复核和端侧并发收敛 | 已新增本地运行时 fallback helper；`tax_matcher` 支持异常/无效结果回退与高风险云端复核；`tax_risk` 支持高风险直接云端路由；`memory_pipeline` 条款审计与 flush 已接入 fallback；税务链路并发改为优先读取本地执行配置 | 真实本地模型压测与 memory 长文档超时验证仍未完成 | 开始真实本地模型联调，并补 memory 长文档与超时场景验证 |
 | 阶段 4 | 进行中 | AI Agent | 2026-06-23 | 2026-06-26 |  | 跑完整回归集，补齐部署文档、回归报告和已知问题清单 | 已新增阶段 4 回归脚本，已生成回归报告，已补部署 Runbook 与已知问题清单 | 真实本地模型 smoke、长文档压测与人工验收仍未完成 | 启动真实本地模型后执行 smoke，并补人工验收记录 |
+| 阶段 5 | 已完成 | AI Agent | 2026-06-23 | 2026-06-23 | 2026-06-23 | 完成 Ollama-only 运行栈迁移、Python 化启动入口和本机联调修复 | 已将本地模型运行统一到 `Ollama`；新增 `init.py`、`start-services.py`、`start-local-llm-servers.py`、`download-local-llm-models.py`、`apply-local-llm-config.py`；`LLMService` 已支持 `provider=ollama`；已修复 `qwen3.6:27b` thinking 兼容与 PID BOM 读取问题 | 长文档压测、人工验收、历史 UTC warnings 清理仍未完成 | 继续补真实业务样本压测与 stop-services Python 入口 |
 
 ### 12.3 设计变更记录表
 
@@ -422,6 +423,7 @@ LLM raw output
 | 2026-06-23 | AI Agent | 阶段 0/1 实现落地 | 仅有设计方案 | 已完成本地模型配置模板、LLM 路由层和基础测试 | 将设计转为可执行代码骨架 | `app/core/llm.py`、`app/core/llm_router.py`、`app/config.example.json`、`tests/` |
 | 2026-06-23 | AI Agent | 阶段 3 首批实现落地 | 仅有阶段目标描述 | 已完成统一 fallback helper、高风险云端复核和并发配置收敛 | 将阶段 3 设计转为可验证代码 | `app/services/local_llm_runtime.py`、`app/services/tax_matcher.py`、`app/services/tax_risk.py`、`tests/` |
 | 2026-06-23 | AI Agent | 阶段 4 交付物落地 | 仅有阶段目标描述 | 已完成回归脚本、回归报告、部署 Runbook 和已知问题清单 | 将阶段 4 交付项转为可执行与可审阅产物 | `bin/run-edge-llm-regression.ps1`、`plan/edge-llm-cpu-local-regression-report.md`、`plan/edge-llm-cpu-local-deployment-runbook.md`、`plan/edge-llm-cpu-local-known-issues.md` |
+| 2026-06-23 | AI Agent | Ollama-only 迁移 | 本地运行方案同时保留 `llama.cpp` 与 `Ollama` 约定 | 已切换为仅保留 `Ollama` 运行时、模型名和部署文档 | 消除 `llama.cpp` 残留配置与脚本假设，统一本地运行栈 | `app/core/llm.py`、`bin/`、`app/config.example.json`、`README.zh-CN.md`、`plan/`、`tests/` |
 
 ### 12.4 当前阶段改动文件记录
 
@@ -458,6 +460,13 @@ LLM raw output
 | 阶段 4 | `plan/edge-llm-cpu-local-regression-report.md` | 新增阶段 4 回归报告文件，记录 53 项回归结果 |
 | 阶段 4 | `plan/edge-llm-cpu-local-deployment-runbook.md` | 新增端侧 CPU 本地部署与联调 Runbook |
 | 阶段 4 | `plan/edge-llm-cpu-local-known-issues.md` | 新增阶段 4 已知问题与关闭条件清单 |
+| 阶段 5 | `app/core/llm.py` | 新增 `provider=ollama` 的官方 API 调用路径 |
+| 阶段 5 | `bin/download-local-llm-models.py` | 从 GGUF 文件下载切换为通过 Ollama API 拉取模型 |
+| 阶段 5 | `bin/start-local-llm-servers.py` | 从 `llama-server` 启动脚本切换为 `ollama serve` 管理脚本 |
+| 阶段 5 | `bin/apply-local-llm-config.py` | 将本地模型配置切换为 `ollama` provider 与 `11434/v1` |
+| 阶段 5 | `app/config.example.json` | 示例配置切换为 Ollama-only |
+| 阶段 5 | `tests/test_llm_router.py` | 路由测试更新为 Ollama 模型名与端点 |
+| 阶段 5 | `tests/test_llm_local_mode.py` | 本地模式测试改为覆盖 Ollama 官方 API 分支 |
 
 ## 13. 测试设计与结果记录
 
@@ -531,6 +540,7 @@ LLM raw output
 | 阶段 2 | 2026-06-23 | AI Agent | 41 | 0 | 1 | 首批业务链路与 JSON 容错底座已打通，税务与合同审计回归通过 | `python -m pytest tests/test_json_guard.py tests/test_tax_risk.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py`；剩余阻塞为真实本地模型联调与统一失败升级策略未完成 |
 | 阶段 3 | 2026-06-23 | AI Agent | 44 | 0 | 1 | 首批性能调优与降级策略已覆盖税务链路与 memory pipeline，具备异常/无效结果回退和高风险云端复核能力 | `python -m pytest tests/test_local_llm_fallback.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_tax_contract_parser.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py`；剩余阻塞为真实本地模型联调与长文档超时压测未完成 |
 | 阶段 4 | 2026-06-23 | AI Agent | 53 | 0 | 1 | 阶段 4 回归入口与交付文档已生成，核心代码级回归通过 | `powershell -ExecutionPolicy Bypass -File .\bin\run-edge-llm-regression.ps1`；已生成 `plan/edge-llm-cpu-local-regression-report.md`，剩余阻塞为真实本地 smoke 与人工验收未完成 |
+| 阶段 5 | 2026-06-23 | AI Agent | 53 | 0 | 0 | Ollama-only 迁移完成，Python 启动链路和本机模型联通验证通过 | 已执行 `python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py`，并通过 `ollama list`、`python .\bin\start-local-llm-servers.py`、`python .\bin\download-local-llm-models.py`、`python .\bin\apply-local-llm-config.py --dry-run` 和 `LLMService` 实机调用完成本机验证 |
 
 ## 14. 代码落点建议
 

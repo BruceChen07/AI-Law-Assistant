@@ -1,8 +1,8 @@
 param(
   [string]$ReportPath = "",
   [switch]$IncludeLocalSmoke,
-  [string]$LocalMainApiBase = "http://127.0.0.1:8011/v1",
-  [string]$LocalSmallApiBase = "http://127.0.0.1:8012/v1",
+  [string]$LocalMainApiBase = "http://127.0.0.1:11434/v1",
+  [string]$LocalSmallApiBase = "http://127.0.0.1:11434/v1",
   [string]$CloudApiBase = ""
 )
 
@@ -59,7 +59,7 @@ function Test-ChatCompletionEndpoint([string]$ApiBase, [string]$Model) {
 
 if ($IncludeLocalSmoke) {
   try {
-    $null = Test-ChatCompletionEndpoint -ApiBase $LocalMainApiBase -Model "qwen3.6-27b-q4"
+    $null = Test-ChatCompletionEndpoint -ApiBase $LocalMainApiBase -Model "qwen3.6:27b"
     $smokeMainStatus = "passed"
   } catch {
     $smokeMainStatus = "failed"
@@ -67,7 +67,7 @@ if ($IncludeLocalSmoke) {
   }
 
   try {
-    $null = Test-ChatCompletionEndpoint -ApiBase $LocalSmallApiBase -Model "llama-3.2-3b-q4"
+    $null = Test-ChatCompletionEndpoint -ApiBase $LocalSmallApiBase -Model "llama3.2:3b"
     $smokeSmallStatus = "passed"
   } catch {
     $smokeSmallStatus = "failed"

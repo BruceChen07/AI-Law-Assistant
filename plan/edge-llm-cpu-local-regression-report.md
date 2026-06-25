@@ -1,4 +1,4 @@
-﻿# Edge LLM CPU Local Regression Report
+# Edge LLM CPU Local Regression Report
 
 - Generated At: 2026-06-23T15:57:47
 - Machine: LAPTOP-3HH3781H
@@ -129,8 +129,8 @@ tests/test_contract_audit_memory_mode.py: 14 warnings
 ## Smoke Check
 
 - Include Local Smoke: False
-- Local Main API: http://127.0.0.1:8011/v1
-- Local Small API: http://127.0.0.1:8012/v1
+- Local Main API: http://127.0.0.1:11434/v1
+- Local Small API: http://127.0.0.1:11434/v1
 - Cloud API: (not provided)
 - Local Main Result: skipped
 - Local Small Result: skipped

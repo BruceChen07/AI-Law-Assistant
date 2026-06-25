@@ -1,23 +1,7 @@
 import unittest
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from app.core.llm import LLMService
-
-
-class _FakeResponse:
-    def __init__(self, content: str):
-        self.choices = [SimpleNamespace(
-            message=SimpleNamespace(content=content))]
-
-    def model_dump(self):
-        return {
-            "usage": {
-                "prompt_tokens": 12,
-                "completion_tokens": 24,
-                "total_tokens": 36,
-            }
-        }
 
 
 class LLMLocalModeTests(unittest.TestCase):
@@ -38,18 +22,18 @@ class LLMLocalModeTests(unittest.TestCase):
                 "routing_enabled": True,
                 "cloud_fallback_enabled": True,
                 "main_model": {
-                    "provider": "openai_compatible",
-                    "api_base": "http://127.0.0.1:8011/v1",
+                    "provider": "ollama",
+                    "api_base": "http://127.0.0.1:11434/v1",
                     "api_key": "",
-                    "model": "qwen3.6-27b-q4",
+                    "model": "qwen3.6:27b",
                     "timeout": 30,
                     "headers": {},
                 },
                 "small_model": {
-                    "provider": "openai_compatible",
-                    "api_base": "http://127.0.0.1:8012/v1",
+                    "provider": "ollama",
+                    "api_base": "http://127.0.0.1:11434/v1",
                     "api_key": "",
-                    "model": "llama-3.2-3b-q4",
+                    "model": "llama3.2:3b",
                     "timeout": 20,
                     "headers": {},
                 },
@@ -65,19 +49,30 @@ class LLMLocalModeTests(unittest.TestCase):
         svc = LLMService(self.cfg)
         captured = {}
 
-        def _fake_completion(_client, kwargs):
-            captured.update(kwargs)
-            return _FakeResponse('{"ok": true}')
+        def _fake_ollama_post(url, body, headers, timeout):
+            captured.update({
+                "url": url,
+                "body": body,
+                "headers": headers,
+                "timeout": timeout,
+            })
+            return {
+                "model": body["model"],
+                "done": True,
+                "message": {"role": "assistant", "content": '{"ok": true}'},
+                "prompt_eval_count": 12,
+                "eval_count": 24,
+            }
 
-        with patch("app.core.llm.OpenAI", return_value=object()):
-            with patch.object(svc, "_create_chat_completion", side_effect=_fake_completion):
-                content, raw = svc.chat_with_profile(
-                    [{"role": "user", "content": "test"}],
-                    "tax_match_small",
-                )
+        with patch.object(svc, "_post_ollama_chat", side_effect=_fake_ollama_post):
+            content, raw = svc.chat_with_profile(
+                [{"role": "user", "content": "test"}],
+                "tax_match_small",
+            )
 
         self.assertEqual(content, '{"ok": true}')
-        self.assertEqual(captured["model"], "llama-3.2-3b-q4")
+        self.assertEqual(captured["url"], "http://127.0.0.1:11434/api/chat")
+        self.assertEqual(captured["body"]["model"], "llama3.2:3b")
         self.assertEqual(raw["_route"]["selected_role"], "small")
         self.assertEqual(raw["_route"]["task_profile"], "tax_match_small")
 
@@ -85,19 +80,30 @@ class LLMLocalModeTests(unittest.TestCase):
         svc = LLMService(self.cfg)
         captured = {}
 
-        def _fake_completion(_client, kwargs):
-            captured.update(kwargs)
-            return _FakeResponse('{"ok": true}')
+        def _fake_ollama_post(url, body, headers, timeout):
+            captured.update({
+                "url": url,
+                "body": body,
+                "headers": headers,
+                "timeout": timeout,
+            })
+            return {
+                "model": body["model"],
+                "done": True,
+                "message": {"role": "assistant", "content": '{"ok": true}'},
+                "prompt_eval_count": 12,
+                "eval_count": 24,
+            }
 
-        with patch("app.core.llm.OpenAI", return_value=object()):
-            with patch.object(svc, "_create_chat_completion", side_effect=_fake_completion):
-                _content, raw = svc.chat(
-                    [{"role": "user", "content": "test"}],
-                    overrides={"max_tokens": 123},
-                )
+        with patch.object(svc, "_post_ollama_chat", side_effect=_fake_ollama_post):
+            _content, raw = svc.chat(
+                [{"role": "user", "content": "test"}],
+                overrides={"max_tokens": 123},
+            )
 
-        self.assertEqual(captured["model"], "qwen3.6-27b-q4")
-        self.assertEqual(captured["max_tokens"], 123)
+        self.assertEqual(captured["url"], "http://127.0.0.1:11434/api/chat")
+        self.assertEqual(captured["body"]["model"], "qwen3.6:27b")
+        self.assertEqual(captured["body"]["options"]["num_predict"], 123)
         self.assertEqual(raw["_route"]["selected_role"], "main")
 
 

@@ -22,13 +22,15 @@ class LLMRouterTests(unittest.TestCase):
                 "cloud_fallback_enabled": True,
                 "timeout_sec": 30,
                 "main_model": {
-                    "api_base": "http://127.0.0.1:8011/v1",
-                    "model": "qwen3.6-27b-q4",
+                    "provider": "ollama",
+                    "api_base": "http://127.0.0.1:11434/v1",
+                    "model": "qwen3.6:27b",
                     "headers": {"X-Model": "main"},
                 },
                 "small_model": {
-                    "api_base": "http://127.0.0.1:8012/v1",
-                    "model": "llama-3.2-3b-q4",
+                    "provider": "ollama",
+                    "api_base": "http://127.0.0.1:11434/v1",
+                    "model": "llama3.2:3b",
                     "headers": {"X-Model": "small"},
                 },
                 "routing": {
@@ -42,13 +44,14 @@ class LLMRouterTests(unittest.TestCase):
 
     def test_default_task_routes_to_main_model(self):
         cfg, meta = resolve_llm_route(self.cfg, task_profile="default")
-        self.assertEqual(cfg["model"], "qwen3.6-27b-q4")
+        self.assertEqual(cfg["model"], "qwen3.6:27b")
+        self.assertEqual(cfg["provider"], "ollama")
         self.assertEqual(meta["selected_role"], "main")
         self.assertEqual(meta["selected_source"], "main_model")
 
     def test_small_task_routes_to_small_model(self):
         cfg, meta = resolve_llm_route(self.cfg, task_profile="tax_match_small")
-        self.assertEqual(cfg["model"], "llama-3.2-3b-q4")
+        self.assertEqual(cfg["model"], "llama3.2:3b")
         self.assertEqual(cfg["headers"]["X-Base"], "base")
         self.assertEqual(cfg["headers"]["X-Model"], "small")
         self.assertEqual(meta["selected_role"], "small")

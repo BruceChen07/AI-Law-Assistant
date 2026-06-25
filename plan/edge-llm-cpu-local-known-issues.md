@@ -26,14 +26,16 @@ The current implementation has not yet completed:
 - Severity: High
 - Status: Open
 - Description:
-  The repository now supports a local main model route, but the current session has not validated a real running local main model service on `http://127.0.0.1:8011/v1`.
+  The repository now supports a local main model route, but the current session has not validated a real running Ollama main model service on `http://127.0.0.1:11434/v1`.
 - Impact:
   `TC-001` remains open.
 - Suggested Action:
   Start the real local service and run:
 
-```powershell
-.\bin\run-edge-llm-regression.ps1 -IncludeLocalSmoke
+```bash
+python .\bin\start-local-llm-servers.py
+python .\bin\download-local-llm-models.py
+python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
 ```
 
 ### KI-002 Long Document Timeout Behavior Not Yet Pressure Tested
@@ -61,18 +63,18 @@ The current implementation has not yet completed:
 - Suggested Action:
   Replace remaining `datetime.utcnow()` usage with timezone-aware UTC timestamps in a focused cleanup pass.
 
-### KI-004 Local Smoke Models Are Still Placeholder Names In Validation Script
+### KI-004 Ollama Model Availability Depends On Local Installation
 
 - Severity: Medium
 - Status: Open
 - Description:
-  The regression script uses placeholder model names:
-  - `qwen3.6-27b-q4`
-  - `llama-3.2-3b-q4`
+  The local runtime now assumes these Ollama model names are installed:
+  - `qwen3.6:27b`
+  - `llama3.2:3b`
 - Impact:
-  If the actual deployed server registers a different model name, smoke validation may fail even when the endpoint is healthy.
+  If the local machine has not pulled the exact model tags, startup and smoke validation will fail.
 - Suggested Action:
-  Align script defaults with actual deployment names, or make them configurable in a later patch.
+  Run `python .\bin\download-local-llm-models.py` or override model names in the local config.
 
 ### KI-005 Cloud Fallback Cost Control Not Yet Measured
 
