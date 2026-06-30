@@ -53,6 +53,7 @@ data/memory/
 data/app.db
 logs/
 log/
+models/
 models/embedding/
 models/reranker/
 models/translation/
@@ -75,3 +76,6 @@ app/config.json
 
 # Runtime state
 .runtime/services.pids.json
+
+# Local IDE / agent assets
+.trae/skills/

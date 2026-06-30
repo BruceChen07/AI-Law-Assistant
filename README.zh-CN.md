@@ -242,7 +242,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 ### 端侧大模型 CPU 本地部署（Phase 0-5）
 
-系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，支持主模型/轻量模型路由与云端兜底。
+系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，并可在企业内网场景下以“纯本地、无云端兜底”方式运行。
 
 **本地模型配置示例**（`app/config.json` 中新增 `local_llm` 字段）：
 
@@ -250,6 +250,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 "local_llm": {
     "enabled": true,
     "routing_enabled": true,
+    "cloud_fallback_enabled": false,
     "main_model": {
         "provider": "ollama",
         "model": "qwen3.6:27b",
@@ -264,11 +265,6 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
         "max_tokens": 400,
         "timeout": 30
     },
-    "cloud_fallback": {
-        "model": "gpt-4o-mini",
-        "api_base": "https://api.openai.com/v1",
-        "timeout": 45
-    },
     "routing": {
         "task_profiles": {
             "contract_audit_main": "main",
@@ -277,11 +273,12 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
             "memory_flush": "small",
             "entity_extract_small": "small",
             "tax_match_small": "small"
-        }
+        },
+        "high_risk_force_cloud": false
     },
     "execution": {
-        "fallback_on_error": true,
-        "fallback_on_invalid_json": true,
+        "fallback_on_error": false,
+        "fallback_on_invalid_json": false,
         "tax_match_cloud_review_labels": ["non_compliant"],
         "tax_match_min_confidence": 0.7,
         "tax_match_max_workers": 2,
@@ -292,8 +289,8 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 **核心能力**：
 - **任务画像路由**：合同审计主流程走 `main` 模型，实体抽取与规则匹配走 `small` 模型
-- **失败回退**：本地模型异常或返回坏 JSON 时自动回退 `cloud_fallback`
-- **高风险复核**：`non_compliant` 税务匹配项可强制升级云端复核
+- **纯本地执行**：所有大模型调用仅访问本机 Ollama，不上传到外部云端
+- **本地容错**：保留 JSON 容错和结果校验，但不再把异常或坏 JSON 升级到云端
 - **JSON 容错**：自动修复 fenced JSON / 尾逗号 / 包裹文本等本地模型常见脏输出
 - **并发约束**：本地模式可独立限制 worker 上限，避免 CPU 过载
 
@@ -318,7 +315,6 @@ python .\bin\start-services.py
 |------|---------|------|---------|
 | 主审计模型 | `qwen3.6:27b` | Ollama | 64-128 GB RAM, 16-24 物理核 |
 | 侧车模型 | `llama3.2:3b` | Ollama | 8-12 GB RAM, 4-8 物理核 |
-| 云端兜底 | GPT-4o-mini | - | 网络连接 |
 
 **回归测试**：
 ```bash
@@ -366,10 +362,10 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
     "ocr_engine": "auto",
     "ocr_engine_order": ["tesseract", "mineru"],
     "llm_config": {
-        "provider": "openai_compatible",
-        "api_base": "https://api.openai.com/v1",
+        "provider": "ollama",
+        "api_base": "http://127.0.0.1:11434/v1",
         "api_key": "",
-        "model": "gpt-4o-mini",
+        "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,

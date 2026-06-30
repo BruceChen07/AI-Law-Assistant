@@ -8,7 +8,7 @@ def build_local_llm_config(enabled: bool) -> dict:
     return {
         "enabled": enabled,
         "routing_enabled": True,
-        "cloud_fallback_enabled": True,
+        "cloud_fallback_enabled": False,
         "timeout_sec": 30,
         "json_repair_enabled": True,
         "main_model": {
@@ -44,11 +44,11 @@ def build_local_llm_config(enabled: bool) -> dict:
             },
             "tax_match_use_small_model": True,
             "entity_extract_use_small_model": True,
-            "high_risk_force_cloud": True,
+            "high_risk_force_cloud": False,
         },
         "execution": {
-            "fallback_on_error": True,
-            "fallback_on_invalid_json": True,
+            "fallback_on_error": False,
+            "fallback_on_invalid_json": False,
             "tax_match_cloud_review_labels": ["non_compliant"],
             "tax_match_min_confidence": 0.65,
             "tax_match_max_workers": 2,
@@ -57,6 +57,19 @@ def build_local_llm_config(enabled: bool) -> dict:
             "memory_clause_force_cloud_for_priority": False,
             "memory_flush_force_cloud": False,
         },
+    }
+
+
+def build_base_llm_config() -> dict:
+    return {
+        "provider": "ollama",
+        "api_base": "http://127.0.0.1:11434/v1",
+        "api_key": "",
+        "model": "qwen3.6:27b",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 60,
+        "headers": {},
     }
 
 
@@ -96,6 +109,7 @@ def main() -> int:
     if isinstance(config.get("local_llm"), dict):
         previous_enabled = config["local_llm"].get("enabled")
 
+    config["llm_config"] = build_base_llm_config()
     config["local_llm"] = build_local_llm_config(enabled=not args.disable)
 
     if args.dry_run:
@@ -118,11 +132,12 @@ def main() -> int:
         print("Local LLM mode is now ACTIVE:")
         print("  Main model:  http://127.0.0.1:11434/v1 (qwen3.6:27b)")
         print("  Small model: http://127.0.0.1:11434/v1 (llama3.2:3b)")
-        print("  Cloud fallback: ENABLED (uses llm_config on failure)")
+        print("  Cloud fallback: DISABLED")
+        print("  Base llm_config: points to local Ollama main model")
         print()
         print(r"Next step: python .\bin\download-local-llm-models.py")
     else:
-        print("[OK] Local LLM mode disabled. Cloud-only mode.")
+        print("[OK] Local routing disabled. Base llm_config still points to local Ollama.")
 
     return 0
 

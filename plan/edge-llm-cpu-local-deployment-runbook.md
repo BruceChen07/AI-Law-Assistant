@@ -8,7 +8,7 @@ Scope:
 
 - Main local model service
 - Small local model service
-- Cloud fallback connectivity check
+- Local-only enterprise deployment
 - Regression execution
 
 This document is the phase 4 delivery runbook. It assumes the repository uses Ollama as the only local LLM runtime.
@@ -17,7 +17,6 @@ This document is the phase 4 delivery runbook. It assumes the repository uses Ol
 
 - Main model endpoint: `http://127.0.0.1:11434/v1`
 - Small model endpoint: `http://127.0.0.1:11434/v1`
-- Cloud fallback endpoint: configured by `llm_config.api_base`
 - App backend: `http://127.0.0.1:8000`
 - App frontend: `http://127.0.0.1:5173`
 
@@ -25,7 +24,6 @@ Recommended model mapping:
 
 - Main model: `qwen3.6:27b`
 - Small model: `llama3.2:3b`
-- Cloud fallback: `gpt-4o-mini` or compatible OpenAI-style provider
 
 ## 3. Prerequisites
 
@@ -59,6 +57,8 @@ Then update:
 - `local_llm.enabled`
 - `local_llm.main_model`
 - `local_llm.small_model`
+- `local_llm.cloud_fallback_enabled = false`
+- `local_llm.routing.high_risk_force_cloud = false`
 
 ## 4. Recommended Config
 
@@ -67,14 +67,14 @@ Key settings in `app/config.json`:
 ```json
 {
   "llm_config": {
-    "provider": "openai_compatible",
-    "api_base": "https://api.openai.com/v1",
-    "model": "gpt-4o-mini"
+    "provider": "ollama",
+    "api_base": "http://127.0.0.1:11434/v1",
+    "model": "qwen3.6:27b"
   },
   "local_llm": {
     "enabled": true,
     "routing_enabled": true,
-    "cloud_fallback_enabled": true,
+    "cloud_fallback_enabled": false,
     "main_model": {
       "provider": "ollama",
       "api_base": "http://127.0.0.1:11434/v1",
@@ -91,12 +91,12 @@ Key settings in `app/config.json`:
 
 Important execution controls:
 
-- `local_llm.execution.fallback_on_error`
-- `local_llm.execution.fallback_on_invalid_json`
+- `local_llm.execution.fallback_on_error = false`
+- `local_llm.execution.fallback_on_invalid_json = false`
 - `local_llm.execution.tax_match_max_workers`
 - `local_llm.execution.tax_risk_max_workers`
-- `local_llm.execution.memory_clause_force_cloud_for_priority`
-- `local_llm.execution.memory_flush_force_cloud`
+- `local_llm.execution.memory_clause_force_cloud_for_priority = false`
+- `local_llm.execution.memory_flush_force_cloud = false`
 
 ## 5. Local Model Startup
 
@@ -117,6 +117,7 @@ Notes:
 
 - Both local roles use the same Ollama API endpoint and are distinguished by model name.
 - The application uses Ollama official runtime management and Ollama-compatible inference configuration.
+- This branch is intended for enterprise local-only deployment and must not point `llm_config` or `local_llm` to external providers.
 
 ## 6. App Startup
 
@@ -157,7 +158,7 @@ python .\bin\download-local-llm-models.py
 python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
 ```
 
-Optional cloud validation:
+Write enterprise local-only config:
 
 ```bash
 python .\bin\apply-local-llm-config.py
@@ -168,23 +169,23 @@ python .\bin\apply-local-llm-config.py
 - `TC-001`: local main model endpoint reachable
 - `TC-002`: route selection tests pass
 - `TC-004`: JSON guard tests pass
-- `TC-005`: fallback and cloud review tests pass
+- `TC-005`: local validation and structured-output guard tests pass
 - `TC-007`: memory fallback tests pass
 - `TC-008`: full regression passes
 
 ## 9. Operations Guidance
 
 - Default to local small model for extraction and tax match tasks
-- Keep cloud fallback enabled until real local smoke and long-document pressure tests pass
+- Keep all model endpoints pointing to the local Ollama service
 - Keep `tax_match_max_workers` and `tax_risk_max_workers` conservative on CPU-only machines
-- Turn on `memory_clause_force_cloud_for_priority` only if high-priority clauses show regression during validation
+- Keep `memory_clause_force_cloud_for_priority` disabled in enterprise local-only deployments
 
 ## 10. Rollback
 
 If local edge mode is unstable:
 
 - Set `local_llm.enabled` to `false`
-- Keep `llm_config` pointing to the cloud endpoint
+- Keep `llm_config` pointing to the local Ollama main model
 - Re-run:
 
 ```bash

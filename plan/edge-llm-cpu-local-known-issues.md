@@ -8,8 +8,7 @@ The current implementation has completed:
 
 - Routing
 - JSON guard
-- Local fallback
-- Cloud review for high-risk tax cases
+- Local-only configuration path
 - Memory pipeline fallback
 - Regression automation entrypoint
 
@@ -45,7 +44,7 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 - Description:
   Memory mode has fallback logic, but there is still no live long-document pressure test using a real CPU-only model.
 - Impact:
-  The system may still show latency spikes or overuse cloud fallback on large contracts.
+  The system may still show latency spikes or degraded output quality on large contracts.
 - Suggested Action:
   Prepare a long contract dataset and run controlled latency tests for:
   - `memory` mode
@@ -76,16 +75,16 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 - Suggested Action:
   Run `python .\bin\download-local-llm-models.py` or override model names in the local config.
 
-### KI-005 Cloud Fallback Cost Control Not Yet Measured
+### KI-005 Enterprise Local-Only Guardrails Not Yet API-Level Verified
 
 - Severity: Medium
 - Status: Open
 - Description:
-  The runtime can now promote high-risk or invalid local results to cloud fallback, but the actual cloud fallback ratio is not yet measured with production-like workloads.
+  The enterprise branch disables cloud fallback by configuration, but a full API-level acceptance pass has not yet verified that all deployed configs keep `llm_config` and `local_llm` pointed only to local Ollama endpoints.
 - Impact:
-  Real operating cost remains uncertain.
+  A misconfigured environment could still accidentally target a non-local provider.
 - Suggested Action:
-  Add fallback counters to dashboards or export trace summaries for analysis.
+  Run admin/API acceptance checks with the enterprise config and confirm every effective model target resolves to `http://127.0.0.1:11434/v1`.
 
 ## 3. Closed Or Mitigated Issues
 
@@ -93,13 +92,13 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 
 - Status: Mitigated
 - Notes:
-  `JSON Guard` plus fallback logic now covers tax and memory callback paths.
+  `JSON Guard` now covers tax and memory callback paths, reducing local structured-output failures.
 
 ### KI-M2 High-Risk Tax Match Cannot Be Escalated
 
 - Status: Mitigated
 - Notes:
-  `tax_matcher` and `tax_risk` now support high-risk cloud review behavior.
+  The enterprise branch keeps high-risk review local by disabling forced cloud escalation in the default config.
 
 ### KI-M3 Memory Callback Failure Can Abort Useful Output
 
@@ -114,4 +113,4 @@ Phase 4 can be considered fully closed when all items below are satisfied:
 - `TC-001` passes with real local services
 - `TC-007B` passes with real long documents
 - `TC-008` is executed with a full regression result log
-- Known fallback ratio is measured and reviewed
+- Enterprise local-only config is API-level verified end-to-end

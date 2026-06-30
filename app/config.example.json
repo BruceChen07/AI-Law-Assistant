@@ -67,19 +67,19 @@
         "timeout": 900
     },
     "llm_config": {
-        "provider": "openai_compatible",
-        "api_base": "https://api.openai.com/v1",
+        "provider": "ollama",
+        "api_base": "http://127.0.0.1:11434/v1",
         "api_key": "",
-        "model": "gpt-4o-mini",
+        "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,
         "headers": {}
     },
     "local_llm": {
-        "enabled": false,
+        "enabled": true,
         "routing_enabled": true,
-        "cloud_fallback_enabled": true,
+        "cloud_fallback_enabled": false,
         "timeout_sec": 30,
         "json_repair_enabled": true,
         "main_model": {
@@ -115,11 +115,11 @@
             },
             "tax_match_use_small_model": true,
             "entity_extract_use_small_model": true,
-            "high_risk_force_cloud": true
+            "high_risk_force_cloud": false
         },
         "execution": {
-            "fallback_on_error": true,
-            "fallback_on_invalid_json": true,
+            "fallback_on_error": false,
+            "fallback_on_invalid_json": false,
             "tax_match_cloud_review_labels": [
                 "non_compliant"
             ],
