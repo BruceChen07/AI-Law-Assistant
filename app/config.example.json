@@ -9,7 +9,7 @@
             "embedding_model": "../models/embedding/zh/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/zh",
             "embedding_model_id": "BAAI/bge-small-zh-v1.5",
-            "embedding_source": "modelscope",
+            "embedding_source": "local_registry",
             "embedding_max_seq_len": 512,
             "embedding_pooling": "cls",
             "embedding_query_instruction": "为这个句子生成表示以用于检索相关文章：",
@@ -19,7 +19,7 @@
             "embedding_model": "../models/embedding/en/model.onnx",
             "embedding_tokenizer_dir": "../models/embedding/en",
             "embedding_model_id": "BAAI/bge-small-en-v1.5",
-            "embedding_source": "modelscope",
+            "embedding_source": "local_registry",
             "embedding_max_seq_len": 512,
             "embedding_pooling": "cls",
             "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:",
@@ -63,40 +63,57 @@
         "device": "cpu",
         "formula": true,
         "table": true,
-        "model_source": "huggingface",
+        "model_source": "local_files",
         "timeout": 900
     },
     "llm_config": {
         "provider": "openai_compatible",
-        "api_base": "https://api.openai.com/v1",
+        "api_base": "http://127.0.0.1:18081/v1",
         "api_key": "",
-        "model": "gpt-4o-mini",
+        "model": "qwen3-14b-instruct-awq",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,
         "headers": {}
     },
+    "network_policy": {
+        "enabled": true,
+        "mode": "offline_strict",
+        "allow_private_ip_ranges": true,
+        "allowed_hosts": [
+            "127.0.0.1",
+            "localhost",
+            "llm-gateway.intra",
+            "ollama.intra",
+            "ocr-gateway.intra"
+        ],
+        "allowed_domain_suffixes": [
+            ".intra",
+            ".corp.local",
+            ".svc.cluster.local"
+        ]
+    },
     "local_llm": {
-        "enabled": false,
+        "enabled": true,
         "routing_enabled": true,
-        "cloud_fallback_enabled": true,
+        "allow_small_to_main_fallback": true,
         "timeout_sec": 30,
         "json_repair_enabled": true,
         "main_model": {
-            "provider": "ollama",
-            "api_base": "http://127.0.0.1:11434/v1",
+            "provider": "openai_compatible",
+            "api_base": "http://127.0.0.1:18081/v1",
             "api_key": "",
-            "model": "qwen3.6:27b",
+            "model": "qwen3-14b-instruct-awq",
             "temperature": 0.2,
             "max_tokens": 2048,
             "timeout": 30,
             "headers": {}
         },
         "small_model": {
-            "provider": "ollama",
-            "api_base": "http://127.0.0.1:11434/v1",
+            "provider": "openai_compatible",
+            "api_base": "http://127.0.0.1:18082/v1",
             "api_key": "",
-            "model": "llama3.2:3b",
+            "model": "qwen3-4b-instruct-awq",
             "temperature": 0.1,
             "max_tokens": 1024,
             "timeout": 20,
@@ -115,20 +132,20 @@
             },
             "tax_match_use_small_model": true,
             "entity_extract_use_small_model": true,
-            "high_risk_force_cloud": true
+            "high_risk_force_main": true
         },
         "execution": {
             "fallback_on_error": true,
             "fallback_on_invalid_json": true,
-            "tax_match_cloud_review_labels": [
+            "tax_match_main_review_labels": [
                 "non_compliant"
             ],
             "tax_match_min_confidence": 0.65,
             "tax_match_max_workers": 2,
             "tax_risk_max_workers": 2,
             "entity_extract_max_workers": 4,
-            "memory_clause_force_cloud_for_priority": false,
-            "memory_flush_force_cloud": false
+            "memory_clause_force_main_for_priority": false,
+            "memory_flush_force_main": false
         }
     },
     "secret_store": {
@@ -181,7 +198,7 @@
         "mode": "dual",
         "cross_lang_source_query_enabled": false,
         "model_id": "tencent/HY-MT1.5-1.8B",
-        "model_dir": "",
+        "model_dir": "../models/translation/tencent__HY-MT1.5-1.8B",
         "device": "cpu",
         "source_langs": [
             "en"
@@ -200,6 +217,10 @@
     "llm_trace_enabled": false,
     "llm_trace_dir": "../data/memory/llm_interactions",
     "llm_trace_max_chars": 12000,
+    "model_preflight_check_on_startup": true,
+    "model_preflight_auto_download_on_startup": false,
+    "model_preflight_include_optional": false,
+    "model_preflight_require_all": true,
     "rag_trace_enabled": true,
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,

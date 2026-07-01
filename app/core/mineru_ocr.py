@@ -182,7 +182,7 @@ def _run_mineru(path: str, out_dir: str) -> Dict[str, Any]:
     device = str(mineru_cfg.get("device", "cpu"))
     formula = bool(mineru_cfg.get("formula", True))
     table = bool(mineru_cfg.get("table", True))
-    model_source = str(mineru_cfg.get("model_source", "huggingface"))
+    model_source = str(mineru_cfg.get("model_source", "local_files"))
     timeout = int(mineru_cfg.get("timeout", 900))
     ocr_langs = str(cfg.get("ocr_languages", "chi_sim+eng"))
     mineru_lang = str(mineru_cfg.get("lang") or _pick_lang("", ocr_langs))

@@ -240,34 +240,37 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 }
 ```
 
-### 端侧大模型 CPU 本地部署（Phase 0-5）
+### 企业内网严格离线部署
 
-系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，支持主模型/轻量模型路由与云端兜底。
+当前分支已切换为企业私有化离线部署基线，所有模型、OCR、检索与翻译能力均要求通过本机或企业内网服务提供，不再包含公网云端兜底逻辑。
 
-**本地模型配置示例**（`app/config.json` 中新增 `local_llm` 字段）：
+**离线模型配置示例**（`app/config.json`）：
 
 ```json
+"network_policy": {
+    "enabled": true,
+    "mode": "offline_strict",
+    "allow_private_ip_ranges": true,
+    "allowed_hosts": ["127.0.0.1", "localhost", "llm-gateway.intra"],
+    "allowed_domain_suffixes": [".intra", ".corp.local"]
+},
 "local_llm": {
     "enabled": true,
     "routing_enabled": true,
+    "allow_small_to_main_fallback": true,
     "main_model": {
-        "provider": "ollama",
-        "model": "qwen3.6:27b",
-        "api_base": "http://127.0.0.1:11434/v1",
+        "provider": "openai_compatible",
+        "model": "qwen3-14b-instruct-awq",
+        "api_base": "http://127.0.0.1:18081/v1",
         "max_tokens": 900,
         "timeout": 60
     },
     "small_model": {
-        "provider": "ollama",
-        "model": "llama3.2:3b",
-        "api_base": "http://127.0.0.1:11434/v1",
+        "provider": "openai_compatible",
+        "model": "qwen3-4b-instruct-awq",
+        "api_base": "http://127.0.0.1:18082/v1",
         "max_tokens": 400,
         "timeout": 30
-    },
-    "cloud_fallback": {
-        "model": "gpt-4o-mini",
-        "api_base": "https://api.openai.com/v1",
-        "timeout": 45
     },
     "routing": {
         "task_profiles": {
@@ -282,7 +285,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
     "execution": {
         "fallback_on_error": true,
         "fallback_on_invalid_json": true,
-        "tax_match_cloud_review_labels": ["non_compliant"],
+        "tax_match_main_review_labels": ["non_compliant"],
         "tax_match_min_confidence": 0.7,
         "tax_match_max_workers": 2,
         "tax_risk_max_workers": 2
@@ -292,8 +295,8 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 **核心能力**：
 - **任务画像路由**：合同审计主流程走 `main` 模型，实体抽取与规则匹配走 `small` 模型
-- **失败回退**：本地模型异常或返回坏 JSON 时自动回退 `cloud_fallback`
-- **高风险复核**：`non_compliant` 税务匹配项可强制升级云端复核
+- **失败回退**：轻量模型异常或返回坏 JSON 时仅允许升级到内网主模型
+- **网络守卫**：`offline_strict` 模式会阻断非内网地址的 LLM 请求
 - **JSON 容错**：自动修复 fenced JSON / 尾逗号 / 包裹文本等本地模型常见脏输出
 - **并发约束**：本地模式可独立限制 worker 上限，避免 CPU 过载
 
@@ -304,21 +307,25 @@ python .\bin\init.py
 
 # 2) 启动 Ollama 并确保模型已安装
 python .\bin\start-local-llm-servers.py
-python .\bin\download-local-llm-models.py
+python .\bin\download-local-llm-models.py --verify-only
 
-# 3) 写入本地 LLM 配置
+# 3) 写入离线 LLM 配置
 python .\bin\apply-local-llm-config.py
 
-# 4) 启动后端与前端
+# 4) 校验离线合规
+python .\bin\ensure_local_models.py --check-only --include-optional
+python .\bin\validate_offline_compliance.py
+
+# 5) 启动后端与前端
 python .\bin\start-services.py
 ```
 
 **推荐模型选型**：
 | 角色 | 推荐模型 | 量化 | 硬件要求 |
 |------|---------|------|---------|
-| 主审计模型 | `qwen3.6:27b` | Ollama | 64-128 GB RAM, 16-24 物理核 |
-| 侧车模型 | `llama3.2:3b` | Ollama | 8-12 GB RAM, 4-8 物理核 |
-| 云端兜底 | GPT-4o-mini | - | 网络连接 |
+| 主审计模型 | `qwen3-14b-instruct-awq` | 内网推理服务 | 64 GB RAM 起 |
+| 侧车模型 | `qwen3-4b-instruct-awq` | 内网推理服务 | 16 GB RAM 起 |
+| OCR / Translation | 本地目录模型 | 本地资产 | 由企业制品库分发 |
 
 **回归测试**：
 ```bash
@@ -326,9 +333,8 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 ```
 
 详细文档：
-- `plan/edge-llm-cpu-local-deployment-detailed-design.md` — 详细设计文档
-- `plan/edge-llm-cpu-local-deployment-runbook.md` — 部署与联调手册
-- `plan/edge-llm-cpu-local-known-issues.md` — 已知问题清单
+- `plan/enterprise-offline-private-deployment-design.md` — 企业内网严格离线方案
+- `plan/enterprise-offline-private-deployment-runbook.md` — 企业内网部署与验收手册
 
 ### API 接口
 
@@ -367,9 +373,9 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
     "ocr_engine_order": ["tesseract", "mineru"],
     "llm_config": {
         "provider": "openai_compatible",
-        "api_base": "https://api.openai.com/v1",
+        "api_base": "http://127.0.0.1:18081/v1",
         "api_key": "",
-        "model": "gpt-4o-mini",
+        "model": "qwen3-14b-instruct-awq",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,

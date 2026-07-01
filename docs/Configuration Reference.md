@@ -22,8 +22,8 @@ This document explains the configuration fields in `app/config.example.json`.
 |---|---|---|
 | `embedding_model` | string | ONNX model file path. |
 | `embedding_tokenizer_dir` | string | Tokenizer directory path. |
-| `embedding_model_id` | string | Source model ID (for identification/download). |
-| `embedding_source` | string | Model source platform (e.g. `modelscope`). |
+| `embedding_model_id` | string | Internal model ID used for artifact traceability. |
+| `embedding_source` | string | Model source label, recommended `local_registry`. |
 | `embedding_max_seq_len` | int | Maximum sequence length for embedding input. |
 | `embedding_pooling` | string | Embedding pooling strategy (e.g. `cls`). |
 | `embedding_query_instruction` | string | Query prefix/instruction used to improve retrieval quality. |
@@ -66,7 +66,7 @@ This document explains the configuration fields in `app/config.example.json`.
 | `device` | string | Runtime device (`cpu` / `cuda`). |
 | `formula` | bool | Enable formula parsing. |
 | `table` | bool | Enable table parsing. |
-| `model_source` | string | Model source platform. |
+| `model_source` | string | Model source mode, recommended `local_files`. |
 | `timeout` | int | OCR timeout (seconds). |
 
 ## 6) LLM
@@ -75,7 +75,7 @@ This document explains the configuration fields in `app/config.example.json`.
 
 | Key | Type | Description |
 |---|---|---|
-| `provider` | string | LLM provider type, currently OpenAI-compatible style. |
+| `provider` | string | LLM protocol type, recommended internal OpenAI-compatible gateway or local Ollama. |
 | `api_base` | string | Base URL of chat-completions API. |
 | `api_key` | string | API key. Prefer secure store/environment in production. |
 | `model` | string | Model name. |
@@ -83,6 +83,16 @@ This document explains the configuration fields in `app/config.example.json`.
 | `max_tokens` | int | Max response tokens. |
 | `timeout` | int | Request timeout in seconds. |
 | `headers` | object | Extra HTTP headers. |
+
+### `network_policy`
+
+| Key | Type | Description |
+|---|---|---|
+| `enabled` | bool | Enable network policy guard before each LLM request. |
+| `mode` | string | `offline_strict` blocks non-intranet hosts. |
+| `allow_private_ip_ranges` | bool | Allow RFC1918/private IP ranges. |
+| `allowed_hosts` | string[] | Explicit allowlist of enterprise hostnames/IPs. |
+| `allowed_domain_suffixes` | string[] | Explicit allowlist of enterprise domain suffixes. |
 
 ### `secret_store`
 
@@ -107,8 +117,8 @@ This document explains the configuration fields in `app/config.example.json`.
 | `backend` | string | Translation backend implementation. |
 | `mode` | string | `dual` or `translate_only`. |
 | `cross_lang_source_query_enabled` | bool | In `dual` mode and cross-language scenario, whether to also run source-language retrieval. Set `false` to avoid duplicate retrieval when corpus is Chinese-only. |
-| `model_id` | string | Translation model ID. |
-| `model_dir` | string | Local model directory override. |
+| `model_id` | string | Internal translation model identifier. |
+| `model_dir` | string | Local model directory. Required for offline deployment. |
 | `device` | string | Translation device (`cpu` / `cuda`). |
 | `source_langs` | string[] | Source languages eligible for translation. |
 | `target_lang` | string | Translation target language. |
@@ -205,7 +215,8 @@ This setup uses translated Chinese query for RAG and avoids redundant English se
 - Enable `rag_trace_enabled` (and optionally `llm_trace_enabled`) for troubleshooting.
 - Keep `contract_audit_debug_retention_days` small (e.g. `7`) to control disk usage.
 
-### Production mode
-- Prefer secure key storage (`secret_store.enabled: true`) and do not store raw API keys in config files.
-- Set strict CORS origins.
-- Tune trace/debug retention and archive settings based on compliance/storage policy.
+### Enterprise offline mode
+- Set `network_policy.mode: "offline_strict"`.
+- Keep `local_llm.enabled: true` and `allow_small_to_main_fallback: true`.
+- Set all model directories to pre-staged local paths.
+- Run `bin/validate_offline_compliance.py` before delivery.

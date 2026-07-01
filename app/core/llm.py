@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 import os
@@ -6,8 +7,9 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlsplit
+
 import httpx
-from openai import OpenAI, APITimeoutError
+
 from app.core.llm_router import resolve_llm_route
 from app.core.secure_store import get_llm_api_key
 
@@ -68,11 +70,7 @@ class LLMService:
         secure_key = self._clean_text(get_llm_api_key(self.cfg))
         if secure_key:
             return secure_key
-        for name in ["LLM_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"]:
-            env_key = self._clean_text(os.environ.get(name, ""))
-            if env_key:
-                return env_key
-        return ""
+        return self._clean_text(os.environ.get("LLM_API_KEY", ""))
 
     def _build_base_url(self, base: str) -> str:
         s = re.sub(r"\s+", "", self._clean_text(base))
@@ -95,6 +93,57 @@ class LLMService:
             if s.endswith(suffix):
                 s = s[: -len(suffix)]
         return s.rstrip("/")
+
+    def _network_policy(self) -> Dict[str, Any]:
+        raw = self.cfg.get("network_policy")
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def _offline_mode_enabled(self) -> bool:
+        policy = self._network_policy()
+        return bool(policy.get("enabled", True)) and str(
+            policy.get("mode", "offline_strict")
+        ).strip().lower() == "offline_strict"
+
+    def _is_allowed_host(self, host: str) -> bool:
+        normalized = self._clean_text(host).lower()
+        if not normalized:
+            return False
+        policy = self._network_policy()
+        allowed_hosts = {
+            str(x).strip().lower()
+            for x in (policy.get("allowed_hosts") or [])
+            if str(x).strip()
+        }
+        allowed_suffixes = [
+            str(x).strip().lower()
+            for x in (policy.get("allowed_domain_suffixes") or [])
+            if str(x).strip()
+        ]
+        if normalized in allowed_hosts or normalized in {"127.0.0.1", "localhost", "::1"}:
+            return True
+        if any(normalized.endswith(suffix) for suffix in allowed_suffixes):
+            return True
+        try:
+            ip = ipaddress.ip_address(normalized)
+            if ip.is_loopback:
+                return True
+            return bool(policy.get("allow_private_ip_ranges", True)) and (
+                ip.is_private or ip.is_link_local
+            )
+        except ValueError:
+            # Hostnames without public suffixes are commonly used in intranet DNS.
+            if "." not in normalized:
+                return True
+        return False
+
+    def _enforce_network_policy(self, base_url: str) -> None:
+        if not self._offline_mode_enabled():
+            return
+        host = urlsplit(base_url).hostname or ""
+        if not self._is_allowed_host(host):
+            raise RuntimeError(
+                f"network policy blocked non-intranet LLM endpoint: {host or '<empty>'}"
+            )
 
     def _build_headers(self, api_key: Optional[str], extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -217,26 +266,30 @@ class LLMService:
             kwargs["extra_body"] = extra_body
         return kwargs
 
-    def _create_chat_completion(self, client: OpenAI, kwargs: Dict[str, Any]):
-        try:
-            return client.chat.completions.create(**kwargs)
-        except Exception as e:
-            msg = str(e).lower()
-            if (
-                "unsupported" in msg
-                or "unknown" in msg
-                or "unrecognized" in msg
-                or "invalid" in msg
-                or "unexpected keyword" in msg
-                or "unexpected keyword argument" in msg
-            ) and (
-                "extra_body" in kwargs or "reasoning_effort" in kwargs
-            ):
-                fallback_kwargs = dict(kwargs)
-                fallback_kwargs.pop("extra_body", None)
-                fallback_kwargs.pop("reasoning_effort", None)
-                return client.chat.completions.create(**fallback_kwargs)
-            raise
+    def _build_openai_compatible_body(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        body = self._build_chat_kwargs(model, messages, temperature, max_tokens, cfg)
+        extra_body = body.pop("extra_body", None)
+        if isinstance(extra_body, dict):
+            body.update(extra_body)
+        return body
+
+    def _post_json(
+        self,
+        url: str,
+        body: Dict[str, Any],
+        headers: Dict[str, str],
+        timeout: int,
+    ) -> Dict[str, Any]:
+        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
 
     def _build_ollama_chat_body(
         self,
@@ -281,9 +334,7 @@ class LLMService:
         headers: Dict[str, str],
         timeout: int,
     ) -> Dict[str, Any]:
-        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
+        return self._post_json(url, body, headers, timeout)
 
     def _chat_via_ollama(
         self,
@@ -360,6 +411,67 @@ class LLMService:
         }
         return content, parsed
 
+    def _chat_via_openai_compatible(
+        self,
+        api_base: str,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        cfg: Dict[str, Any],
+        api_key: str,
+        extra_headers: Optional[Dict[str, str]],
+    ) -> Tuple[str, Dict[str, Any]]:
+        base_url = self._build_base_url(api_base)
+        self._enforce_network_policy(base_url)
+        request_url = f"{base_url}/chat/completions"
+        request_headers = self._build_headers(api_key, extra_headers)
+        request_body = self._build_openai_compatible_body(
+            model, messages, temperature, max_tokens, cfg
+        )
+        try:
+            raw = self._post_json(request_url, request_body, request_headers, timeout)
+        except httpx.TimeoutException as e:
+            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
+            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
+            retry_body = self._build_openai_compatible_body(
+                model, messages, temperature, retry_max_tokens, cfg
+            )
+            logger.warning(
+                "openai_compatible_timeout_retry url=%s model=%s timeout=%s->%s max_tokens=%s->%s",
+                request_url,
+                model,
+                timeout,
+                retry_timeout,
+                max_tokens,
+                retry_max_tokens,
+            )
+            try:
+                raw = self._post_json(
+                    request_url, retry_body, request_headers, retry_timeout
+                )
+            except Exception as e2:
+                raise RuntimeError(
+                    f"openai-compatible request failed after timeout retry: {str(e2)}"
+                ) from e2
+        choices = raw.get("choices") if isinstance(raw.get("choices"), list) else []
+        first_choice = choices[0] if choices else {}
+        message = first_choice.get("message") if isinstance(
+            first_choice.get("message"), dict
+        ) else {}
+        content = message.get("content", "")
+        if isinstance(content, list):
+            content = json.dumps(content, ensure_ascii=False)
+        parsed = dict(raw)
+        if not isinstance(parsed.get("usage"), dict):
+            parsed["usage"] = {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+        return str(content or ""), parsed
+
     def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
         cfg, route_meta, trace_meta = self._resolve_chat_target(overrides)
         api_base_raw = cfg.get("api_base", "")
@@ -376,12 +488,12 @@ class LLMService:
             raise RuntimeError("llm_config api_base or model missing")
 
         base_url = api_base
+        self._enforce_network_policy(base_url)
         timeout = int(cfg.get("timeout", 60))
-        retries = max(1, int(cfg.get("retries", 2)))
         input_tokens_est = self._estimate_input_tokens(messages)
         t0 = time.perf_counter()
         logger.info(
-            "llm_request_start api_base=%s base_url=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s retries=%s input_tokens_est=%s message_count=%s",
+            "llm_request_start api_base=%s base_url=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s input_tokens_est=%s message_count=%s",
             api_base,
             base_url,
             model,
@@ -390,7 +502,6 @@ class LLMService:
             temperature,
             max_tokens,
             timeout,
-            retries,
             input_tokens_est,
             len(messages)
         )
@@ -415,69 +526,17 @@ class LLMService:
                     extra_headers,
                 )
             else:
-                client = OpenAI(
-                    api_key=api_key or None,
-                    base_url=base_url,
-                    timeout=timeout,
-                    max_retries=max(0, retries - 1),
-                    default_headers=extra_headers or None
-                )
-                request_kwargs = self._build_chat_kwargs(
-                    model, messages, temperature, max_tokens, cfg)
-                resp = self._create_chat_completion(client, request_kwargs)
-                parsed = resp.model_dump()
-                try:
-                    content = resp.choices[0].message.content or ""
-                except Exception:
-                    content = json.dumps(parsed, ensure_ascii=False)
-        except APITimeoutError as e:
-            fallback_model = self._clean_text(cfg.get("fallback_model", ""))
-            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
-            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
-            retry_model = fallback_model or model
-            logger.warning(
-                "llm_request_timeout_retry base_url=%s model=%s retry_model=%s timeout=%s->%s max_tokens=%s->%s",
-                base_url,
-                model,
-                retry_model,
-                timeout,
-                retry_timeout,
-                max_tokens,
-                retry_max_tokens,
-            )
-            retry_client = OpenAI(
-                api_key=api_key or None,
-                base_url=base_url,
-                timeout=retry_timeout,
-                max_retries=0,
-                default_headers=extra_headers or None,
-            )
-            retry_cfg = dict(cfg)
-            retry_request_kwargs = self._build_chat_kwargs(
-                retry_model, messages, temperature, retry_max_tokens, retry_cfg)
-            try:
-                resp = self._create_chat_completion(
-                    retry_client, retry_request_kwargs)
-                parsed = resp.model_dump()
-                try:
-                    content = resp.choices[0].message.content or ""
-                except Exception:
-                    content = json.dumps(parsed, ensure_ascii=False)
-            except Exception as e2:
-                logger.exception(
-                    "llm_request_failed_after_retry api_base=%s base_url=%s model=%s retry_model=%s timeout=%s retry_timeout=%s raw_api_base=%r api_key=%s headers=%s",
+                content, parsed = self._chat_via_openai_compatible(
                     api_base,
-                    base_url,
                     model,
-                    retry_model,
+                    messages,
+                    temperature,
+                    max_tokens,
                     timeout,
-                    retry_timeout,
-                    cfg.get("api_base", ""),
-                    self._mask_secret(api_key),
-                    list((extra_headers or {}).keys()),
+                    cfg,
+                    api_key,
+                    extra_headers,
                 )
-                raise RuntimeError(
-                    f"llm request failed after timeout retry: {str(e2)}") from e2
         except Exception as e:
             logger.exception(
                 "llm_request_failed provider=%s api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",

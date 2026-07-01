@@ -8,9 +8,9 @@ class LLMRouterTests(unittest.TestCase):
         self.cfg = {
             "llm_config": {
                 "provider": "openai_compatible",
-                "api_base": "https://api.openai.com/v1",
+                "api_base": "http://127.0.0.1:18081/v1",
                 "api_key": "",
-                "model": "gpt-4o-mini",
+                "model": "qwen3-14b-instruct-awq",
                 "temperature": 0.2,
                 "max_tokens": 512,
                 "timeout": 60,
@@ -19,18 +19,18 @@ class LLMRouterTests(unittest.TestCase):
             "local_llm": {
                 "enabled": True,
                 "routing_enabled": True,
-                "cloud_fallback_enabled": True,
+                "allow_small_to_main_fallback": True,
                 "timeout_sec": 30,
                 "main_model": {
-                    "provider": "ollama",
-                    "api_base": "http://127.0.0.1:11434/v1",
-                    "model": "qwen3.6:27b",
+                    "provider": "openai_compatible",
+                    "api_base": "http://127.0.0.1:18081/v1",
+                    "model": "qwen3-14b-instruct-awq",
                     "headers": {"X-Model": "main"},
                 },
                 "small_model": {
-                    "provider": "ollama",
-                    "api_base": "http://127.0.0.1:11434/v1",
-                    "model": "llama3.2:3b",
+                    "provider": "openai_compatible",
+                    "api_base": "http://127.0.0.1:18082/v1",
+                    "model": "qwen3-4b-instruct-awq",
                     "headers": {"X-Model": "small"},
                 },
                 "routing": {
@@ -44,33 +44,33 @@ class LLMRouterTests(unittest.TestCase):
 
     def test_default_task_routes_to_main_model(self):
         cfg, meta = resolve_llm_route(self.cfg, task_profile="default")
-        self.assertEqual(cfg["model"], "qwen3.6:27b")
-        self.assertEqual(cfg["provider"], "ollama")
+        self.assertEqual(cfg["model"], "qwen3-14b-instruct-awq")
+        self.assertEqual(cfg["provider"], "openai_compatible")
         self.assertEqual(meta["selected_role"], "main")
         self.assertEqual(meta["selected_source"], "main_model")
 
     def test_small_task_routes_to_small_model(self):
         cfg, meta = resolve_llm_route(self.cfg, task_profile="tax_match_small")
-        self.assertEqual(cfg["model"], "llama3.2:3b")
+        self.assertEqual(cfg["model"], "qwen3-4b-instruct-awq")
         self.assertEqual(cfg["headers"]["X-Base"], "base")
         self.assertEqual(cfg["headers"]["X-Model"], "small")
         self.assertEqual(meta["selected_role"], "small")
 
-    def test_missing_small_model_falls_back_to_cloud(self):
+    def test_missing_small_model_falls_back_to_main(self):
         self.cfg["local_llm"]["small_model"] = {}
         cfg, meta = resolve_llm_route(self.cfg, task_profile="tax_match_small")
-        self.assertEqual(cfg["model"], "gpt-4o-mini")
-        self.assertEqual(meta["selected_role"], "cloud_fallback")
-        self.assertEqual(meta["reason"], "small_missing_fallback")
+        self.assertEqual(cfg["model"], "qwen3-14b-instruct-awq")
+        self.assertEqual(meta["selected_role"], "main")
+        self.assertEqual(meta["reason"], "small_missing_main_fallback")
 
-    def test_explicit_cloud_role_overrides_local(self):
+    def test_explicit_base_role_overrides_local(self):
         cfg, meta = resolve_llm_route(
             self.cfg,
             task_profile="tax_match_small",
-            model_role="cloud_fallback",
+            model_role="base",
         )
-        self.assertEqual(cfg["model"], "gpt-4o-mini")
-        self.assertEqual(meta["selected_role"], "cloud_fallback")
+        self.assertEqual(cfg["model"], "qwen3-14b-instruct-awq")
+        self.assertEqual(meta["selected_role"], "base")
         self.assertEqual(meta["reason"], "preferred_role")
 
 

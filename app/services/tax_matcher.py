@@ -21,7 +21,7 @@ from app.services.local_llm_runtime import (
     get_cloud_review_labels,
     get_local_worker_limit,
     get_tax_match_min_confidence,
-    is_high_risk_force_cloud,
+    is_high_risk_force_main,
 )
 
 logger = logging.getLogger("law_assistant")
@@ -106,9 +106,9 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
         route = raw.get("_route") if isinstance(
             raw, dict) and isinstance(raw.get("_route"), dict) else {}
         needs_cloud_review = (
-            is_high_risk_force_cloud(cfg)
+            is_high_risk_force_main(cfg)
             and str(label).lower() in set(get_cloud_review_labels(cfg))
-            and str(route.get("selected_role") or "") != "cloud_fallback"
+            and str(route.get("selected_role") or "") != "main"
         )
         if needs_cloud_review or float(score) < get_tax_match_min_confidence(cfg):
             review_response, review_raw, review_meta = call_with_fallback(
@@ -116,7 +116,7 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
                 cfg,
                 [{"role": "user", "content": prompt}],
                 "tax_match_small",
-                force_cloud=True,
+                force_main=True,
                 retry_on_error=False,
                 retry_on_invalid=False,
                 validator=lambda text, _raw: _is_valid_match_result(
@@ -130,7 +130,7 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
                 fallback_meta = {
                     "fallback_used": True,
                     "fallback_reason": "high_risk_review" if needs_cloud_review else "low_confidence_review",
-                    "final_model_role": "cloud_fallback",
+                    "final_model_role": "main",
                     "review_meta": review_meta,
                 }
     except Exception as e:

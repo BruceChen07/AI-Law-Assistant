@@ -352,10 +352,10 @@ def create_memory_callbacks(
             llm_budget["called_high_priority_clauses"] = int(
                 llm_budget.get("called_high_priority_clauses") or 0) + 1
         try:
-            force_cloud = bool(
+            force_main = bool(
                 is_high_priority_clause
                 and get_execution_flag(
-                    cfg, "memory_clause_force_cloud_for_priority", False)
+                    cfg, "memory_clause_force_main_for_priority", False)
             )
             result_text, llm_raw, fallback_meta = call_with_fallback(
                 llm,
@@ -366,7 +366,7 @@ def create_memory_callbacks(
                 overrides={"max_tokens": 600, "enable_thinking": False, "reasoning_effort": "low",
                            "thinking_budget_tokens": 0, "_trace_meta": clause_trace_meta},
                 validator=lambda text, _raw: _is_valid_clause_result(text),
-                force_cloud=force_cloud,
+                force_main=force_main,
             )
         except Exception as e:
             clause_parse_state["count"] += 1
@@ -592,8 +592,8 @@ def create_memory_callbacks(
                 round_runtime.get("clause_id") or ""), "result": out}, flush_round)
             return out
         llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
-        force_cloud = get_execution_flag(
-            cfg, "memory_flush_force_cloud", False)
+        force_main = get_execution_flag(
+            cfg, "memory_flush_force_main", False)
         try:
             result_text, _raw, fallback_meta = call_with_fallback(
                 llm,
@@ -604,7 +604,7 @@ def create_memory_callbacks(
                 overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low",
                            "thinking_budget_tokens": 0, "_trace_meta": flush_trace_meta},
                 validator=lambda text, _raw: _is_valid_flush_result(text),
-                force_cloud=force_cloud,
+                force_main=force_main,
             )
             out = str(result_text or "").strip()
         except Exception as e:

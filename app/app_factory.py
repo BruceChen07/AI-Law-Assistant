@@ -64,7 +64,7 @@ def create_app():
     preflight_auto_download = bool(
         cfg.get("model_preflight_auto_download_on_startup", False))
     preflight_include_optional = bool(
-        cfg.get("model_preflight_include_optional", True))
+        cfg.get("model_preflight_include_optional", False))
     preflight_require_all = bool(cfg.get("model_preflight_require_all", True))
     if preflight_enabled:
         logger.info(

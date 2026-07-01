@@ -34,10 +34,12 @@ def _is_enabled(value: Any, default: bool = False) -> bool:
 def _normalize_role(value: Any) -> str:
     role = _clean_text(value).lower()
     aliases = {
-        "cloud": "cloud_fallback",
-        "fallback": "cloud_fallback",
+        "primary": "main",
+        "secondary": "small",
         "local_main": "main",
         "local_small": "small",
+        "base_service": "base",
+        "default_service": "base",
     }
     return aliases.get(role, role)
 
@@ -63,12 +65,12 @@ def _is_model_target_ready(cfg: Dict[str, Any]) -> bool:
 
 def _resolve_task_role(local_cfg: Dict[str, Any], task_profile: str, preferred_role: str) -> Tuple[str, str]:
     normalized_preferred = _normalize_role(preferred_role)
-    if normalized_preferred in {"main", "small", "cloud_fallback"}:
+    if normalized_preferred in {"main", "small", "base"}:
         return normalized_preferred, "preferred_role"
     routing_cfg = _clean_dict(local_cfg.get("routing"))
     profile_map = _clean_dict(routing_cfg.get("task_profiles"))
     mapped_role = _normalize_role(profile_map.get(task_profile))
-    if mapped_role in {"main", "small", "cloud_fallback"}:
+    if mapped_role in {"main", "small", "base"}:
         return mapped_role, "task_profile_map"
     default_role = _normalize_role(DEFAULT_TASK_ROLE_MAP.get(
         task_profile) or DEFAULT_TASK_ROLE_MAP["default"])
@@ -86,18 +88,18 @@ def resolve_llm_route(
     local_cfg = _clean_dict((app_cfg or {}).get("local_llm"))
     local_enabled = _is_enabled(local_cfg.get("enabled"), False)
     routing_enabled = _is_enabled(local_cfg.get("routing_enabled"), True)
-    cloud_fallback_enabled = _is_enabled(
-        local_cfg.get("cloud_fallback_enabled"), True)
+    allow_small_to_main_fallback = _is_enabled(
+        local_cfg.get("allow_small_to_main_fallback"), True)
 
     if not local_enabled:
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
+            "selected_role": "base",
             "selected_source": "llm_config",
             "reason": "local_disabled",
             "local_enabled": False,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
     resolved_role, reason = _resolve_task_role(
@@ -109,18 +111,18 @@ def resolve_llm_route(
     target_key = {
         "main": "main_model",
         "small": "small_model",
-        "cloud_fallback": "",
+        "base": "",
     }.get(resolved_role, "main_model")
 
-    if resolved_role == "cloud_fallback":
+    if resolved_role == "base":
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
+            "selected_role": "base",
             "selected_source": "llm_config",
             "reason": reason,
             "local_enabled": True,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
     local_target_cfg = _clean_dict(local_cfg.get(target_key))
@@ -134,18 +136,31 @@ def resolve_llm_route(
             "selected_source": target_key,
             "reason": reason,
             "local_enabled": True,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
-    if cloud_fallback_enabled and _is_model_target_ready(base_cfg):
+    main_cfg = _clean_dict(local_cfg.get("main_model"))
+    if resolved_role == "small" and allow_small_to_main_fallback and _is_model_target_ready(main_cfg):
+        merged_cfg = _normalize_model_cfg(base_cfg, main_cfg, local_cfg)
+        return merged_cfg, {
+            "task_profile": task_profile,
+            "requested_role": preferred_role or "auto",
+            "selected_role": "main",
+            "selected_source": "main_model",
+            "reason": "small_missing_main_fallback",
+            "local_enabled": True,
+            "allow_small_to_main_fallback": True,
+        }
+
+    if _is_model_target_ready(base_cfg):
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
+            "selected_role": "base",
             "selected_source": "llm_config",
-            "reason": f"{resolved_role}_missing_fallback",
+            "reason": f"{resolved_role}_missing_base_route",
             "local_enabled": True,
-            "cloud_fallback_enabled": True,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
     merged_cfg = _normalize_model_cfg(base_cfg, local_target_cfg, local_cfg)
@@ -154,7 +169,7 @@ def resolve_llm_route(
         "requested_role": preferred_role or "auto",
         "selected_role": resolved_role,
         "selected_source": target_key,
-        "reason": f"{resolved_role}_missing_no_fallback",
+        "reason": f"{resolved_role}_missing_no_route",
         "local_enabled": True,
-        "cloud_fallback_enabled": cloud_fallback_enabled,
+        "allow_small_to_main_fallback": allow_small_to_main_fallback,
     }

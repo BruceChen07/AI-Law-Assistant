@@ -3,17 +3,16 @@ import shutil
 from pathlib import Path
 from transformers import AutoTokenizer, AutoModel
 import torch
-from modelscope.hub.snapshot_download import snapshot_download
 
 
 def main():
-    # Ensure model is downloaded
-    model_id = "BAAI/bge-small-zh-v1.5"
-    try:
-        cache_dir = snapshot_download(model_id)
-        print(f"Model downloaded to: {cache_dir}")
-    except Exception as e:
-        print(f"Download failed: {e}")
+    source_dir = os.environ.get("EMBEDDING_SOURCE_DIR", "").strip()
+    if not source_dir:
+        print("Missing EMBEDDING_SOURCE_DIR. Use a locally staged model directory.")
+        return
+    cache_dir = source_dir
+    if not Path(cache_dir).exists():
+        print(f"Local source directory not found: {cache_dir}")
         return
 
     # Output directory

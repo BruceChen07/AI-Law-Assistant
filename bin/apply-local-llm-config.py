@@ -8,24 +8,24 @@ def build_local_llm_config(enabled: bool) -> dict:
     return {
         "enabled": enabled,
         "routing_enabled": True,
-        "cloud_fallback_enabled": True,
+        "allow_small_to_main_fallback": True,
         "timeout_sec": 30,
         "json_repair_enabled": True,
         "main_model": {
-            "provider": "ollama",
-            "api_base": "http://127.0.0.1:11434/v1",
+            "provider": "openai_compatible",
+            "api_base": "http://127.0.0.1:18081/v1",
             "api_key": "",
-            "model": "qwen3.6:27b",
+            "model": "qwen3-14b-instruct-awq",
             "temperature": 0.2,
             "max_tokens": 2048,
             "timeout": 30,
             "headers": {},
         },
         "small_model": {
-            "provider": "ollama",
-            "api_base": "http://127.0.0.1:11434/v1",
+            "provider": "openai_compatible",
+            "api_base": "http://127.0.0.1:18082/v1",
             "api_key": "",
-            "model": "llama3.2:3b",
+            "model": "qwen3-4b-instruct-awq",
             "temperature": 0.1,
             "max_tokens": 1024,
             "timeout": 20,
@@ -44,18 +44,18 @@ def build_local_llm_config(enabled: bool) -> dict:
             },
             "tax_match_use_small_model": True,
             "entity_extract_use_small_model": True,
-            "high_risk_force_cloud": True,
+            "high_risk_force_main": True,
         },
         "execution": {
             "fallback_on_error": True,
             "fallback_on_invalid_json": True,
-            "tax_match_cloud_review_labels": ["non_compliant"],
+            "tax_match_main_review_labels": ["non_compliant"],
             "tax_match_min_confidence": 0.65,
             "tax_match_max_workers": 2,
             "tax_risk_max_workers": 2,
             "entity_extract_max_workers": 4,
-            "memory_clause_force_cloud_for_priority": False,
-            "memory_flush_force_cloud": False,
+            "memory_clause_force_main_for_priority": False,
+            "memory_flush_force_main": False,
         },
     }
 
@@ -63,7 +63,7 @@ def build_local_llm_config(enabled: bool) -> dict:
 def parse_args() -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
-        description="Enable or disable local_llm configuration in app/config.json."
+        description="Enable or disable enterprise offline local_llm configuration in app/config.json."
     )
     parser.add_argument(
         "--config-path",
@@ -97,6 +97,33 @@ def main() -> int:
         previous_enabled = config["local_llm"].get("enabled")
 
     config["local_llm"] = build_local_llm_config(enabled=not args.disable)
+    config["llm_config"] = {
+        "provider": "openai_compatible",
+        "api_base": "http://127.0.0.1:18081/v1",
+        "api_key": "",
+        "model": "qwen3-14b-instruct-awq",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 60,
+        "headers": {},
+    }
+    config["network_policy"] = {
+        "enabled": True,
+        "mode": "offline_strict",
+        "allow_private_ip_ranges": True,
+        "allowed_hosts": [
+            "127.0.0.1",
+            "localhost",
+            "llm-gateway.intra",
+            "ollama.intra",
+            "ocr-gateway.intra",
+        ],
+        "allowed_domain_suffixes": [
+            ".intra",
+            ".corp.local",
+            ".svc.cluster.local",
+        ],
+    }
 
     if args.dry_run:
         print()
@@ -115,14 +142,14 @@ def main() -> int:
 
     if not args.disable:
         print()
-        print("Local LLM mode is now ACTIVE:")
-        print("  Main model:  http://127.0.0.1:11434/v1 (qwen3.6:27b)")
-        print("  Small model: http://127.0.0.1:11434/v1 (llama3.2:3b)")
-        print("  Cloud fallback: ENABLED (uses llm_config on failure)")
+        print("Enterprise offline mode is now ACTIVE:")
+        print("  Main model:  http://127.0.0.1:18081/v1 (qwen3-14b-instruct-awq)")
+        print("  Small model: http://127.0.0.1:18082/v1 (qwen3-4b-instruct-awq)")
+        print("  Fallback policy: small -> main only; no public cloud route")
         print()
-        print(r"Next step: python .\bin\download-local-llm-models.py")
+        print(r"Next step: stage local model assets and run python .\bin\download-local-llm-models.py --verify-only")
     else:
-        print("[OK] Local LLM mode disabled. Cloud-only mode.")
+        print("[OK] Local LLM mode disabled. Base internal service route only.")
 
     return 0
 

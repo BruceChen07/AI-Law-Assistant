@@ -46,8 +46,8 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
         "db_path": str(db_path),
         "memory_dir": str(tmp_path / "memory"),
         "local_llm": {
-            "cloud_fallback_enabled": True,
-            "routing": {"high_risk_force_cloud": True},
+            "allow_small_to_main_fallback": True,
+            "routing": {"high_risk_force_main": True},
             "execution": {"tax_risk_max_workers": 2},
         },
     }
@@ -145,8 +145,7 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
     assert gen["medium"] >= 1
     risk_calls = [x for x in llm.calls if x["task_profile"] == "tax_risk_main"]
     assert len(risk_calls) >= 2
-    assert any(x["overrides"].get("_model_role") ==
-               "cloud_fallback" for x in risk_calls)
+    assert any(x["overrides"].get("_model_role") == "main" for x in risk_calls)
     items = list_tax_audit_issues_by_contract(cfg, contract_id)
     assert len(items) == 2
     assert items[0]["issue_text"]

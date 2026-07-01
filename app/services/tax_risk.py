@@ -6,7 +6,7 @@ from app.services.tax_common import parse_llm_json_object
 from app.services.local_llm_runtime import (
     call_with_fallback,
     get_local_worker_limit,
-    is_high_risk_force_cloud,
+    is_high_risk_force_main,
 )
 from app.services.crud import (
     get_tax_contract_document,
@@ -138,8 +138,8 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
                 cfg,
                 [{"role": "user", "content": prompt}],
                 "tax_risk_main",
-                force_cloud=(
-                    label == "non_compliant" and is_high_risk_force_cloud(cfg)),
+                force_main=(
+                    label == "non_compliant" and is_high_risk_force_main(cfg)),
                 validator=lambda text, _raw: _is_valid_risk_result(
                     parse_llm_json_object(text)),
             )

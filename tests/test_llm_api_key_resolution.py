@@ -10,9 +10,9 @@ class LLMApiKeyResolutionTests(unittest.TestCase):
         self.cfg = {
             "llm_config": {
                 "provider": "openai_compatible",
-                "api_base": "https://api.openai.com/v1",
+                "api_base": "http://127.0.0.1:18081/v1",
                 "api_key": "",
-                "model": "gpt-4o-mini",
+                "model": "qwen3-14b-instruct-awq",
                 "temperature": 0.2,
                 "max_tokens": 256,
                 "timeout": 10,

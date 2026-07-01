@@ -10,7 +10,7 @@ def _build_callback_args(tmp_path: Path):
         "cfg": {
             "memory_dir": str(tmp_path / "memory"),
             "local_llm": {
-                "cloud_fallback_enabled": True,
+                "allow_small_to_main_fallback": True,
                 "execution": {
                     "fallback_on_error": True,
                     "fallback_on_invalid_json": True,
@@ -47,7 +47,7 @@ def _build_callback_args(tmp_path: Path):
     }
 
 
-def test_clause_callback_retries_cloud_on_invalid_json(monkeypatch, tmp_path: Path):
+def test_clause_callback_retries_main_on_invalid_json(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cb, "recall_similar_audit_memories", lambda **kwargs: [])
     monkeypatch.setattr(cb, "recall_failure_patterns", lambda **kwargs: [])
     monkeypatch.setattr(cb, "rerank_memory_candidates", lambda items, **kwargs: items)
@@ -62,12 +62,12 @@ def test_clause_callback_retries_cloud_on_invalid_json(monkeypatch, tmp_path: Pa
                 "overrides": dict(overrides or {}),
             }
             calls.append(payload)
-            if payload["overrides"].get("_model_role") == "cloud_fallback":
+            if payload["overrides"].get("_model_role") == "main":
                 return (
                     '{"summary":"ok","risks":[{"level":"high","issue":"invoice risk","suggestion":"fix","law_title":"税法","article_no":"第一条","evidence":"quote"}]}',
                     {
                         "usage": {"prompt_tokens": 100, "completion_tokens": 40, "total_tokens": 140},
-                        "_route": {"selected_role": "cloud_fallback"},
+                        "_route": {"selected_role": "main"},
                     },
                 )
             return (
@@ -94,10 +94,10 @@ def test_clause_callback_retries_cloud_on_invalid_json(monkeypatch, tmp_path: Pa
     )
     assert result["summary"] == "ok"
     assert len(result["risks"]) == 1
-    assert any(x["overrides"].get("_model_role") == "cloud_fallback" for x in calls)
+    assert any(x["overrides"].get("_model_role") == "main" for x in calls)
 
 
-def test_flush_callback_retries_cloud_on_exception(monkeypatch, tmp_path: Path):
+def test_flush_callback_retries_main_on_exception(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cb, "recall_similar_audit_memories", lambda **kwargs: [])
     monkeypatch.setattr(cb, "recall_failure_patterns", lambda **kwargs: [])
     monkeypatch.setattr(cb, "rerank_memory_candidates", lambda items, **kwargs: items)
@@ -112,8 +112,8 @@ def test_flush_callback_retries_cloud_on_exception(monkeypatch, tmp_path: Path):
                 "overrides": dict(overrides or {}),
             }
             calls.append(payload)
-            if payload["overrides"].get("_model_role") == "cloud_fallback":
-                return "- flush cloud", {"_route": {"selected_role": "cloud_fallback"}}
+            if payload["overrides"].get("_model_role") == "main":
+                return "- flush main", {"_route": {"selected_role": "main"}}
             raise RuntimeError("local flush timeout")
 
     _clause_cb, flush_cb = create_memory_callbacks(
@@ -121,5 +121,5 @@ def test_flush_callback_retries_cloud_on_exception(monkeypatch, tmp_path: Path):
         **_build_callback_args(tmp_path),
     )
     result = asyncio.run(flush_cb("需要压缩的记忆内容"))
-    assert result == "- flush cloud"
-    assert any(x["overrides"].get("_model_role") == "cloud_fallback" for x in calls)
+    assert result == "- flush main"
+    assert any(x["overrides"].get("_model_role") == "main" for x in calls)

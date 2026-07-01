@@ -69,7 +69,7 @@ def test_evaluate_clause_rule_match_llm_uses_small_task_profile():
     assert calls[0]["task_profile"] == "tax_match_small"
 
 
-def test_evaluate_clause_rule_match_llm_high_risk_uses_cloud_review():
+def test_evaluate_clause_rule_match_llm_high_risk_uses_main_review():
     calls = []
 
     class FakeLLM:
@@ -79,15 +79,15 @@ def test_evaluate_clause_rule_match_llm_high_risk_uses_cloud_review():
                 "overrides": dict(overrides or {}),
             }
             calls.append(payload)
-            if payload["overrides"].get("_model_role") == "cloud_fallback":
-                return ('{"label":"non_compliant","score":0.96,"reason":"cloud review confirmed"}', {"_route": {"selected_role": "cloud_fallback"}})
+            if payload["overrides"].get("_model_role") == "main":
+                return ('{"label":"non_compliant","score":0.96,"reason":"main review confirmed"}', {"_route": {"selected_role": "main"}})
             return ('{"label":"non_compliant","score":0.72,"reason":"local review"}', {"_route": {"selected_role": "small"}})
 
     cfg = {
         "local_llm": {
-            "cloud_fallback_enabled": True,
-            "routing": {"high_risk_force_cloud": True},
-            "execution": {"tax_match_cloud_review_labels": ["non_compliant"]},
+            "allow_small_to_main_fallback": True,
+            "routing": {"high_risk_force_main": True},
+            "execution": {"tax_match_main_review_labels": ["non_compliant"]},
         }
     }
     clause = {"id": "c1", "clause_text": "税率按9%执行"}
@@ -107,8 +107,7 @@ def test_evaluate_clause_rule_match_llm_high_risk_uses_cloud_review():
     assert out["match_score"] == 0.96
     assert evidence["fallback_used"] is True
     assert evidence["fallback_reason"] == "high_risk_review"
-    assert any(item["overrides"].get("_model_role")
-               == "cloud_fallback" for item in calls)
+    assert any(item["overrides"].get("_model_role") == "main" for item in calls)
 
 
 def test_match_contract_against_rules_end_to_end(tmp_path):
