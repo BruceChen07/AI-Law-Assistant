@@ -20,6 +20,8 @@ def _normalize_paths(cfg: dict, base_dir: str):
         "static_dir",
         "log_dir",
         "log_base_dir",
+        "llm_trace_dir",
+        "rag_trace_dir",
         "embedding_model",
         "embedding_tokenizer_dir",
         "reranker_model_path",
@@ -48,6 +50,18 @@ def _normalize_paths(cfg: dict, base_dir: str):
         for lang, path in reranker_profiles.items():
             normalized_reranker[lang] = _resolve_path(base_dir, path)
         normalized["reranker_profiles"] = normalized_reranker
+    translation_cfg = normalized.get("translation_config")
+    if isinstance(translation_cfg, dict):
+        next_translation = dict(translation_cfg)
+        next_translation["model_dir"] = _resolve_path(
+            base_dir, next_translation.get("model_dir"))
+        normalized["translation_config"] = next_translation
+    contract_preview = normalized.get("contract_preview")
+    if isinstance(contract_preview, dict):
+        next_preview = dict(contract_preview)
+        next_preview["cache_dir"] = _resolve_path(
+            base_dir, next_preview.get("cache_dir"))
+        normalized["contract_preview"] = next_preview
     rag_db_paths = normalized.get("rag_db_paths")
     if isinstance(rag_db_paths, dict):
         normalized["rag_db_paths"] = {

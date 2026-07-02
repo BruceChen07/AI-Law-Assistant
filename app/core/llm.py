@@ -274,7 +274,8 @@ class LLMService:
         max_tokens: int,
         cfg: Dict[str, Any],
     ) -> Dict[str, Any]:
-        body = self._build_chat_kwargs(model, messages, temperature, max_tokens, cfg)
+        body = self._build_chat_kwargs(
+            model, messages, temperature, max_tokens, cfg)
         extra_body = body.pop("extra_body", None)
         if isinstance(extra_body, dict):
             body.update(extra_body)
@@ -336,6 +337,18 @@ class LLMService:
     ) -> Dict[str, Any]:
         return self._post_json(url, body, headers, timeout)
 
+    def _extract_http_error_text(self, err: httpx.HTTPStatusError) -> str:
+        response = getattr(err, "response", None)
+        if response is None:
+            return ""
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                return str(payload.get("error") or payload.get("message") or "")
+            return str(payload or "")
+        except Exception:
+            return str(getattr(response, "text", "") or "")
+
     def _chat_via_ollama(
         self,
         api_base: str,
@@ -357,6 +370,28 @@ class LLMService:
             raw = self._post_ollama_chat(
                 request_url, request_body, request_headers, timeout
             )
+        except httpx.HTTPStatusError as e:
+            err_text = self._extract_http_error_text(e).lower()
+            if e.response is not None and e.response.status_code == 404 and "model" in err_text and "not found" in err_text:
+                raise RuntimeError(f"ollama model not found: {model}") from e
+            raise
+        except httpx.ReadError as e:
+            logger.warning(
+                "ollama_request_read_retry url=%s model=%s timeout=%s err=%s",
+                request_url,
+                model,
+                timeout,
+                str(e),
+            )
+            time.sleep(0.2)
+            try:
+                raw = self._post_ollama_chat(
+                    request_url, request_body, request_headers, timeout
+                )
+            except Exception as e2:
+                raise RuntimeError(
+                    f"ollama request failed after read retry: {str(e2)}"
+                ) from e2
         except httpx.TimeoutException as e:
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
             retry_cfg = dict(cfg)
@@ -431,7 +466,8 @@ class LLMService:
             model, messages, temperature, max_tokens, cfg
         )
         try:
-            raw = self._post_json(request_url, request_body, request_headers, timeout)
+            raw = self._post_json(request_url, request_body,
+                                  request_headers, timeout)
         except httpx.TimeoutException as e:
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
             retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
@@ -455,7 +491,8 @@ class LLMService:
                 raise RuntimeError(
                     f"openai-compatible request failed after timeout retry: {str(e2)}"
                 ) from e2
-        choices = raw.get("choices") if isinstance(raw.get("choices"), list) else []
+        choices = raw.get("choices") if isinstance(
+            raw.get("choices"), list) else []
         first_choice = choices[0] if choices else {}
         message = first_choice.get("message") if isinstance(
             first_choice.get("message"), dict

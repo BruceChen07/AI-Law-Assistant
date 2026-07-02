@@ -4,10 +4,13 @@ import json
 import csv
 import io
 import logging
-from datetime import datetime, timedelta
-from typing import Optional, List, Literal
+import threading
+import time
+from datetime import datetime, timedelta, timezone
+from typing import Optional, List, Literal, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
 from pydantic import BaseModel
+import httpx
 from app.core.auth import get_all_users, update_user_role, log_audit
 from app.api.dependencies import require_admin, get_app_llm
 from app.core.database import get_conn
@@ -22,6 +25,15 @@ from app.services.memory_promotion import (
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger("law_assistant")
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+OLLAMA_CACHE_TTL_SEC = 300
+_OLLAMA_MODELS_CACHE: Dict[str, Any] = {
+    "host": "",
+    "ts": 0.0,
+    "models": [],
+    "error": "",
+}
+_OLLAMA_MODELS_CACHE_LOCK = threading.Lock()
 
 
 # ============ Document Models ============
@@ -69,6 +81,34 @@ class LLMConfigResponse(BaseModel):
     timeout: int
     headers: dict
     has_api_key: bool
+    config_source: str = "llm_config"
+    local_llm_enabled: bool = False
+
+
+class OllamaModelItem(BaseModel):
+    name: str
+    model: str
+    parameter_size: str = ""
+    updated_at: str = ""
+    size_bytes: int = 0
+    family: str = ""
+    quantization_level: str = ""
+    capabilities: List[str] = []
+
+
+class OllamaModelListResponse(BaseModel):
+    ok: bool
+    host: str
+    reachable: bool
+    cached: bool
+    stale: bool = False
+    cache_ttl_sec: int
+    cached_at: str = ""
+    expires_at: str = ""
+    current_model: str = ""
+    recommended_model: str = ""
+    models: List[OllamaModelItem]
+    error: str = ""
 
 
 class LLMConfigUpdate(BaseModel):
@@ -181,6 +221,136 @@ def _clean_text(v: str) -> str:
     s = str(v or "").strip()
     s = s.strip("`").strip('"').strip("'").strip()
     return s
+
+
+def _clean_dict(value: Any) -> Dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _normalize_ollama_host(value: str) -> str:
+    host = _clean_text(value) or DEFAULT_OLLAMA_HOST
+    for suffix in ("/chat/completions", "/api/chat", "/api/generate", "/v1"):
+        if host.endswith(suffix):
+            host = host[: -len(suffix)]
+    return host.rstrip("/")
+
+
+def _iso_from_ts(ts: float) -> str:
+    if not ts:
+        return ""
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+
+def _effective_llm_config(cfg: dict) -> Tuple[dict, str, bool]:
+    local_cfg = _clean_dict(cfg.get("local_llm"))
+    local_enabled = bool(local_cfg.get("enabled", False))
+    main_cfg = _clean_dict(local_cfg.get("main_model"))
+    if local_enabled and _clean_text(main_cfg.get("api_base")) and _clean_text(main_cfg.get("model")):
+        return main_cfg, "local_main_model", True
+    llm_cfg = _clean_dict(cfg.get("llm_config"))
+    return llm_cfg, "llm_config", local_enabled
+
+
+def _choose_recommended_ollama_model(models: List[Dict[str, Any]]) -> str:
+    names = {
+        _clean_text(item.get("name") or item.get("model"))
+        for item in models
+        if isinstance(item, dict)
+    }
+    preferred = [
+        "qwen3.6:27b",
+        "qwen3-coder-next:latest",
+        "qwen3:8b",
+        "deepseek-r1:14b",
+        "qwen3:4b",
+        "glm4:latest",
+        "llama3:latest",
+        "llama3.2:latest",
+    ]
+    for item in preferred:
+        if item in names:
+            return item
+    return sorted(names)[0] if names else ""
+
+
+def _extract_ollama_models(payload: dict) -> List[Dict[str, Any]]:
+    rows = payload.get("models") if isinstance(
+        payload.get("models"), list) else []
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        details = _clean_dict(row.get("details"))
+        out.append({
+            "name": _clean_text(row.get("name") or row.get("model")),
+            "model": _clean_text(row.get("model") or row.get("name")),
+            "parameter_size": _clean_text(details.get("parameter_size")),
+            "updated_at": _clean_text(row.get("modified_at")),
+            "size_bytes": int(row.get("size") or 0),
+            "family": _clean_text(details.get("family")),
+            "quantization_level": _clean_text(details.get("quantization_level")),
+            "capabilities": [
+                _clean_text(item)
+                for item in (row.get("capabilities") or [])
+                if _clean_text(item)
+            ],
+        })
+    out.sort(key=lambda item: item.get("updated_at", ""), reverse=True)
+    return out
+
+
+def _get_cached_ollama_models(host: str, force_refresh: bool = False) -> Tuple[List[Dict[str, Any]], bool, bool, str, float]:
+    now = time.time()
+    with _OLLAMA_MODELS_CACHE_LOCK:
+        cache_host = _clean_text(_OLLAMA_MODELS_CACHE.get("host"))
+        cache_ts = float(_OLLAMA_MODELS_CACHE.get("ts") or 0.0)
+        cache_models = list(_OLLAMA_MODELS_CACHE.get("models") or [])
+        cache_error = _clean_text(_OLLAMA_MODELS_CACHE.get("error"))
+        cache_ok = bool(cache_models) and cache_host == host and (
+            now - cache_ts) < OLLAMA_CACHE_TTL_SEC
+        if cache_ok and not force_refresh:
+            return cache_models, True, False, cache_error, cache_ts
+    try:
+        response = httpx.get(f"{host}/api/tags", timeout=10)
+        response.raise_for_status()
+        models = _extract_ollama_models(response.json())
+        with _OLLAMA_MODELS_CACHE_LOCK:
+            _OLLAMA_MODELS_CACHE["host"] = host
+            _OLLAMA_MODELS_CACHE["ts"] = now
+            _OLLAMA_MODELS_CACHE["models"] = models
+            _OLLAMA_MODELS_CACHE["error"] = ""
+        return models, False, False, "", now
+    except Exception as e:
+        err = f"ollama models fetch failed: {str(e)}"
+        with _OLLAMA_MODELS_CACHE_LOCK:
+            cache_host = _clean_text(_OLLAMA_MODELS_CACHE.get("host"))
+            cache_ts = float(_OLLAMA_MODELS_CACHE.get("ts") or 0.0)
+            cache_models = list(_OLLAMA_MODELS_CACHE.get("models") or [])
+        if cache_models and cache_host == host:
+            return cache_models, False, True, err, cache_ts
+        return [], False, False, err, 0.0
+
+
+def _ollama_unreachable_message(llm_cfg: dict) -> str:
+    configured = _normalize_ollama_host(
+        _clean_text(llm_cfg.get("api_base")) or DEFAULT_OLLAMA_HOST
+    )
+    return f"Ollama 服务未启动或 {configured} 不可达，请先启动 Ollama 后重试。"
+
+
+def _sync_llm_patch(cfg_current: dict, data: dict) -> dict:
+    patch = {"llm_config": dict(data)}
+    local_cfg = _clean_dict(cfg_current.get("local_llm"))
+    if bool(local_cfg.get("enabled", False)):
+        next_local = dict(local_cfg)
+        main_cfg = _clean_dict(local_cfg.get("main_model"))
+        next_main = dict(main_cfg)
+        for key in ("provider", "api_base", "model", "temperature", "max_tokens", "timeout", "headers"):
+            next_main[key] = data.get(key)
+        next_main["api_key"] = ""
+        next_local["main_model"] = next_main
+        patch["local_llm"] = next_local
+    return patch
 
 
 def _normalize_llm_payload(payload: dict) -> dict:
@@ -610,7 +780,14 @@ def get_stats(current_user: dict = Depends(require_admin)):
 @router.get("/llm-config", response_model=LLMConfigResponse)
 def get_llm_config(current_user: dict = Depends(require_admin)):
     cfg = _ensure_llm_secret_migrated(get_config())
-    llm_cfg = cfg.get("llm_config") or {}
+    llm_cfg, config_source, local_llm_enabled = _effective_llm_config(cfg)
+    logger.info(
+        "admin_llm_config_read user_id=%s provider=%s api_base=%s model=%s",
+        str(current_user.get("id") or ""),
+        str(llm_cfg.get("provider", "")),
+        str(llm_cfg.get("api_base", "")),
+        str(llm_cfg.get("model", "")),
+    )
     return LLMConfigResponse(
         provider=str(llm_cfg.get("provider", "")),
         api_base=str(llm_cfg.get("api_base", "")),
@@ -620,24 +797,45 @@ def get_llm_config(current_user: dict = Depends(require_admin)):
         timeout=int(llm_cfg.get("timeout", 60)),
         headers=llm_cfg.get("headers") if isinstance(
             llm_cfg.get("headers"), dict) else {},
-        has_api_key=bool(llm_cfg.get("api_key")) or has_llm_api_key(cfg)
+        has_api_key=bool(llm_cfg.get("api_key")) or has_llm_api_key(cfg),
+        config_source=config_source,
+        local_llm_enabled=local_llm_enabled,
     )
 
 
 @router.put("/llm-config", response_model=LLMConfigResponse)
 def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: dict = Depends(require_admin)):
-    data = _normalize_llm_payload(payload.dict())
+    data = _normalize_llm_payload(payload.model_dump())
     _validate_llm_config(data)
+    logger.info(
+        "admin_llm_config_update_start user_id=%s provider=%s api_base=%s model=%s timeout=%s max_tokens=%s",
+        str(current_user.get("id") or ""),
+        str(data.get("provider", "")),
+        str(data.get("api_base", "")),
+        str(data.get("model", "")),
+        str(data.get("timeout", "")),
+        str(data.get("max_tokens", "")),
+    )
     cfg_now = get_config()
     plain_api_key = _clean_text(data.get("api_key", ""))
+    if data.get("provider") == "ollama":
+        data["api_key"] = ""
+        plain_api_key = ""
     if plain_api_key and not set_llm_api_key(cfg_now, plain_api_key):
         raise HTTPException(
             status_code=500, detail="failed to save api_key in secure store")
     data["api_key"] = ""
-    cfg = update_config_patch({"llm_config": data})
+    cfg = update_config_patch(_sync_llm_patch(cfg_now, data))
     if hasattr(request.app.state, "llm"):
         request.app.state.llm.cfg = cfg
-    llm_cfg = cfg.get("llm_config") or {}
+    logger.info(
+        "admin_llm_config_update_done user_id=%s provider=%s api_base=%s model=%s",
+        str(current_user.get("id") or ""),
+        str(data.get("provider", "")),
+        str(data.get("api_base", "")),
+        str(data.get("model", "")),
+    )
+    llm_cfg, config_source, local_llm_enabled = _effective_llm_config(cfg)
     return LLMConfigResponse(
         provider=str(llm_cfg.get("provider", "")),
         api_base=str(llm_cfg.get("api_base", "")),
@@ -647,7 +845,62 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
         timeout=int(llm_cfg.get("timeout", 60)),
         headers=llm_cfg.get("headers") if isinstance(
             llm_cfg.get("headers"), dict) else {},
-        has_api_key=has_llm_api_key(cfg)
+        has_api_key=has_llm_api_key(cfg),
+        config_source=config_source,
+        local_llm_enabled=local_llm_enabled,
+    )
+
+
+@router.get("/ollama/models", response_model=OllamaModelListResponse)
+def get_ollama_models(
+    force_refresh: bool = Query(False),
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    effective_cfg, _source, _enabled = _effective_llm_config(cfg)
+    current_model = _clean_text(effective_cfg.get("model"))
+    provider = _clean_text(effective_cfg.get("provider")).lower()
+    configured_host = ""
+    if provider == "ollama":
+        configured_host = _normalize_ollama_host(
+            _clean_text(effective_cfg.get("api_base")) or DEFAULT_OLLAMA_HOST
+        )
+    host = configured_host if configured_host else DEFAULT_OLLAMA_HOST
+    models, cached, stale, error, cache_ts = _get_cached_ollama_models(
+        host, force_refresh=bool(force_refresh)
+    )
+    recommended_model = _choose_recommended_ollama_model(models)
+    if current_model and not any(_clean_text(item.get("name")) == current_model for item in models):
+        logger.warning(
+            "admin_ollama_current_model_missing user_id=%s current_model=%s recommended_model=%s host=%s",
+            str(current_user.get("id") or ""),
+            current_model,
+            recommended_model,
+            host,
+        )
+    logger.info(
+        "admin_ollama_models user_id=%s host=%s cached=%s stale=%s model_count=%s error=%s",
+        str(current_user.get("id") or ""),
+        host,
+        cached,
+        stale,
+        len(models),
+        error,
+    )
+    expires_at = cache_ts + OLLAMA_CACHE_TTL_SEC if cache_ts else 0.0
+    return OllamaModelListResponse(
+        ok=bool(models) and not error,
+        host=host,
+        reachable=not bool(error),
+        cached=bool(cached),
+        stale=bool(stale),
+        cache_ttl_sec=OLLAMA_CACHE_TTL_SEC,
+        cached_at=_iso_from_ts(cache_ts),
+        expires_at=_iso_from_ts(expires_at),
+        current_model=current_model,
+        recommended_model=recommended_model,
+        models=[OllamaModelItem(**item) for item in models],
+        error=error,
     )
 
 
@@ -958,9 +1211,48 @@ def test_llm(
         {"role": "system", "content": "You are a helpful assistant."},
         {"role": "user", "content": prompt}
     ]
+    cfg = getattr(llm, "cfg", {}) if hasattr(llm, "cfg") else {}
+    llm_cfg, _config_source, _local_enabled = _effective_llm_config(cfg)
+    logger.info(
+        "admin_llm_test_start user_id=%s provider=%s api_base=%s model=%s prompt_len=%s",
+        str(current_user.get("id") or ""),
+        str(llm_cfg.get("provider", "")),
+        str(llm_cfg.get("api_base", "")),
+        str(llm_cfg.get("model", "")),
+        len(prompt),
+    )
     try:
         answer, _ = llm.chat(messages)
     except Exception as e:
+        raw_err = str(e)
+        low_err = raw_err.lower()
+        user_err = raw_err
+        provider = str(llm_cfg.get("provider", "")).lower()
+        if provider == "ollama":
+            if "10061" in low_err or "connection refused" in low_err:
+                user_err = _ollama_unreachable_message(llm_cfg)
+            elif "not found" in low_err and "model" in low_err:
+                user_err = f"Ollama 模型不存在：{str(llm_cfg.get('model', ''))}。请先执行 `ollama pull` 或切换到已下载模型。"
+            elif "timed out" in low_err or "timeout" in low_err:
+                user_err = f"Ollama 模型响应超时：{str(llm_cfg.get('model', ''))}。请增大超时或切换到更小模型。"
+        elif "10061" in low_err or "connection refused" in low_err:
+            user_err = f"LLM 接口不可达：{str(llm_cfg.get('api_base', ''))}。当前项目已迁移到 Ollama，本地建议改为 http://127.0.0.1:11434/v1。"
+        logger.exception(
+            "admin_llm_test_failed user_id=%s provider=%s api_base=%s model=%s err=%s",
+            str(current_user.get("id") or ""),
+            str(llm_cfg.get("provider", "")),
+            str(llm_cfg.get("api_base", "")),
+            str(llm_cfg.get("model", "")),
+            str(e),
+        )
         raise HTTPException(
-            status_code=400, detail=f"llm test failed: {str(e)}")
+            status_code=400, detail=f"llm test failed: {user_err}")
+    logger.info(
+        "admin_llm_test_done user_id=%s provider=%s api_base=%s model=%s answer_len=%s",
+        str(current_user.get("id") or ""),
+        str(llm_cfg.get("provider", "")),
+        str(llm_cfg.get("api_base", "")),
+        str(llm_cfg.get("model", "")),
+        len(str(answer or "")),
+    )
     return LLMTestResponse(ok=True, prompt=prompt, answer=answer)

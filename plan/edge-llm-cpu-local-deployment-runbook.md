@@ -74,7 +74,6 @@ Key settings in `app/config.json`:
   "local_llm": {
     "enabled": true,
     "routing_enabled": true,
-    "cloud_fallback_enabled": true,
     "main_model": {
       "provider": "ollama",
       "api_base": "http://127.0.0.1:11434/v1",
@@ -83,7 +82,7 @@ Key settings in `app/config.json`:
     "small_model": {
       "provider": "ollama",
       "api_base": "http://127.0.0.1:11434/v1",
-      "model": "llama3.2:3b"
+      "model": "qwen3:4b"
     }
   }
 }
@@ -117,6 +116,7 @@ Notes:
 
 - Both local roles use the same Ollama API endpoint and are distinguished by model name.
 - The application uses Ollama official runtime management and Ollama-compatible inference configuration.
+- Admin `模型配置` 页面会自动探测本机 `/api/tags`，并以 5 分钟缓存提供模型列表、搜索和默认模型记忆能力。
 
 ## 6. App Startup
 

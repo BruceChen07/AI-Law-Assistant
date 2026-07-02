@@ -259,16 +259,16 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
     "routing_enabled": true,
     "allow_small_to_main_fallback": true,
     "main_model": {
-        "provider": "openai_compatible",
-        "model": "qwen3-14b-instruct-awq",
-        "api_base": "http://127.0.0.1:18081/v1",
+        "provider": "ollama",
+        "model": "qwen3.6:27b",
+        "api_base": "http://127.0.0.1:11434/v1",
         "max_tokens": 900,
         "timeout": 60
     },
     "small_model": {
-        "provider": "openai_compatible",
-        "model": "qwen3-4b-instruct-awq",
-        "api_base": "http://127.0.0.1:18082/v1",
+        "provider": "ollama",
+        "model": "qwen3:4b",
+        "api_base": "http://127.0.0.1:11434/v1",
         "max_tokens": 400,
         "timeout": 30
     },
@@ -323,9 +323,15 @@ python .\bin\start-services.py
 **推荐模型选型**：
 | 角色 | 推荐模型 | 量化 | 硬件要求 |
 |------|---------|------|---------|
-| 主审计模型 | `qwen3-14b-instruct-awq` | 内网推理服务 | 64 GB RAM 起 |
-| 侧车模型 | `qwen3-4b-instruct-awq` | 内网推理服务 | 16 GB RAM 起 |
+| 主审计模型 | `qwen3.6:27b` | Ollama GGUF | 64 GB RAM 起 |
+| 侧车模型 | `qwen3:4b` | Ollama GGUF | 16 GB RAM 起 |
 | OCR / Translation | 本地目录模型 | 本地资产 | 由企业制品库分发 |
+
+**管理后台新增能力**：
+- `模型配置` 页会自动识别本机 `Ollama` 已下载模型
+- 模型列表使用 5 分钟缓存，支持手动刷新和搜索筛选
+- 用户选择的默认模型会保存到浏览器 `localStorage`，下次进入后台自动恢复
+- 切换模型后会立即写回后端配置并实时生效
 
 **回归测试**：
 ```bash
@@ -351,6 +357,7 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | POST | `/embedding/compute`           | 计算向量      |
 | GET  | `/api/admin/llm-config`        | 获取 LLM 配置 |
 | PUT  | `/api/admin/llm-config`        | 更新 LLM 配置 |
+| GET  | `/api/admin/ollama/models`     | 获取本地 Ollama 模型列表 |
 | GET  | `/api/admin/memory-config`     | 获取记忆运行配置 |
 | PUT  | `/api/admin/memory-config`     | 更新记忆运行配置 |
 
@@ -372,10 +379,10 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
     "ocr_engine": "auto",
     "ocr_engine_order": ["tesseract", "mineru"],
     "llm_config": {
-        "provider": "openai_compatible",
-        "api_base": "http://127.0.0.1:18081/v1",
+        "provider": "ollama",
+        "api_base": "http://127.0.0.1:11434/v1",
         "api_key": "",
-        "model": "qwen3-14b-instruct-awq",
+        "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,

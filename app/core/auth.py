@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
 from passlib.context import CryptContext
@@ -24,11 +24,13 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
+    now = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = now + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+        expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    # Ensure tokens minted within the same second are still unique.
+    to_encode.update({"exp": expire, "iat": now, "jti": str(uuid.uuid4())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -70,7 +72,7 @@ def create_user(username: str, email: str, password: str, role: str = "user") ->
 
     user_id = str(uuid.uuid4())
     password_hash = hash_password(password)
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     cfg = get_config()
     conn = get_conn(cfg)
@@ -126,9 +128,9 @@ def create_session(user_id: str, token: str, ip_address: str = None, user_agent:
     from app.core.config import get_config
 
     session_id = str(uuid.uuid4())
-    expires_at = (datetime.utcnow() +
+    expires_at = (datetime.now(timezone.utc) +
                   timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)).isoformat()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     cfg = get_config()
     conn = get_conn(cfg)
@@ -173,7 +175,7 @@ def update_user_role(user_id: str, role: str) -> bool:
     conn = get_conn(cfg)
     cur = conn.cursor()
     cur.execute("UPDATE users SET role = ?, updated_at = ? WHERE id = ?",
-                (role, datetime.utcnow().isoformat(), user_id))
+                (role, datetime.now(timezone.utc).isoformat(), user_id))
     conn.commit()
     affected = cur.rowcount
     conn.close()
@@ -185,7 +187,7 @@ def log_audit(user_id: str, action: str, resource_type: str = None, resource_id:
     from app.core.config import get_config
 
     log_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     cfg = get_config()
     conn = get_conn(cfg)

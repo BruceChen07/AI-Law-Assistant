@@ -131,3 +131,11 @@ export async function adminTestLLM(payload) {
     body: JSON.stringify(payload || {})
   })
 }
+
+export async function adminGetOllamaModels(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/ollama/models${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}

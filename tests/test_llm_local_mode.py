@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import patch
 
+import httpx
+
 from app.core.llm import LLMService
 
 
@@ -105,6 +107,50 @@ class LLMLocalModeTests(unittest.TestCase):
         self.assertEqual(captured["body"]["model"], "qwen3.6:27b")
         self.assertEqual(captured["body"]["options"]["num_predict"], 123)
         self.assertEqual(raw["_route"]["selected_role"], "main")
+
+    def test_chat_retries_once_on_ollama_read_error(self):
+        svc = LLMService(self.cfg)
+        calls = {"count": 0}
+
+        def _fake_ollama_post(url, body, headers, timeout):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise httpx.ReadError("[WinError 10054] connection reset")
+            return {
+                "model": body["model"],
+                "done": True,
+                "message": {"role": "assistant", "content": "pong"},
+                "prompt_eval_count": 12,
+                "eval_count": 24,
+            }
+
+        with patch.object(svc, "_post_ollama_chat", side_effect=_fake_ollama_post):
+            content, raw = svc.chat([{"role": "user", "content": "test"}])
+
+        self.assertEqual(content, "pong")
+        self.assertEqual(raw["model"], "qwen3.6:27b")
+        self.assertEqual(calls["count"], 2)
+
+    def test_chat_maps_ollama_model_not_found(self):
+        svc = LLMService(self.cfg)
+        request = httpx.Request("POST", "http://127.0.0.1:11434/api/chat")
+        response = httpx.Response(
+            404,
+            request=request,
+            json={"error": "model 'qwen3.6:27b' not found"},
+        )
+
+        with patch.object(
+            svc,
+            "_post_ollama_chat",
+            side_effect=httpx.HTTPStatusError(
+                "Client error '404 Not Found'",
+                request=request,
+                response=response,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "ollama model not found: qwen3.6:27b"):
+                svc.chat([{"role": "user", "content": "test"}])
 
 
 if __name__ == "__main__":

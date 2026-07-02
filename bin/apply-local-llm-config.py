@@ -12,20 +12,20 @@ def build_local_llm_config(enabled: bool) -> dict:
         "timeout_sec": 30,
         "json_repair_enabled": True,
         "main_model": {
-            "provider": "openai_compatible",
-            "api_base": "http://127.0.0.1:18081/v1",
+            "provider": "ollama",
+            "api_base": "http://127.0.0.1:11434/v1",
             "api_key": "",
-            "model": "qwen3-14b-instruct-awq",
+            "model": "qwen3.6:27b",
             "temperature": 0.2,
             "max_tokens": 2048,
             "timeout": 30,
             "headers": {},
         },
         "small_model": {
-            "provider": "openai_compatible",
-            "api_base": "http://127.0.0.1:18082/v1",
+            "provider": "ollama",
+            "api_base": "http://127.0.0.1:11434/v1",
             "api_key": "",
-            "model": "qwen3-4b-instruct-awq",
+            "model": "qwen3:4b",
             "temperature": 0.1,
             "max_tokens": 1024,
             "timeout": 20,
@@ -98,10 +98,10 @@ def main() -> int:
 
     config["local_llm"] = build_local_llm_config(enabled=not args.disable)
     config["llm_config"] = {
-        "provider": "openai_compatible",
-        "api_base": "http://127.0.0.1:18081/v1",
+        "provider": "ollama",
+        "api_base": "http://127.0.0.1:11434/v1",
         "api_key": "",
-        "model": "qwen3-14b-instruct-awq",
+        "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,
@@ -143,8 +143,8 @@ def main() -> int:
     if not args.disable:
         print()
         print("Enterprise offline mode is now ACTIVE:")
-        print("  Main model:  http://127.0.0.1:18081/v1 (qwen3-14b-instruct-awq)")
-        print("  Small model: http://127.0.0.1:18082/v1 (qwen3-4b-instruct-awq)")
+        print("  Main model:  http://127.0.0.1:11434/v1 (qwen3.6:27b)")
+        print("  Small model: http://127.0.0.1:11434/v1 (qwen3:4b)")
         print("  Fallback policy: small -> main only; no public cloud route")
         print()
         print(r"Next step: stage local model assets and run python .\bin\download-local-llm-models.py --verify-only")
