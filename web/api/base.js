@@ -1,6 +1,7 @@
 export let API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
 const API_REQUEST_TIMEOUT_MS = 8000
 const API_LONG_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
+const API_CONTRACT_AUDIT_TIMEOUT_MS = 60 * 60 * 1000
 
 function dedupe(items) {
   return [...new Set(items.filter(Boolean))]
@@ -54,6 +55,14 @@ async function fetchWithTimeout(url, options = {}) {
   const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs)
   try {
     return await fetch(url, { ...fetchOptions, signal: controller.signal })
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      const timeoutError = new Error(`request timeout after ${Math.ceil(effectiveTimeoutMs / 1000)}s`)
+      timeoutError.name = "RequestTimeoutError"
+      timeoutError.cause = err
+      throw timeoutError
+    }
+    throw err
   } finally {
     clearTimeout(timer)
   }
@@ -74,6 +83,9 @@ async function requestWithFallback(url, options = {}) {
       }
       return res
     } catch (err) {
+      if (err?.name === "RequestTimeoutError") {
+        throw err
+      }
       lastError = err
     }
   }
@@ -127,4 +139,8 @@ export function getLongRequestTimeoutMs(timeoutSec) {
     return Math.max(API_REQUEST_TIMEOUT_MS, seconds * 1000 + 5000)
   }
   return API_LONG_REQUEST_TIMEOUT_MS
+}
+
+export function getContractAuditTimeoutMs() {
+  return API_CONTRACT_AUDIT_TIMEOUT_MS
 }

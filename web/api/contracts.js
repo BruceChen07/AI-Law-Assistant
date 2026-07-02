@@ -1,10 +1,11 @@
-import { API_BASE, getAuthHeaders, requestBlob, requestJson } from "./base"
+import { API_BASE, getAuthHeaders, getContractAuditTimeoutMs, requestBlob, requestJson } from "./base"
 
 export async function auditContract(formData) {
   return requestJson(`${API_BASE}/contracts/audit`, {
     method: "POST",
     body: formData,
-    headers: { ...getAuthHeaders() }
+    headers: { ...getAuthHeaders() },
+    timeoutMs: getContractAuditTimeoutMs()
   })
 }
 
