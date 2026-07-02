@@ -1,4 +1,81 @@
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+export let API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+const API_REQUEST_TIMEOUT_MS = 8000
+
+function dedupe(items) {
+  return [...new Set(items.filter(Boolean))]
+}
+
+function isAbsoluteUrl(value) {
+  return /^https?:\/\//i.test(String(value || ""))
+}
+
+function toPath(url) {
+  const raw = String(url || "")
+  if (!isAbsoluteUrl(raw)) return raw
+  try {
+    const parsed = new URL(raw)
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return raw
+  }
+}
+
+function buildCandidateBases() {
+  const configured = String(import.meta.env.VITE_API_BASE || "").trim()
+  const currentOrigin = typeof window !== "undefined" ? window.location.origin : ""
+  const currentPort = typeof window !== "undefined" ? window.location.port : ""
+  return dedupe([
+    configured,
+    currentPort && currentPort !== "5173" ? currentOrigin : "",
+    API_BASE,
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8001",
+    "http://127.0.0.1:8001"
+  ])
+}
+
+function buildCandidateUrls(url) {
+  const raw = String(url || "")
+  if (!raw) return []
+  const path = toPath(raw)
+  const bases = buildCandidateBases()
+  if (!path.startsWith("/")) {
+    return dedupe([raw])
+  }
+  return dedupe(bases.map(base => `${String(base).replace(/\/$/, "")}${path}`))
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...options, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+async function requestWithFallback(url, options = {}) {
+  const attemptUrls = buildCandidateUrls(url)
+  let lastError = null
+  for (const attemptUrl of attemptUrls) {
+    try {
+      const res = await fetchWithTimeout(attemptUrl, options)
+      const ok = res.ok
+      if (ok) {
+        try {
+          const parsed = new URL(attemptUrl)
+          API_BASE = parsed.origin
+        } catch {}
+      }
+      return res
+    } catch (err) {
+      lastError = err
+    }
+  }
+  throw lastError || new Error("request failed")
+}
 
 export function getToken() {
   return localStorage.getItem("token")
@@ -30,13 +107,13 @@ export async function ensureOk(res) {
 }
 
 export async function requestJson(url, options) {
-  const res = await fetch(url, options)
+  const res = await requestWithFallback(url, options)
   await ensureOk(res)
   return res.json()
 }
 
 export async function requestBlob(url, options) {
-  const res = await fetch(url, options)
+  const res = await requestWithFallback(url, options)
   await ensureOk(res)
   return res.blob()
 }

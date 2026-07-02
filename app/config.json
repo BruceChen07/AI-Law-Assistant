@@ -64,10 +64,10 @@
         "provider": "ollama",
         "api_base": "http://127.0.0.1:11434/v1",
         "api_key": "",
-        "model": "qwen3.6:27b",
+        "model": "gemma4:12b",
         "temperature": 0.2,
-        "max_tokens": 2048,
-        "timeout": 600,
+        "max_tokens": 65536,
+        "timeout": 30,
         "headers": {}
     },
     "network_policy": {
@@ -97,10 +97,10 @@
             "provider": "ollama",
             "api_base": "http://127.0.0.1:11434/v1",
             "api_key": "",
-            "model": "qwen3.6:27b",
+            "model": "gemma4:12b",
             "temperature": 0.2,
-            "max_tokens": 2048,
-            "timeout": 600,
+            "max_tokens": 65536,
+            "timeout": 30,
             "headers": {}
         },
         "small_model": {
