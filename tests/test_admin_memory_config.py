@@ -36,11 +36,13 @@ def test_admin_memory_config_get_and_update():
     headers = _admin_headers()
     cfg_before = get_config()
     old_mem_cfg = deepcopy(cfg_before.get("memory_runtime_config"))
+    old_temp_disable = deepcopy(cfg_before.get("memory_temporary_disable"))
     try:
         get_resp = client.get("/api/admin/memory-config", headers=headers)
         assert get_resp.status_code == 200
         payload = get_resp.json()
         assert "memory_module_enabled" in payload
+        assert "memory_temporary_disable_enabled" in payload
         assert "risk_notice" in payload
         assert payload["memory_mode_when_disabled"] == "classic"
 
@@ -52,6 +54,9 @@ def test_admin_memory_config_get_and_update():
                 "memory_token_guard_enabled": True,
                 "memory_max_llm_calls_per_audit": 9,
                 "memory_max_prompt_chars_per_clause": 1800,
+                "memory_temporary_disable_enabled": True,
+                "memory_temporary_disable_reason": "edge_llm_context_limit",
+                "memory_temporary_disable_trigger_source": "test_admin_memory_config",
             },
         )
         assert update_resp.status_code == 200
@@ -60,11 +65,19 @@ def test_admin_memory_config_get_and_update():
         assert data["memory_token_guard_enabled"] is True
         assert int(data["memory_max_llm_calls_per_audit"]) == 9
         assert int(data["memory_max_prompt_chars_per_clause"]) == 1800
+        assert data["memory_temporary_disable_enabled"] is True
+        assert data["memory_temporary_disable_reason"] == "edge_llm_context_limit"
+        assert data["memory_temporary_disable_trigger_source"] == "test_admin_memory_config"
 
         verify_resp = client.get("/api/admin/memory-config", headers=headers)
         assert verify_resp.status_code == 200
         verify_data = verify_resp.json()
         assert verify_data["memory_module_enabled"] is False
+        assert verify_data["memory_temporary_disable_enabled"] is True
     finally:
         restore = old_mem_cfg if isinstance(old_mem_cfg, dict) else {}
-        update_config_patch({"memory_runtime_config": restore})
+        restore_temp = old_temp_disable if isinstance(old_temp_disable, dict) else {}
+        update_config_patch({
+            "memory_runtime_config": restore,
+            "memory_temporary_disable": restore_temp,
+        })

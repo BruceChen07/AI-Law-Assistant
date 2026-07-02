@@ -96,6 +96,10 @@ Important execution controls:
 - `local_llm.execution.tax_risk_max_workers`
 - `local_llm.execution.memory_clause_force_cloud_for_priority`
 - `local_llm.execution.memory_flush_force_cloud`
+- `memory_runtime_config.memory_module_enabled`
+- `memory_temporary_disable.enabled`
+- `memory_temporary_disable.reason`
+- `memory_temporary_disable.trigger_source`
 
 ## 5. Local Model Startup
 
@@ -117,6 +121,37 @@ Notes:
 - Both local roles use the same Ollama API endpoint and are distinguished by model name.
 - The application uses Ollama official runtime management and Ollama-compatible inference configuration.
 - Admin `模型配置` 页面会自动探测本机 `/api/tags`，并以 5 分钟缓存提供模型列表、搜索和默认模型记忆能力。
+- If edge inference starts timing out because the memory path keeps expanding prompt context, enable `memory_temporary_disable.enabled=true` to force classic fallback.
+
+## 5.1 Temporary Memory Disable Procedure
+
+Use this procedure when logs show repeated `memory_audit_start`, `memory_round_done`, and multi-round `contract_clause_audit` LLM calls causing edge timeout pressure.
+
+Recommended config in `app/config.json`:
+
+```json
+{
+  "memory_temporary_disable": {
+    "enabled": true,
+    "fallback_mode": "classic",
+    "reason": "edge_llm_context_limit",
+    "trigger_source": "ops_temporary_disable_2026-07-03"
+  }
+}
+```
+
+Validation checkpoints:
+
+- Backend log contains `memory_temporarily_disabled`
+- Contract audit result metadata contains `memory_temporarily_disabled=true`
+- No new `memory_audit_start` / `memory_round_done` records appear for new audits
+- Contract audit still completes through `classic` path
+
+Rollback:
+
+- Set `memory_temporary_disable.enabled=false`
+- Keep `memory_runtime_config` unchanged unless you also want to disable memory permanently
+- Re-run contract audit validation and confirm `execution_path=memory` before declaring recovery
 
 ## 6. App Startup
 

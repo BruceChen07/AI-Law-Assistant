@@ -225,6 +225,20 @@
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,
     "rag_trace_max_rows": 20,
+    "memory_runtime_config": {
+        "memory_module_enabled": true,
+        "memory_mode_when_disabled": "classic",
+        "memory_disable_fallback_on_error": true,
+        "memory_token_guard_enabled": true,
+        "memory_max_llm_calls_per_audit": 12,
+        "memory_max_prompt_chars_per_clause": 2400
+    },
+    "memory_temporary_disable": {
+        "enabled": false,
+        "fallback_mode": "classic",
+        "reason": "edge_llm_context_limit",
+        "trigger_source": "config.memory_temporary_disable"
+    },
     "ui_config": {
         "show_citation_source": false,
         "default_theme": "dark"

@@ -170,11 +170,15 @@ npm run storybook
 
 1. 进入 Admin → 「模型配置」→「记忆审计配置」
 2. 开关 `启用经验记忆审计`：关闭后走 `classic` 低成本路径
-3. 勾选 `启用记忆 Token 守卫`，并设置预算上限
+3. 开关 `临时全局禁用记忆功能`：优先级高于 `启用经验记忆审计`，开启后统一走 `classic`
+4. 勾选 `启用记忆 Token 守卫`，并设置预算上限
 
 建议参数（生产默认）：
 
 - `memory_module_enabled`: `true`（如需严格控成本可设为 `false`）
+- `memory_temporary_disable.enabled`: 端侧模型上下文承载不足或持续超时时可设为 `true`
+- `memory_temporary_disable.reason`: 建议填写 `edge_llm_context_limit`
+- `memory_temporary_disable.trigger_source`: 建议填写运维变更来源，如 `ops_temporary_disable_2026-07-03`
 - `memory_max_llm_calls_per_audit`: `8-16`（合同较长建议上调）
 - `memory_max_prompt_chars_per_clause`: `1600-2800`
 
@@ -182,6 +186,7 @@ npm run storybook
 
 - 启用记忆模式会增加 LLM 调用次数与 Token 消耗，成本通常高于 classic 模式
 - 关闭记忆模式后，复杂场景的跨条款召回与经验修正能力会下降
+- 开启 `临时全局禁用记忆功能` 后，即使 `memory_module_enabled=true`，系统仍会强制走 `classic`
 - 预算过低时系统会优先高风险条款，低优先级条款可能被跳过（可在 trace 中观测）
 
 常见排查：
@@ -189,6 +194,7 @@ npm run storybook
 - 如果发现命中率下降，先检查 `memory_max_llm_calls_per_audit` 是否过小
 - 如果出现条款被跳过，检查 `memory_llm_guard_skipped_low_priority_calls` 指标
 - 如果想快速止损，直接在 Admin 关闭 `启用经验记忆审计`
+- 如果端侧模型持续超时，优先开启 `临时全局禁用记忆功能`，并在日志中观察 `memory_temporarily_disabled`
 
 ### 记忆审计模块拆分说明
 
@@ -396,6 +402,12 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
         "memory_max_llm_calls_per_audit": 12,
         "memory_max_prompt_chars_per_clause": 2400
     },
+    "memory_temporary_disable": {
+        "enabled": false,
+        "fallback_mode": "classic",
+        "reason": "edge_llm_context_limit",
+        "trigger_source": "config.memory_temporary_disable"
+    },
     "reranker_enabled": true,
     "reranker_model_path": "../models/reranker/zh",
     "reranker_profiles": {
@@ -435,6 +447,11 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | `memory_token_guard_enabled` | boolean | 是否启用记忆调用预算守卫             |
 | `memory_max_llm_calls_per_audit` | int | 单次审计允许的记忆路径最大 LLM 调用次数 |
 | `memory_max_prompt_chars_per_clause` | int | 单条款 prompt 最大字符数上限    |
+| `memory_temporary_disable` | object | 端侧稳定性止损用的临时总闸配置 |
+| `memory_temporary_disable.enabled` | boolean | 是否临时全局禁用记忆功能 |
+| `memory_temporary_disable.fallback_mode` | string | 临时禁用后强制回退模式，当前固定为 `classic` |
+| `memory_temporary_disable.reason` | string | 临时禁用原因，会写入日志与审计元数据 |
+| `memory_temporary_disable.trigger_source` | string | 临时禁用触发源，会写入日志与审计元数据 |
 | `reranker_enabled`       | boolean | 是否启用重排                    |
 | `reranker_model_path`    | string  | 默认重排模型路径                  |
 | `reranker_profiles`      | object  | 重排模型多语言路径                 |

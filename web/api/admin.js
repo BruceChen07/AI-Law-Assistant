@@ -140,3 +140,34 @@ export async function adminGetOllamaModels(params = {}) {
     headers: { ...getAuthHeaders() }
   })
 }
+
+// ---- LLM Trace 全链路日志接口 ----
+
+export async function adminListLLMTraces(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/llm-traces${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetLLMTraceDetail(spanId) {
+  return requestJson(`${API_BASE}/api/admin/llm-traces/${spanId}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetLLMTraceStats(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/llm-traces/stats/summary${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminCleanupLLMTraces(beforeDate) {
+  return requestJson(`${API_BASE}/api/admin/llm-traces?before_date=${encodeURIComponent(beforeDate)}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}

@@ -15,6 +15,7 @@ from app.core.auth import get_all_users, update_user_role, log_audit
 from app.api.dependencies import require_admin, get_app_llm
 from app.core.database import get_conn
 from app.core.config import get_config, update_config_patch
+from app.core.llm_trace import get_trace_collector
 from app.core.secure_store import has_llm_api_key, set_llm_api_key, delete_llm_api_key
 from app.vector_store.factory import VectorStoreFactory
 from app.services.memory_promotion import (
@@ -139,6 +140,10 @@ class MemoryRuntimeConfigResponse(BaseModel):
     memory_token_guard_enabled: bool
     memory_max_llm_calls_per_audit: int
     memory_max_prompt_chars_per_clause: int
+    memory_temporary_disable_enabled: bool
+    memory_temporary_disable_fallback_mode: str
+    memory_temporary_disable_reason: str
+    memory_temporary_disable_trigger_source: str
     risk_notice: str
 
 
@@ -149,6 +154,10 @@ class MemoryRuntimeConfigUpdate(BaseModel):
     memory_token_guard_enabled: Optional[bool] = None
     memory_max_llm_calls_per_audit: Optional[int] = None
     memory_max_prompt_chars_per_clause: Optional[int] = None
+    memory_temporary_disable_enabled: Optional[bool] = None
+    memory_temporary_disable_fallback_mode: Optional[str] = None
+    memory_temporary_disable_reason: Optional[str] = None
+    memory_temporary_disable_trigger_source: Optional[str] = None
 
 
 class LLMTestRequest(BaseModel):
@@ -413,10 +422,16 @@ def _get_ui_config(cfg: dict) -> dict:
 def _get_memory_runtime_config(cfg: dict) -> dict:
     raw = cfg.get("memory_runtime_config") if isinstance(
         cfg.get("memory_runtime_config"), dict) else {}
+    temp_disable = cfg.get("memory_temporary_disable") if isinstance(
+        cfg.get("memory_temporary_disable"), dict) else {}
     mode = str(raw.get("memory_mode_when_disabled")
                or "classic").strip().lower()
     if mode not in {"classic"}:
         mode = "classic"
+    temp_mode = str(temp_disable.get("fallback_mode")
+                    or "classic").strip().lower()
+    if temp_mode not in {"classic"}:
+        temp_mode = "classic"
     max_calls = int(raw.get("memory_max_llm_calls_per_audit") or 12)
     max_prompt_chars = int(
         raw.get("memory_max_prompt_chars_per_clause") or 2400)
@@ -429,7 +444,11 @@ def _get_memory_runtime_config(cfg: dict) -> dict:
         "memory_token_guard_enabled": bool(raw.get("memory_token_guard_enabled", True)),
         "memory_max_llm_calls_per_audit": max_calls,
         "memory_max_prompt_chars_per_clause": max_prompt_chars,
-        "risk_notice": "Enabling memory mode may increase LLM calls and token cost; disable it for lower-cost audits with potentially reduced recall quality.",
+        "memory_temporary_disable_enabled": bool(temp_disable.get("enabled", False)),
+        "memory_temporary_disable_fallback_mode": temp_mode,
+        "memory_temporary_disable_reason": str(temp_disable.get("reason") or "edge_llm_context_limit").strip() or "edge_llm_context_limit",
+        "memory_temporary_disable_trigger_source": str(temp_disable.get("trigger_source") or "config.memory_temporary_disable").strip() or "config.memory_temporary_disable",
+        "risk_notice": "Enabling memory mode may increase LLM calls and token cost; temporary-disable can force classic fallback for edge-device stability.",
     }
 
 
@@ -965,6 +984,11 @@ def update_memory_runtime_config(payload: MemoryRuntimeConfigUpdate, current_use
     if mode not in {"classic"}:
         raise HTTPException(
             status_code=400, detail="memory_mode_when_disabled must be 'classic'")
+    temp_mode = str(merged.get("memory_temporary_disable_fallback_mode")
+                    or "classic").strip().lower()
+    if temp_mode not in {"classic"}:
+        raise HTTPException(
+            status_code=400, detail="memory_temporary_disable_fallback_mode must be 'classic'")
     max_calls = int(merged.get("memory_max_llm_calls_per_audit") or 12)
     max_prompt_chars = int(merged.get(
         "memory_max_prompt_chars_per_clause") or 2400)
@@ -982,7 +1006,16 @@ def update_memory_runtime_config(payload: MemoryRuntimeConfigUpdate, current_use
         "memory_max_llm_calls_per_audit": max_calls,
         "memory_max_prompt_chars_per_clause": max_prompt_chars,
     }
-    cfg = update_config_patch({"memory_runtime_config": save_payload})
+    temp_disable_payload = {
+        "enabled": bool(merged.get("memory_temporary_disable_enabled", False)),
+        "fallback_mode": temp_mode,
+        "reason": str(merged.get("memory_temporary_disable_reason") or "edge_llm_context_limit").strip() or "edge_llm_context_limit",
+        "trigger_source": str(merged.get("memory_temporary_disable_trigger_source") or "config.memory_temporary_disable").strip() or "config.memory_temporary_disable",
+    }
+    cfg = update_config_patch({
+        "memory_runtime_config": save_payload,
+        "memory_temporary_disable": temp_disable_payload,
+    })
     out = _get_memory_runtime_config(cfg)
     return MemoryRuntimeConfigResponse(**out)
 
@@ -1256,3 +1289,143 @@ def test_llm(
         len(str(answer or "")),
     )
     return LLMTestResponse(ok=True, prompt=prompt, answer=answer)
+
+
+# ==================== LLM Trace 全链路日志接口 ====================
+
+class LlmTraceQuery(BaseModel):
+    model_name: str = ""
+    status: str = ""
+    audit_id: str = ""
+    date_from: str = ""
+    date_to: str = ""
+    stage: str = ""
+    page: int = 1
+    page_size: int = 20
+
+
+class LlmTraceItem(BaseModel):
+    id: int
+    trace_id: str
+    span_id: str
+    parent_span_id: str = ""
+    audit_id: str = ""
+    stage: str
+    task_profile: str = "default"
+    model_role: str = "main"
+    provider: str = ""
+    api_base: str = ""
+    model_name: str
+    request_received_at: str = ""
+    request_input_tokens_est: int = 0
+    request_temperature: float = 0
+    request_max_tokens: int = 0
+    request_timeout: int = 0
+    thinking_started_at: str = ""
+    thinking_duration_ms: int = 0
+    response_generated_at: str = ""
+    response_content_length: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    total_latency_ms: int = 0
+    retry_index: int = 0
+    is_retry: bool = False
+    retry_strategy: str = ""
+    status: str
+    error_type: str = ""
+    error_message: str = ""
+    ollama_load_duration_ms: int = 0
+    ollama_prompt_eval_ms: int = 0
+    ollama_eval_duration_ms: int = 0
+    ollama_total_duration_ms: int = 0
+    created_at: str = ""
+
+
+class LlmTraceListResponse(BaseModel):
+    items: List[LlmTraceItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class LlmTraceDetailResponse(BaseModel):
+    trace: dict
+    full_request_messages: list
+    full_response_content: str = ""
+    full_thinking_content: str = ""
+    jsonl_events: list
+
+
+class LlmTraceStatsResponse(BaseModel):
+    by_model: list
+    by_stage: list
+    daily: list
+
+
+@router.get("/llm-traces", response_model=LlmTraceListResponse)
+def list_llm_traces(
+    model_name: str = Query(""),
+    status: str = Query(""),
+    audit_id: str = Query(""),
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    stage: str = Query(""),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    collector = get_trace_collector(cfg)
+    result = collector.query_traces(
+        model_name=model_name,
+        status=status,
+        audit_id=audit_id,
+        date_from=date_from,
+        date_to=date_to,
+        stage=stage,
+        page=page,
+        page_size=page_size,
+    )
+    return result
+
+
+@router.get("/llm-traces/{span_id}", response_model=LlmTraceDetailResponse)
+def get_llm_trace_detail(
+    span_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    collector = get_trace_collector(cfg)
+    detail = collector.get_trace_detail(span_id)
+    if not detail:
+        raise HTTPException(status_code=404, detail="trace span not found")
+    return {
+        "trace": detail,
+        "full_request_messages": detail.get("full_request_messages", []),
+        "full_response_content": detail.get("full_response_content", ""),
+        "full_thinking_content": detail.get("full_thinking_content", ""),
+        "jsonl_events": detail.get("jsonl_events", []),
+    }
+
+
+@router.get("/llm-traces/stats/summary", response_model=LlmTraceStatsResponse)
+def get_llm_trace_stats(
+    date_from: str = Query(""),
+    date_to: str = Query(""),
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    collector = get_trace_collector(cfg)
+    return collector.get_stats(date_from=date_from, date_to=date_to)
+
+
+@router.delete("/llm-traces")
+def cleanup_llm_traces(
+    before_date: str = Query(..., description="删除此日期之前的日志，格式 YYYY-MM-DD"),
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    collector = get_trace_collector(cfg)
+    deleted = collector.delete_old_traces(before_date)
+    return {"message": f"deleted {deleted} trace records before {before_date}", "deleted": deleted}

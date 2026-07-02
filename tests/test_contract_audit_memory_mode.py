@@ -1150,6 +1150,76 @@ def test_memory_llm_call_budget_limit_enforced(monkeypatch, tmp_path: Path):
         "memory_llm_call_guard_hit")) in {True, False}
 
 
+def test_memory_temporary_disable_forces_classic_without_calling_memory_pipeline(monkeypatch, tmp_path: Path):
+    def fake_extract(_cfg, _file_path):
+        text = "第一条 甲方应在10日内开具发票。\n第二条 乙方应在5日内提供对账单。"
+        return text, {"ocr_used": False, "ocr_engine": "", "page_count": 1}
+
+    def fake_retrieve(_cfg, _text, _lang, _opts, embedder=None, reranker=None):
+        return {
+            "used": True,
+            "queries": ["发票", "对账单"],
+            "query_success": 2,
+            "query_failed": 0,
+            "chunk_total": 2,
+            "failed_chunks": [],
+            "items": [
+                {
+                    "citation_id": "c1",
+                    "law_title": "中华人民共和国增值税暂行条例",
+                    "title": "中华人民共和国增值税暂行条例",
+                    "article_no": "第十九条",
+                    "excerpt": "纳税义务发生时间",
+                    "content": "纳税义务发生时间",
+                }
+            ],
+        }
+
+    def fail_execute_memory_audit(**_kwargs):
+        raise AssertionError("memory pipeline should not run when temporary disable is enabled")
+
+    monkeypatch.setattr(ca, "extract_text_with_config", fake_extract)
+    monkeypatch.setattr(ca, "_retrieve_regulation_evidence", fake_retrieve)
+    monkeypatch.setattr(ca, "_get_memory_embedder", lambda: FakeEmbedder())
+    monkeypatch.setattr(ca, "execute_memory_audit", fail_execute_memory_audit)
+
+    cfg = {
+        "data_dir": str(tmp_path / "data"),
+        "memory_dir": str(tmp_path / "memory"),
+        "memory_filter_unverifiable_risks": False,
+        "llm_config": {"model": "fake", "timeout": 8},
+        "memory_runtime_config": {
+            "memory_module_enabled": True,
+            "memory_mode_when_disabled": "classic",
+            "memory_disable_fallback_on_error": True,
+        },
+        "memory_temporary_disable": {
+            "enabled": True,
+            "fallback_mode": "classic",
+            "reason": "edge_llm_context_limit",
+            "trigger_source": "test_case",
+        },
+    }
+    f = tmp_path / "dummy.docx"
+    f.write_text("x", encoding="utf-8")
+    llm = FakeLLM()
+    result = ca.audit_contract(
+        cfg=cfg,
+        llm=llm,
+        file_path=str(f),
+        lang="zh",
+        retrieval_options={"audit_mode": "rag"},
+    )
+
+    assert result["meta"]["memory_module_enabled"] is False
+    assert result["meta"]["memory_runtime_module_enabled"] is True
+    assert result["meta"]["memory_temporarily_disabled"] is True
+    assert result["meta"]["memory_temporary_disable_reason"] == "edge_llm_context_limit"
+    assert result["meta"]["memory_temporary_disable_trigger_source"] == "test_case"
+    assert result["meta"]["execution_path"] == "classic"
+    assert result["raw"]["mode"] == "classic"
+
+
 def test_memory_llm_budget_prioritizes_high_risk_clause(monkeypatch, tmp_path: Path):
     def fake_extract(_cfg, _file_path):
         text = (

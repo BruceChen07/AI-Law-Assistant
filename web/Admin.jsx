@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react"
 import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminGetOllamaModels, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
+import LlmTraceViewer from "./LlmTraceViewer"
 import { adminI18n } from "./i18n/adminI18n"
 
 const OLLAMA_MODEL_STORAGE_KEY = "admin.selectedOllamaModel"
-const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor"])
+const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor", "llm-traces"])
 
 export default function Admin({ onBack, lang, tab: externalTab = "documents", onTabChange }) {
   const normalizedInitialTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
@@ -49,6 +50,10 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     memory_token_guard_enabled: true,
     memory_max_llm_calls_per_audit: 12,
     memory_max_prompt_chars_per_clause: 2400,
+    memory_temporary_disable_enabled: false,
+    memory_temporary_disable_fallback_mode: "classic",
+    memory_temporary_disable_reason: "edge_llm_context_limit",
+    memory_temporary_disable_trigger_source: "config.memory_temporary_disable",
     risk_notice: ""
   })
   const [memorySaving, setMemorySaving] = useState(false)
@@ -341,6 +346,10 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
         memory_token_guard_enabled: !!data.memory_token_guard_enabled,
         memory_max_llm_calls_per_audit: Number(data.memory_max_llm_calls_per_audit || 12),
         memory_max_prompt_chars_per_clause: Number(data.memory_max_prompt_chars_per_clause || 2400),
+        memory_temporary_disable_enabled: !!data.memory_temporary_disable_enabled,
+        memory_temporary_disable_fallback_mode: String(data.memory_temporary_disable_fallback_mode || "classic"),
+        memory_temporary_disable_reason: String(data.memory_temporary_disable_reason || "edge_llm_context_limit"),
+        memory_temporary_disable_trigger_source: String(data.memory_temporary_disable_trigger_source || "config.memory_temporary_disable"),
         risk_notice: String(data.risk_notice || "")
       })
       setMemoryMsg("")
@@ -459,7 +468,11 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
         memory_mode_when_disabled: "classic",
         memory_token_guard_enabled: !!memoryConfig.memory_token_guard_enabled,
         memory_max_llm_calls_per_audit: Number(memoryConfig.memory_max_llm_calls_per_audit || 12),
-        memory_max_prompt_chars_per_clause: Number(memoryConfig.memory_max_prompt_chars_per_clause || 2400)
+        memory_max_prompt_chars_per_clause: Number(memoryConfig.memory_max_prompt_chars_per_clause || 2400),
+        memory_temporary_disable_enabled: !!memoryConfig.memory_temporary_disable_enabled,
+        memory_temporary_disable_fallback_mode: "classic",
+        memory_temporary_disable_reason: String(memoryConfig.memory_temporary_disable_reason || "edge_llm_context_limit"),
+        memory_temporary_disable_trigger_source: String(memoryConfig.memory_temporary_disable_trigger_source || "config.memory_temporary_disable")
       }
       const next = await adminUpdateMemoryConfig(payload)
       setMemoryConfig(prev => ({
@@ -467,6 +480,10 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
         ...next,
         memory_max_llm_calls_per_audit: Number(next.memory_max_llm_calls_per_audit || prev.memory_max_llm_calls_per_audit),
         memory_max_prompt_chars_per_clause: Number(next.memory_max_prompt_chars_per_clause || prev.memory_max_prompt_chars_per_clause),
+        memory_temporary_disable_enabled: !!next.memory_temporary_disable_enabled,
+        memory_temporary_disable_fallback_mode: String(next.memory_temporary_disable_fallback_mode || prev.memory_temporary_disable_fallback_mode || "classic"),
+        memory_temporary_disable_reason: String(next.memory_temporary_disable_reason || prev.memory_temporary_disable_reason || "edge_llm_context_limit"),
+        memory_temporary_disable_trigger_source: String(next.memory_temporary_disable_trigger_source || prev.memory_temporary_disable_trigger_source || "config.memory_temporary_disable"),
         risk_notice: String(next.risk_notice || prev.risk_notice || "")
       }))
       setMemoryMsg(t.memoryConfigSaved)
@@ -603,6 +620,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
         <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>{t.tabModel}</button>
         <button className={tab === "regulations" ? "active" : ""} onClick={() => setTab("regulations")}>{t.tabRegulations}</button>
         <button className={tab === "token-monitor" ? "active" : ""} onClick={() => setTab("token-monitor")}>{t.tabTokenMonitor}</button>
+        <button className={tab === "llm-traces" ? "active" : ""} onClick={() => setTab("llm-traces")}>LLM Trace</button>
       </div>
       
       {tab === "stats" && stats && (
@@ -948,6 +966,37 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
                   </div>
                 </div>
                 <div className="row">
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={!!memoryConfig.memory_temporary_disable_enabled}
+                      onChange={e => setMemoryConfig(prev => ({ ...prev, memory_temporary_disable_enabled: e.target.checked }))}
+                    />
+                    {t.memoryTemporaryDisableEnabled}
+                  </label>
+                </div>
+                <div className="row">
+                  <div style={{ color: "#6941c6", fontSize: 13, lineHeight: 1.5 }}>
+                    {t.memoryTemporaryDisableHint}
+                  </div>
+                </div>
+                <div className="row">
+                  <label>{t.memoryTemporaryDisableReason}</label>
+                  <input
+                    value={String(memoryConfig.memory_temporary_disable_reason || "")}
+                    onChange={e => setMemoryConfig(prev => ({ ...prev, memory_temporary_disable_reason: e.target.value }))}
+                    placeholder="edge_llm_context_limit"
+                  />
+                </div>
+                <div className="row">
+                  <label>{t.memoryTemporaryDisableTriggerSource}</label>
+                  <input
+                    value={String(memoryConfig.memory_temporary_disable_trigger_source || "")}
+                    onChange={e => setMemoryConfig(prev => ({ ...prev, memory_temporary_disable_trigger_source: e.target.value }))}
+                    placeholder="ops_temporary_disable_2026-07-03"
+                  />
+                </div>
+                <div className="row">
                   <label>{t.memoryModeWhenDisabled}</label>
                   <select
                     value={String(memoryConfig.memory_mode_when_disabled || "classic")}
@@ -1194,6 +1243,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
       )}
 
       {tab === "token-monitor" && <TokenMonitor lang={lang} />}
+      {tab === "llm-traces" && <LlmTraceViewer lang={lang} />}
     </div>
   )
 }

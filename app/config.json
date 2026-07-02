@@ -66,8 +66,8 @@
         "api_key": "",
         "model": "gemma4:12b",
         "temperature": 0.2,
-        "max_tokens": 2048,
-        "timeout": 30,
+        "max_tokens": 65536,
+        "timeout": 600,
         "headers": {}
     },
     "network_policy": {
@@ -99,8 +99,8 @@
             "api_key": "",
             "model": "gemma4:12b",
             "temperature": 0.2,
-            "max_tokens": 2048,
-            "timeout": 30,
+            "max_tokens": 65536,
+            "timeout": 600,
             "headers": {}
         },
         "small_model": {
@@ -145,6 +145,10 @@
     "llm_trace_enabled": true,
     "llm_trace_dir": "../data/memory/llm_interactions",
     "llm_trace_max_chars": 12000,
+    "llm_trace_full_enabled": true,
+    "llm_trace_full_dir": "../data/llm_traces_full",
+    "llm_trace_full_db_path": "../data/llm_trace.db",
+    "llm_trace_full_max_chars": 16000,
     "model_preflight_check_on_startup": true,
     "model_preflight_auto_download_on_startup": false,
     "model_preflight_include_optional": false,
@@ -207,9 +211,22 @@
         "http://localhost:5173",
         "http://localhost:5174"
     ],
+    "memory_runtime_config": {
+        "memory_module_enabled": true,
+        "memory_mode_when_disabled": "classic",
+        "memory_disable_fallback_on_error": true,
+        "memory_token_guard_enabled": true,
+        "memory_max_llm_calls_per_audit": 12,
+        "memory_max_prompt_chars_per_clause": 2400
+    },
+    "memory_temporary_disable": {
+        "enabled": true,
+        "fallback_mode": "classic",
+        "reason": "edge_llm_context_limit",
+        "trigger_source": "ops_temporary_disable_2026-07-03"
+    },
     "ui_config": {
         "show_citation_source": false,
         "default_theme": "light"
-    },
-    "memory_runtime_config": {}
+    }
 }

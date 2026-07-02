@@ -7,6 +7,7 @@ import uuid
 import hashlib
 import json
 import re
+import socket
 import structlog
 from typing import Dict, Any, Optional, Callable, List
 
@@ -20,6 +21,7 @@ from app.services.contract_audit_modules.result_assembler import attach_risk_loc
 from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip
 from app.memory_system.search import HybridSearcher
 from app.memory_system.experience_repo import save_audit_episode
+from app.core.llm_trace import new_trace_id
 
 logger = structlog.get_logger(__name__)
 
@@ -75,6 +77,20 @@ def _get_memory_runtime_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_memory_temporary_disable_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    raw = cfg.get("memory_temporary_disable") if isinstance(
+        cfg.get("memory_temporary_disable"), dict) else {}
+    fallback_mode = str(raw.get("fallback_mode") or "classic").strip().lower()
+    if fallback_mode not in {"classic"}:
+        fallback_mode = "classic"
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "fallback_mode": fallback_mode,
+        "reason": str(raw.get("reason") or "edge_llm_context_limit").strip() or "edge_llm_context_limit",
+        "trigger_source": str(raw.get("trigger_source") or "config.memory_temporary_disable").strip() or "config.memory_temporary_disable",
+    }
+
+
 def _load_llm_json_object(raw_text: str) -> Dict[str, Any]:
     s = str(raw_text or "").strip()
     if not s:
@@ -110,6 +126,7 @@ def _build_classic_audit(
     evidence_items: List[Dict[str, Any]],
     retrieval_opts: Dict[str, Any],
     audit_id: str,
+    trace_id: str = "",
 ) -> Dict[str, Any]:
     norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
     allowed_citation_ids = {
@@ -159,6 +176,7 @@ def _build_classic_audit(
         "module": "contract_audit",
         "stage": "contract_classic_audit",
         "audit_id": audit_id,
+        "trace_id": trace_id,
         "lang": norm_lang,
         "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
     }
@@ -341,9 +359,10 @@ def audit_contract(
 
     audit_started_at = time.perf_counter()
     audit_id = f"audit_{uuid.uuid4().hex[:12]}"
+    trace_id = new_trace_id()
     _report("extracting", 15, "extracting text")
     logger.info("audit_extract_start", file=file_path,
-                lang=lang, audit_id=audit_id)
+                lang=lang, audit_id=audit_id, trace_id=trace_id)
     text, meta = extract_text_with_config(cfg, file_path)
     preview_clauses = build_preview_clauses(text)
     logger.info(
@@ -417,8 +436,17 @@ def audit_contract(
         },
     )
     memory_runtime_cfg = _get_memory_runtime_config(cfg)
-    memory_enabled = bool(memory_runtime_cfg.get(
+    memory_temporary_disable_cfg = _get_memory_temporary_disable_config(cfg)
+    runtime_memory_enabled = bool(memory_runtime_cfg.get(
         "memory_module_enabled", True))
+    memory_temporarily_disabled = bool(
+        memory_temporary_disable_cfg.get("enabled", False))
+    effective_disable_mode = str(
+        memory_temporary_disable_cfg.get("fallback_mode")
+        or memory_runtime_cfg.get("memory_mode_when_disabled")
+        or "classic"
+    ).strip().lower()
+    memory_enabled = runtime_memory_enabled and not memory_temporarily_disabled
     fallback_on_error = bool(memory_runtime_cfg.get(
         "memory_disable_fallback_on_error", True))
     execution_path = "memory"
@@ -458,6 +486,7 @@ def audit_contract(
                     "module": "contract_audit",
                     "file_path": file_path,
                     "audit_id": audit_id,
+                    "trace_id": trace_id,
                     "regulation_pack_id": regulation_identity.get("regulation_pack_id", ""),
                     "regulation_fingerprint": regulation_identity.get("regulation_fingerprint", ""),
                 },
@@ -477,11 +506,27 @@ def audit_contract(
                 evidence_items=evidence_items,
                 retrieval_opts=opts,
                 audit_id=audit_id,
+                trace_id=trace_id,
             )
             execution_path = "classic_fallback"
     else:
-        logger.info("audit_memory_disabled_use_classic",
-                    audit_id=audit_id, file=file_path)
+        if memory_temporarily_disabled:
+            logger.warning(
+                "memory_temporarily_disabled audit_id=%s file=%s service_node=%s trigger_source=%s disable_reason=%s fallback_mode=%s runtime_memory_enabled=%s clauses=%s",
+                audit_id,
+                file_path,
+                socket.gethostname(),
+                str(memory_temporary_disable_cfg.get(
+                    "trigger_source") or "config.memory_temporary_disable"),
+                str(memory_temporary_disable_cfg.get(
+                    "reason") or "edge_llm_context_limit"),
+                effective_disable_mode,
+                runtime_memory_enabled,
+                len(preview_clauses),
+            )
+        else:
+            logger.info("audit_memory_disabled_use_classic",
+                        audit_id=audit_id, file=file_path)
         memory_result = _build_classic_audit(
             cfg=cfg,
             llm=llm,
@@ -491,8 +536,9 @@ def audit_contract(
             evidence_items=evidence_items,
             retrieval_opts=opts,
             audit_id=audit_id,
+            trace_id=trace_id,
         )
-        execution_path = "classic"
+        execution_path = "classic" if effective_disable_mode == "classic" else effective_disable_mode
     _report("audit_done", 90, "audit complete")
     memory_meta = memory_result.get("meta") if isinstance(
         memory_result.get("meta"), dict) else {}
@@ -542,6 +588,11 @@ def audit_contract(
         "regulation_fingerprint": regulation_identity.get("regulation_fingerprint", ""),
         "regulation_pack_members": regulation_identity.get("regulation_pack_members", []),
         "memory_module_enabled": memory_enabled,
+        "memory_runtime_module_enabled": runtime_memory_enabled,
+        "memory_temporarily_disabled": memory_temporarily_disabled,
+        "memory_temporary_disable_reason": memory_temporary_disable_cfg.get("reason"),
+        "memory_temporary_disable_trigger_source": memory_temporary_disable_cfg.get("trigger_source"),
+        "memory_temporary_disable_fallback_mode": memory_temporary_disable_cfg.get("fallback_mode"),
         "execution_path": execution_path,
         **memory_meta,
     }
@@ -556,6 +607,9 @@ def audit_contract(
             "memory_rounds": output_meta.get("memory_clause_rounds", 0),
             "memory_llm_call_count": output_meta.get("memory_llm_call_count", 0),
             "memory_llm_total_tokens": output_meta.get("memory_llm_total_tokens", 0),
+            "memory_temporarily_disabled": memory_temporarily_disabled,
+            "memory_temporary_disable_reason": output_meta.get("memory_temporary_disable_reason", ""),
+            "memory_temporary_disable_trigger_source": output_meta.get("memory_temporary_disable_trigger_source", ""),
             "risk_count": output_meta.get("memory_report_risk_count", 0),
             "suppressed_missing_risks": output_meta.get("suppressed_missing_risks", 0),
             "parse_failed_clauses": output_meta.get("parse_failed_clauses", 0),
