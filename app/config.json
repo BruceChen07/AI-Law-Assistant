@@ -148,7 +148,7 @@
     "model_preflight_check_on_startup": true,
     "model_preflight_auto_download_on_startup": false,
     "model_preflight_include_optional": false,
-    "model_preflight_require_all": true,
+    "model_preflight_require_all": false,
     "rag_trace_enabled": true,
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,
