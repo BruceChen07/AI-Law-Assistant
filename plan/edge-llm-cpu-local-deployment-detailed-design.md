@@ -414,6 +414,7 @@ LLM raw output
 | 阶段 3 | 进行中 | AI Agent | 2026-06-23 | 2026-06-26 |  | 完成统一失败升级策略、高风险云端复核和端侧并发收敛 | 已新增本地运行时 fallback helper；`tax_matcher` 支持异常/无效结果回退与高风险云端复核；`tax_risk` 支持高风险直接云端路由；`memory_pipeline` 条款审计与 flush 已接入 fallback；税务链路并发改为优先读取本地执行配置 | 真实本地模型压测与 memory 长文档超时验证仍未完成 | 开始真实本地模型联调，并补 memory 长文档与超时场景验证 |
 | 阶段 4 | 进行中 | AI Agent | 2026-06-23 | 2026-06-26 |  | 跑完整回归集，补齐部署文档、回归报告和已知问题清单 | 已新增阶段 4 回归脚本，已生成回归报告，已补部署 Runbook 与已知问题清单 | 真实本地模型 smoke、长文档压测与人工验收仍未完成 | 启动真实本地模型后执行 smoke，并补人工验收记录 |
 | 阶段 5 | 已完成 | AI Agent | 2026-06-23 | 2026-06-23 | 2026-06-23 | 完成 Ollama-only 运行栈迁移、Python 化启动入口和本机联调修复 | 已将本地模型运行统一到 `Ollama`；新增 `init.py`、`start-services.py`、`start-local-llm-servers.py`、`download-local-llm-models.py`、`apply-local-llm-config.py`；`LLMService` 已支持 `provider=ollama`；已修复 `qwen3.6:27b` thinking 兼容与 PID BOM 读取问题 | 长文档压测、人工验收、历史 UTC warnings 清理仍未完成 | 继续补真实业务样本压测与 stop-services Python 入口 |
+| 阶段 6 | 已完成 | AI Agent | 2026-06-23 | 2026-06-23 | 2026-06-23 | 完成企业纯本地分支、云端依赖审计和 i5-12500/64GB 硬件适配评估 | 已创建 `feature/enterprise-local-ollama-only` 分支并禁用所有云端兜底配置；已完成全量云端依赖审计（零运行时外部调用）；已完成 `qwen3.6:27b` 和 `llama3.2:3b` 在 i5-12500/64GB 上的实测基准；已删除含硬编码 API Key 的 `bin/test_qwen_ai.py`；已新增 `bin/benchmark-local-llm.py`；53 项回归全部通过 | 27B 主模型在 i5-12500 上仅 ~2.2 tok/s，建议测试更轻主模型 | 补充 stop-services Python 入口并开展真实业务联调 |
 
 ### 12.3 设计变更记录表
 
@@ -424,6 +425,7 @@ LLM raw output
 | 2026-06-23 | AI Agent | 阶段 3 首批实现落地 | 仅有阶段目标描述 | 已完成统一 fallback helper、高风险云端复核和并发配置收敛 | 将阶段 3 设计转为可验证代码 | `app/services/local_llm_runtime.py`、`app/services/tax_matcher.py`、`app/services/tax_risk.py`、`tests/` |
 | 2026-06-23 | AI Agent | 阶段 4 交付物落地 | 仅有阶段目标描述 | 已完成回归脚本、回归报告、部署 Runbook 和已知问题清单 | 将阶段 4 交付项转为可执行与可审阅产物 | `bin/run-edge-llm-regression.ps1`、`plan/edge-llm-cpu-local-regression-report.md`、`plan/edge-llm-cpu-local-deployment-runbook.md`、`plan/edge-llm-cpu-local-known-issues.md` |
 | 2026-06-23 | AI Agent | Ollama-only 迁移 | 本地运行方案同时保留 `llama.cpp` 与 `Ollama` 约定 | 已切换为仅保留 `Ollama` 运行时、模型名和部署文档 | 消除 `llama.cpp` 残留配置与脚本假设，统一本地运行栈 | `app/core/llm.py`、`bin/`、`app/config.example.json`、`README.zh-CN.md`、`plan/`、`tests/` |
+| 2026-06-23 | AI Agent | 企业纯本地分支与硬件适配评估 | 仅保留本地 Ollama 配置但仍暴露云端兼容分支 | 已创建 `feature/enterprise-local-ollama-only` 分支，禁用所有云端兜底配置，删除含硬编码 API Key 的测试脚本，新增本地性能基准工具 | 满足企业内网安全合规要求，完成 i5-12500/64GB 硬件实测评估 | `bin/test_qwen_ai.py`（删除）、`bin/benchmark-local-llm.py`（新增）、`app/config.example.json`、`plan/` |
 
 ### 12.4 当前阶段改动文件记录
 
@@ -467,6 +469,11 @@ LLM raw output
 | 阶段 5 | `app/config.example.json` | 示例配置切换为 Ollama-only |
 | 阶段 5 | `tests/test_llm_router.py` | 路由测试更新为 Ollama 模型名与端点 |
 | 阶段 5 | `tests/test_llm_local_mode.py` | 本地模式测试改为覆盖 Ollama 官方 API 分支 |
+| 阶段 6 | `bin/test_qwen_ai.py` | 删除：移除了含硬编码 DashScope API Key 的调试脚本（安全清理） |
+| 阶段 6 | `bin/benchmark-local-llm.py` | 新增：企业本地部署硬件评估基准测试工具，支持双模型（27B/3B）吞吐与延迟验证 |
+| 阶段 6 | `app/config.example.json` | 更新：默认禁用所有云端兜底开关，强制本地 Ollama 唯一数据通路 |
+| 阶段 6 | `plan/edge-llm-cpu-local-deployment-detailed-design.md` | 更新：追加阶段 6 进度、变更记录和文件改动清单 |
+| 阶段 6 | `plan/edge-llm-cpu-local-known-issues.md` | 更新：标记 KI-001 为已缓解，新增 KI-006（26GB 模型加载延迟）与 KI-007（i5-12500 CPU 瓶颈） |
 
 ## 13. 测试设计与结果记录
 
