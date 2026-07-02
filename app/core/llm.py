@@ -392,8 +392,9 @@ class LLMService:
                 raise RuntimeError(
                     f"ollama request failed after read retry: {str(e2)}"
                 ) from e2
-        except httpx.TimeoutException as e:
-            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
+        except httpx.TimeoutException:
+            # ---- first retry: extended timeout + reduced max_tokens ----
+            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 900)))
             retry_cfg = dict(cfg)
             retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
             retry_body = self._build_ollama_chat_body(
@@ -411,6 +412,24 @@ class LLMService:
             try:
                 raw = self._post_ollama_chat(
                     request_url, retry_body, request_headers, retry_timeout
+                )
+            except httpx.TimeoutException:
+                # ---- last-chance retry: full timeout + aggressive reduction ----
+                last_timeout = retry_timeout
+                last_max_tokens = max(64, int(max_tokens * 0.3))
+                last_body = self._build_ollama_chat_body(
+                    model, messages, temperature, last_max_tokens, dict(cfg)
+                )
+                logger.warning(
+                    "ollama_request_timeout_last_chance url=%s model=%s timeout=%s max_tokens=%s->%s",
+                    request_url,
+                    model,
+                    last_timeout,
+                    max_tokens,
+                    last_max_tokens,
+                )
+                raw = self._post_ollama_chat(
+                    request_url, last_body, request_headers, last_timeout
                 )
             except Exception as e2:
                 raise RuntimeError(
