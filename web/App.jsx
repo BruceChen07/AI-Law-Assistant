@@ -6,9 +6,30 @@ import { appI18n } from "./i18n/appI18n"
 
 const THEME_STORAGE_KEY = "ui_theme"
 const APP_LANG_STORAGE_KEY = "ui_lang"
+const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
+const normalizeView = (value) => (String(value || "").toLowerCase() === "admin" ? "admin" : "main")
+
+const readRouteFromHash = () => {
+  if (typeof window === "undefined") return { view: "main", adminTab: "documents" }
+  const hash = String(window.location.hash || "").replace(/^#/, "").trim()
+  if (!hash) return { view: "main", adminTab: "documents" }
+  const [viewRaw, adminTabRaw] = hash.split("/")
+  const view = normalizeView(viewRaw)
+  const adminTab = ADMIN_TABS.has(adminTabRaw) ? adminTabRaw : "documents"
+  return { view, adminTab }
+}
+
+const writeRouteToHash = (view, adminTab = "documents") => {
+  if (typeof window === "undefined") return
+  const nextView = normalizeView(view)
+  const nextTab = ADMIN_TABS.has(adminTab) ? adminTab : "documents"
+  const nextHash = nextView === "admin" ? `#admin/${nextTab}` : "#main"
+  if (window.location.hash === nextHash) return
+  window.history.replaceState(null, "", nextHash)
+}
 
 const getStoredTheme = () => {
   const v = String(localStorage.getItem(THEME_STORAGE_KEY) || "").toLowerCase()
@@ -21,7 +42,9 @@ const getStoredAppLang = () => {
 }
 
 export default function App() {
-  const [view, setView] = useState("main")
+  const initialRoute = readRouteFromHash()
+  const [view, setView] = useState(initialRoute.view)
+  const [adminTab, setAdminTab] = useState(initialRoute.adminTab)
   const [user, setUser] = useState(getCurrentUser())
 
   useEffect(() => {
@@ -39,6 +62,18 @@ export default function App() {
     }
     syncUser()
   }, [])
+  useEffect(() => {
+    const onHashChange = () => {
+      const nextRoute = readRouteFromHash()
+      setView(nextRoute.view)
+      setAdminTab(nextRoute.adminTab)
+    }
+    window.addEventListener("hashchange", onHashChange)
+    return () => window.removeEventListener("hashchange", onHashChange)
+  }, [])
+  useEffect(() => {
+    writeRouteToHash(view, adminTab)
+  }, [view, adminTab])
   const [uiLang, setUiLang] = useState(() => getStoredAppLang())
   const [theme, setTheme] = useState("dark")
   const [contract, setContract] = useState(() => ({
@@ -829,13 +864,25 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login onLogin={() => { setUser(getCurrentUser()); setView("main") }} />
+    return <Login onLogin={() => {
+      setUser(getCurrentUser())
+      const nextRoute = readRouteFromHash()
+      setView(nextRoute.view)
+      setAdminTab(nextRoute.adminTab)
+    }} />
   }
 
   const canOpenAdmin = user.role === "admin" || user.username === "admin"
 
   if (view === "admin") {
-    return <Admin lang={uiLang} onBack={() => setView("main")} />
+    return (
+      <Admin
+        lang={uiLang}
+        tab={adminTab}
+        onTabChange={setAdminTab}
+        onBack={() => setView("main")}
+      />
+    )
   }
 
   return (

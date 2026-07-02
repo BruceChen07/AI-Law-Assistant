@@ -4,9 +4,11 @@ import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
 const OLLAMA_MODEL_STORAGE_KEY = "admin.selectedOllamaModel"
+const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor"])
 
-export default function Admin({ onBack, lang }) {
-  const [tab, setTab] = useState("documents")
+export default function Admin({ onBack, lang, tab: externalTab = "documents", onTabChange }) {
+  const normalizedInitialTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
+  const [tab, setTab] = useState(normalizedInitialTab)
   const [documents, setDocuments] = useState([])
   const [users, setUsers] = useState([])
   const [stats, setStats] = useState(null)
@@ -82,6 +84,15 @@ export default function Admin({ onBack, lang }) {
   const user = getCurrentUser()
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
+  
+  useEffect(() => {
+    const nextTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
+    setTab(prev => (prev === nextTab ? prev : nextTab))
+  }, [externalTab])
+
+  useEffect(() => {
+    if (typeof onTabChange === "function") onTabChange(tab)
+  }, [tab, onTabChange])
   
   useEffect(() => {
     if (!admin) return
@@ -415,7 +426,7 @@ export default function Admin({ onBack, lang }) {
     setLlmTestResult("")
     setLlmTestError("")
     try {
-      const res = await adminTestLLM({ prompt })
+      const res = await adminTestLLM({ prompt }, Number(llmConfig.timeout || 0))
       setLlmTestResult(res.answer || "")
     } catch (err) {
       setLlmTestError(err.message)

@@ -1,4 +1,4 @@
-import { API_BASE, getAuthHeaders, requestBlob, requestJson } from "./base"
+import { API_BASE, getAuthHeaders, getLongRequestTimeoutMs, requestBlob, requestJson } from "./base"
 
 export async function adminListDocuments(params = {}) {
   const query = new URLSearchParams(params).toString()
@@ -124,11 +124,12 @@ export async function adminExportTokenStats(params = {}) {
   })
 }
 
-export async function adminTestLLM(payload) {
+export async function adminTestLLM(payload, timeoutSec) {
   return requestJson(`${API_BASE}/api/admin/llm-test`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-    body: JSON.stringify(payload || {})
+    body: JSON.stringify(payload || {}),
+    timeoutMs: getLongRequestTimeoutMs(timeoutSec)
   })
 }
 
