@@ -4,11 +4,9 @@
     "files_dir": "../data/files",
     "static_dir": "../web/dist",
     "default_language": "zh",
-    "reranker_enabled": true,
+    "reranker_enabled": false,
     "reranker_model_path": "",
-    "reranker_profiles": {
-        "en": "../models/reranker/en"
-    },
+    "reranker_profiles": {},
     "rerank_batch_size": 8,
     "rerank_max_len": 512,
     "rerank_fallback": true,
@@ -46,19 +44,33 @@
     "ocr_languages": "chi_sim+eng",
     "ocr_min_text_length": 200,
     "ocr_dpi": 220,
-    "ocr_engine": "auto",
+    "ocr_engine": "mineru",
     "ocr_engine_order": [
-        "tesseract",
         "mineru"
     ],
     "ocr_engine_by_type": {
-        "pdf": "tesseract"
+        "pdf": "mineru",
+        "image": "mineru"
     },
     "ocr_engines": {
         "mineru": {
             "module": "app.core.mineru_ocr",
-            "function": "ocr_pdf"
+            "function": "ocr_document"
         }
+    },
+    "mineru": {
+        "mode": "auto",
+        "fallback_backends": [
+            "pipeline"
+        ],
+        "probe_cache_ttl_sec": 300,
+        "method": "auto",
+        "lang": "ch",
+        "device": "cpu",
+        "formula": false,
+        "table": false,
+        "model_source": "huggingface",
+        "timeout": 900
     },
     "llm_config": {
         "provider": "qwen",
@@ -111,13 +123,13 @@
         "国有资本经营预算制度"
     ],
     "translation_config": {
-        "enabled": true,
+        "enabled": false,
         "backend": "hy_mt_local",
         "mode": "dual",
         "cross_lang_source_query_enabled": false,
         "model_id": "tencent/HY-MT1.5-1.8B",
         "model_dir": "",
-        "device": "cuda",
+        "device": "cpu",
         "source_langs": [
             "en"
         ],
@@ -125,7 +137,7 @@
     },
     "memory_use_long_hits": false,
     "memory_enable_long_memory": false,
-    "memory_enable_short_memory": true,
+    "memory_enable_short_memory": false,
     "max_upload_mb": 50,
     "cors_allow_origins": [
         "http://localhost:5173",
@@ -135,5 +147,9 @@
         "show_citation_source": false,
         "default_theme": "dark"
     },
-    "memory_runtime_config": {}
+    "memory_runtime_config": {
+        "memory_module_enabled": false,
+        "memory_mode_when_disabled": "classic",
+        "memory_disable_fallback_on_error": true
+    }
 }

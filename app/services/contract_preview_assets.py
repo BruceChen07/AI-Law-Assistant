@@ -15,15 +15,6 @@ from app.core.mineru_ocr import run_mineru_extract
 from app.core.utils import extract_text_with_config
 from app.services.audit_utils import _safe_int, _safe_float
 
-try:
-    from pdf2image import convert_from_path
-except ImportError as e:
-    logging.getLogger("law_assistant").warning(
-        "preview_pdf2image_unavailable err=%s",
-        str(e),
-    )
-    convert_from_path = None
-
 
 logger = logging.getLogger("law_assistant")
 
@@ -133,27 +124,7 @@ def _build_text_pages(text: str, lines_per_page: int) -> List[Dict[str, Any]]:
 
 
 def _render_pdf_pages(file_path: str, out_dir: str, dpi: int, max_pages: int) -> List[Dict[str, Any]]:
-    if convert_from_path is None:
-        raise RuntimeError("pdf2image not available")
-    images = convert_from_path(
-        file_path,
-        dpi=max(72, _safe_int(dpi, 160)),
-        first_page=1,
-        last_page=max(1, _safe_int(max_pages, 30)),
-        fmt="png",
-    )
-    pages: List[Dict[str, Any]] = []
-    for i, image in enumerate(images, 1):
-        image_file = os.path.join(out_dir, f"page_{i}.png")
-        image.save(image_file, "PNG")
-        pages.append({
-            "page_no": i,
-            "width": int(getattr(image, "width", 0) or 0),
-            "height": int(getattr(image, "height", 0) or 0),
-            "blocks": [],
-            "image_file": image_file,
-        })
-    return pages
+    raise RuntimeError("pdf raster preview is disabled in mineru-only mode")
 
 
 def _extract_pdf_text_blocks(file_path: str, max_pages: int) -> Tuple[Dict[int, List[Dict[str, Any]]], int]:

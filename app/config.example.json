@@ -37,18 +37,18 @@
     "ocr_languages": "chi_sim+eng",
     "ocr_min_text_length": 200,
     "ocr_dpi": 220,
-    "ocr_engine": "auto",
+    "ocr_engine": "mineru",
     "ocr_engine_order": [
-        "tesseract",
         "mineru"
     ],
     "ocr_engine_by_type": {
-        "pdf": "tesseract"
+        "pdf": "mineru",
+        "image": "mineru"
     },
     "ocr_engines": {
         "mineru": {
             "module": "app.core.mineru_ocr",
-            "function": "ocr_pdf"
+            "function": "ocr_document"
         }
     },
     "mineru": {

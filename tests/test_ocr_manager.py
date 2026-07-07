@@ -12,7 +12,7 @@ class StubEngine(OCREngine):
     def is_available(self) -> bool:
         return self.available
 
-    def ocr_pdf(self, path: str, lang: str, dpi: int):
+    def ocr_document(self, path: str, lang: str, dpi: int, doc_type: str = "pdf"):
         return self.text, self.pages
 
 
@@ -42,8 +42,7 @@ def test_benchmark_engines():
 
 def test_detect_dependencies_shape():
     info = detect_dependencies(cmd_runner=lambda cmd: "v1")
-    assert "tesseract" in info
-    assert "poppler" in info
+    assert "mineru" in info
 
 
 def test_probe_mineru_capabilities(monkeypatch):

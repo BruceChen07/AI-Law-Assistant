@@ -7,6 +7,9 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Tuple, Dict, Any, Optional, List
+
+from PIL import Image
+
 from app.core.config import get_config
 
 
@@ -314,13 +317,52 @@ def run_mineru_extract(path: str, output_dir: str = "") -> Dict[str, Any]:
         return result
 
 
-def ocr_pdf(path: str, lang: str, dpi: int) -> Tuple[str, int]:
-    logger.info("mineru_ocr_pdf_start path=%s lang=%s dpi=%s", path, lang, dpi)
+def _normalize_doc_type(doc_type: str) -> str:
+    raw = str(doc_type or "pdf").strip().lower()
+    return raw if raw else "pdf"
+
+
+def _convert_image_to_pdf(image_path: str) -> str:
+    with Image.open(image_path) as img:
+        converted = img.convert("RGB")
+        fd, tmp_pdf = tempfile.mkstemp(prefix="mineru_image_", suffix=".pdf")
+        os.close(fd)
+        converted.save(tmp_pdf, "PDF", resolution=220.0)
+    return tmp_pdf
+
+
+def ocr_document(path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int]:
+    logger.info("mineru_ocr_document_start path=%s lang=%s dpi=%s doc_type=%s", path, lang, dpi, doc_type)
     cfg = get_config()
     mineru_cfg: Dict[str, Any] = cfg.get("mineru") or {}
     output_dir = str(mineru_cfg.get("output_dir", "")).strip()
-    result = run_mineru_extract(path, output_dir=output_dir)
-    text = str(result.get("text") or "")
-    pages = int(result.get("pages") or 0)
-    logger.info("mineru_ocr_pdf_done path=%s output_dir=%s text_len=%s pages=%s", path, output_dir or "<temp>", len(text), pages)
-    return text, pages
+    normalized_doc_type = _normalize_doc_type(doc_type)
+    mineru_input_path = path
+    temp_pdf = ""
+    try:
+        if normalized_doc_type in {"image", "png", "jpg", "jpeg", "tif", "tiff", "bmp", "webp"}:
+            temp_pdf = _convert_image_to_pdf(path)
+            mineru_input_path = temp_pdf
+        result = run_mineru_extract(mineru_input_path, output_dir=output_dir)
+        text = str(result.get("text") or "")
+        pages = int(result.get("pages") or 0)
+        logger.info(
+            "mineru_ocr_document_done path=%s mineru_input=%s output_dir=%s text_len=%s pages=%s doc_type=%s",
+            path,
+            mineru_input_path,
+            output_dir or "<temp>",
+            len(text),
+            pages,
+            normalized_doc_type,
+        )
+        return text, pages
+    finally:
+        if temp_pdf and os.path.exists(temp_pdf):
+            try:
+                os.remove(temp_pdf)
+            except OSError:
+                logger.warning("mineru_temp_pdf_remove_failed file=%s", temp_pdf)
+
+
+def ocr_pdf(path: str, lang: str, dpi: int) -> Tuple[str, int]:
+    return ocr_document(path, lang, dpi, doc_type="pdf")

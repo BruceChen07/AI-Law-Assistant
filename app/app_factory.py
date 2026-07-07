@@ -54,9 +54,10 @@ def create_app():
     rag_logger.info("class=%s stage=service_ready db=%s",
                     "AppFactory", cfg.get("db_path"))
 
+    reranker_enabled = bool(cfg.get("reranker_enabled", False))
     reranker = RerankerService(
-        cfg.get("reranker_model_path"),
-        profiles=cfg.get("reranker_profiles"),
+        cfg.get("reranker_model_path") if reranker_enabled else None,
+        profiles=cfg.get("reranker_profiles") if reranker_enabled else None,
         batch_size=cfg.get("rerank_batch_size", 8),
         max_len=cfg.get("rerank_max_len", 512),
     )
