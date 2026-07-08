@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminTestLLM, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { useState, useEffect, useRef } from "react"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
@@ -13,9 +13,11 @@ export default function Admin({ onBack, lang }) {
   const [search, setSearch] = useState("")
   const [docCategory, setDocCategory] = useState("contract")
   const [deleteConfirm, setDeleteConfirm] = useState(null)
+  const [userDeleteConfirm, setUserDeleteConfirm] = useState(null)
   const [llmConfig, setLlmConfig] = useState(null)
   const [llmHasApiKey, setLlmHasApiKey] = useState(false)
   const [llmSaving, setLlmSaving] = useState(false)
+  const [llmClearingKey, setLlmClearingKey] = useState(false)
   const [llmError, setLlmError] = useState("")
   const [llmTestPrompt, setLlmTestPrompt] = useState("")
   const [llmTestResult, setLlmTestResult] = useState("")
@@ -24,6 +26,19 @@ export default function Admin({ onBack, lang }) {
   const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark" })
   const [uiSaving, setUiSaving] = useState(false)
   const [uiError, setUiError] = useState("")
+  const [memoryConfig, setMemoryConfig] = useState({
+    memory_module_enabled: true,
+    memory_mode_when_disabled: "classic",
+    memory_token_guard_enabled: true,
+    memory_max_llm_calls_per_audit: 12,
+    memory_max_prompt_chars_per_clause: 2400,
+    risk_notice: ""
+  })
+  const [memorySaving, setMemorySaving] = useState(false)
+  const [memoryMsg, setMemoryMsg] = useState("")
+  const [vectorStoreConfig, setVectorStoreConfig] = useState(null)
+  const [vectorStoreSaving, setVectorStoreSaving] = useState(false)
+  const [vectorStoreMsg, setVectorStoreMsg] = useState("")
   const [regUpload, setRegUpload] = useState({
     title: "",
     doc_no: "",
@@ -45,7 +60,10 @@ export default function Admin({ onBack, lang }) {
   const [regHasSearched, setRegHasSearched] = useState(false)
   const [regSearchError, setRegSearchError] = useState("")
   const [regShowAdvanced, setRegShowAdvanced] = useState(false)
+  const [regExpanded, setRegExpanded] = useState({})
   
+  const fileInputRef = useRef(null)
+
   const user = getCurrentUser()
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
@@ -58,6 +76,8 @@ export default function Admin({ onBack, lang }) {
     if (tab === "model") {
       loadLLM()
       loadUIConfig()
+      loadVectorStoreConfig()
+      loadMemoryConfig()
     }
     if (tab === "regulations") {}
   }, [tab, pagination.page, docCategory])
@@ -149,6 +169,55 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
+  const loadVectorStoreConfig = async () => {
+    try {
+      const data = await adminGetVectorStoreConfig()
+      setVectorStoreConfig(data)
+      setVectorStoreMsg("")
+    } catch (err) {
+      setVectorStoreMsg(err.message)
+    }
+  }
+
+  const loadMemoryConfig = async () => {
+    try {
+      const data = await adminGetMemoryConfig()
+      setMemoryConfig({
+        memory_module_enabled: !!data.memory_module_enabled,
+        memory_mode_when_disabled: String(data.memory_mode_when_disabled || "classic"),
+        memory_token_guard_enabled: !!data.memory_token_guard_enabled,
+        memory_max_llm_calls_per_audit: Number(data.memory_max_llm_calls_per_audit || 12),
+        memory_max_prompt_chars_per_clause: Number(data.memory_max_prompt_chars_per_clause || 2400),
+        risk_notice: String(data.risk_notice || "")
+      })
+      setMemoryMsg("")
+    } catch (err) {
+      setMemoryMsg(String(err?.message || err || "load memory config failed"))
+    }
+  }
+
+  const saveVectorStoreConfig = async () => {
+    setVectorStoreSaving(true)
+    setVectorStoreMsg("")
+    try {
+      await adminUpdateVectorStoreConfig({ engine: vectorStoreConfig.engine })
+      setVectorStoreMsg(lang === "zh" ? "向量库引擎配置已保存并开始异步迁移" : "Vector store config saved, async migration started")
+    } catch (err) {
+      setVectorStoreMsg(err.message)
+    } finally {
+      setVectorStoreSaving(false)
+    }
+  }
+
+  const cleanupVectorStore = async () => {
+    try {
+      const res = await adminCleanupVectorStore()
+      setVectorStoreMsg(lang === "zh" ? `清理完成，删除了 ${res.deleted_records} 条数据` : `Cleanup done, deleted ${res.deleted_records} records`)
+    } catch (err) {
+      setVectorStoreMsg(err.message)
+    }
+  }
+
   const validateLLM = (cfg) => {
     if (!cfg.api_base || !cfg.api_base.startsWith("http")) return false
     if (!cfg.model) return false
@@ -190,6 +259,20 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
+  const clearLLMApiKey = async () => {
+    setLlmClearingKey(true)
+    try {
+      await adminDeleteLLMApiKey()
+      setLlmHasApiKey(false)
+      setLlmConfig(prev => prev ? { ...prev, api_key: "" } : prev)
+      setLlmError(t.llmApiKeyCleared)
+    } catch (err) {
+      setLlmError(err.message)
+    } finally {
+      setLlmClearingKey(false)
+    }
+  }
+
   const testLLM = async () => {
     if (!llmConfig) return
     if (!validateLLM(llmConfig)) {
@@ -225,6 +308,33 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
+  const saveMemoryConfig = async () => {
+    setMemorySaving(true)
+    setMemoryMsg("")
+    try {
+      const payload = {
+        memory_module_enabled: !!memoryConfig.memory_module_enabled,
+        memory_mode_when_disabled: "classic",
+        memory_token_guard_enabled: !!memoryConfig.memory_token_guard_enabled,
+        memory_max_llm_calls_per_audit: Number(memoryConfig.memory_max_llm_calls_per_audit || 12),
+        memory_max_prompt_chars_per_clause: Number(memoryConfig.memory_max_prompt_chars_per_clause || 2400)
+      }
+      const next = await adminUpdateMemoryConfig(payload)
+      setMemoryConfig(prev => ({
+        ...prev,
+        ...next,
+        memory_max_llm_calls_per_audit: Number(next.memory_max_llm_calls_per_audit || prev.memory_max_llm_calls_per_audit),
+        memory_max_prompt_chars_per_clause: Number(next.memory_max_prompt_chars_per_clause || prev.memory_max_prompt_chars_per_clause),
+        risk_notice: String(next.risk_notice || prev.risk_notice || "")
+      }))
+      setMemoryMsg(t.memoryConfigSaved)
+    } catch (err) {
+      setMemoryMsg(String(err?.message || err || "save memory config failed"))
+    } finally {
+      setMemorySaving(false)
+    }
+  }
+
   const onRegUpload = async (e) => {
     e.preventDefault()
     if (!regFile) return
@@ -257,6 +367,7 @@ export default function Admin({ onBack, lang }) {
     setRegSearching(true)
     setRegHasSearched(true)
     setRegSearchError("")
+    setRegExpanded({})
     try {
       const res = await searchRegulations(payload)
       setRegResults(Array.isArray(res) ? res : [])
@@ -286,6 +397,16 @@ export default function Admin({ onBack, lang }) {
       alert(err.message)
     }
   }
+
+  const handleUserDelete = async (userId) => {
+    try {
+      await adminDeleteUser(userId)
+      setUserDeleteConfirm(null)
+      loadUsers()
+    } catch (err) {
+      alert(err.message)
+    }
+  }
   
   const formatSize = (bytes) => {
     if (bytes < 1024) return bytes + " B"
@@ -301,6 +422,14 @@ export default function Admin({ onBack, lang }) {
       utcStr += "Z"
     }
     return new Date(utcStr).toLocaleString()
+  }
+
+  const getRegResultKey = (r, i) => String(r?.citation_id || `${r?.regulation_id || "reg"}:${r?.article_id || i}`)
+
+  const getRegSummary = (text) => {
+    const s = String(text || "")
+    if (s.length <= 300) return s
+    return `${s.slice(0, 300)}...`
   }
   
   if (!admin) {
@@ -497,6 +626,7 @@ export default function Admin({ onBack, lang }) {
               </div>
               <div className="row">
                 <button disabled={llmSaving} onClick={saveLLM}>{t.save}</button>
+                <button disabled={llmClearingKey || !llmHasApiKey} onClick={clearLLMApiKey}>{t.llmClearApiKey}</button>
                 {llmError && <span style={{ marginLeft: 12 }}>{llmError}</span>}
               </div>
               <div className="llm-test">
@@ -550,6 +680,95 @@ export default function Admin({ onBack, lang }) {
                   {uiError && <span style={{ marginLeft: 12 }}>{uiError}</span>}
                 </div>
               </div>
+
+              {vectorStoreConfig && (
+                <div className="llm-test">
+                  <div className="row">
+                    <label>{lang === "zh" ? "向量库存储引擎" : "Vector Store Engine"}</label>
+                  </div>
+                  <div className="row">
+                    <label>{lang === "zh" ? "当前引擎:" : "Current Engine:"}</label>
+                    <select
+                      value={vectorStoreConfig.engine}
+                      onChange={e => setVectorStoreConfig(prev => ({ ...prev, engine: e.target.value }))}
+                    >
+                      <option value="sqlite">SQLite (Default)</option>
+                      <option value="chromadb" disabled={!vectorStoreConfig.chroma_available}>
+                        ChromaDB {!vectorStoreConfig.chroma_available && (lang === "zh" ? "(未安装依赖)" : "(Not Installed)")}
+                      </option>
+                    </select>
+                  </div>
+                  <div className="row">
+                    <button disabled={vectorStoreSaving} onClick={saveVectorStoreConfig}>{t.save}</button>
+                    <button onClick={cleanupVectorStore} style={{ marginLeft: 8 }}>{lang === "zh" ? "一键清理旧引擎数据" : "Clean Old Engine Data"}</button>
+                    {vectorStoreMsg && <span style={{ marginLeft: 12 }}>{vectorStoreMsg}</span>}
+                  </div>
+                </div>
+              )}
+
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.memoryConfigTitle}</label>
+                </div>
+                <div className="row">
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={!!memoryConfig.memory_module_enabled}
+                      onChange={e => setMemoryConfig(prev => ({ ...prev, memory_module_enabled: e.target.checked }))}
+                    />
+                    {t.memoryModuleEnabled}
+                  </label>
+                </div>
+                <div className="row">
+                  <div style={{ color: "#b54708", fontSize: 13, lineHeight: 1.5 }}>
+                    {memoryConfig.risk_notice || t.memoryRiskNotice}
+                  </div>
+                </div>
+                <div className="row">
+                  <label>{t.memoryModeWhenDisabled}</label>
+                  <select
+                    value={String(memoryConfig.memory_mode_when_disabled || "classic")}
+                    onChange={e => setMemoryConfig(prev => ({ ...prev, memory_mode_when_disabled: e.target.value || "classic" }))}
+                  >
+                    <option value="classic">{t.memoryModeClassic}</option>
+                  </select>
+                </div>
+                <div className="row">
+                  <label className="toggle">
+                    <input
+                      type="checkbox"
+                      checked={!!memoryConfig.memory_token_guard_enabled}
+                      onChange={e => setMemoryConfig(prev => ({ ...prev, memory_token_guard_enabled: e.target.checked }))}
+                    />
+                    {t.memoryTokenGuardEnabled}
+                  </label>
+                </div>
+                <div className="row">
+                  <label>{t.memoryMaxCalls}</label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="200"
+                    value={memoryConfig.memory_max_llm_calls_per_audit}
+                    onChange={e => setMemoryConfig(prev => ({ ...prev, memory_max_llm_calls_per_audit: Number(e.target.value || 12) }))}
+                  />
+                </div>
+                <div className="row">
+                  <label>{t.memoryMaxPromptChars}</label>
+                  <input
+                    type="number"
+                    min="300"
+                    max="12000"
+                    value={memoryConfig.memory_max_prompt_chars_per_clause}
+                    onChange={e => setMemoryConfig(prev => ({ ...prev, memory_max_prompt_chars_per_clause: Number(e.target.value || 2400) }))}
+                  />
+                </div>
+                <div className="row">
+                  <button disabled={memorySaving} onClick={saveMemoryConfig}>{t.save}</button>
+                  {memoryMsg && <span style={{ marginLeft: 12 }}>{memoryMsg}</span>}
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -584,7 +803,18 @@ export default function Admin({ onBack, lang }) {
                       </select>
                     </td>
                     <td>{formatDate(u.created_at)}</td>
-                    <td>{u.role}</td>
+                    <td>
+                      {u.id === user?.id ? (
+                        <span>-</span>
+                      ) : userDeleteConfirm === u.id ? (
+                        <span>
+                          <button onClick={() => handleUserDelete(u.id)}>{t.confirm}</button>
+                          <button onClick={() => setUserDeleteConfirm(null)}>{t.cancel}</button>
+                        </span>
+                      ) : (
+                        <button onClick={() => setUserDeleteConfirm(u.id)}>{t.delete}</button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -604,16 +834,29 @@ export default function Admin({ onBack, lang }) {
             <input placeholder={lang === "zh" ? "失效日期 yyyy-mm-dd" : "Expiry Date yyyy-mm-dd"} value={regUpload.expiry_date} onChange={e => setRegUpload({ ...regUpload, expiry_date: e.target.value })} />
             <input placeholder={lang === "zh" ? "地区" : "Region"} value={regUpload.region} onChange={e => setRegUpload({ ...regUpload, region: e.target.value })} />
             <input placeholder={lang === "zh" ? "Sub-Tag" : "Sub-Tag"} value={regUpload.industry} onChange={e => setRegUpload({ ...regUpload, industry: e.target.value })} />
-            <div className="row">
+            <div className="row" style={{ alignItems: "center" }}>
+              <select 
+                value={regUpload.language} 
+                onChange={e => setRegUpload({ ...regUpload, language: e.target.value })}
+                style={{ marginRight: '12px' }}
+              >
+                <option value="zh">中文文档</option>
+                <option value="en">English Document</option>
+              </select>
               <input
+                ref={fileInputRef}
                 type="file"
                 accept=".docx,.pdf"
+                style={{ display: "none" }}
                 onChange={e => {
                   const f = e.target.files?.[0] || null
                   setRegFile(f)
                   setRegFileError("")
                 }}
               />
+              <button type="button" onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{ marginRight: '12px' }}>
+                {t.chooseFile}
+              </button>
               <span className="meta">{regFile ? regFile.name : t.noFileChosen}</span>
             </div>
             {regFileError && <span className="error">{regFileError}</span>}
@@ -703,10 +946,25 @@ export default function Admin({ onBack, lang }) {
           {regHasSearched && !regSearchError && regResults.length === 0 && !regSearching && <div className="error">{t.noMatch}</div>}
           <ul className="list">
             {regResults.slice(0, 5).map((r, i) => (
-              <li key={i}>
+              <li key={getRegResultKey(r, i)}>
                 <div className="title">{r.title} - {r.article_no}</div>
                 <div className="meta">{r.effective_date} | {r.region} | {r.industry}</div>
-                <div className="content">{r.content?.slice(0, 300)}...</div>
+                <div className="content">
+                  {regExpanded[getRegResultKey(r, i)] ? String(r.content || "") : getRegSummary(r.content)}
+                </div>
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const key = getRegResultKey(r, i)
+                      setRegExpanded(prev => ({ ...prev, [key]: !prev[key] }))
+                    }}
+                  >
+                    {regExpanded[getRegResultKey(r, i)]
+                      ? (lang === "zh" ? "收起全文" : "Collapse")
+                      : (lang === "zh" ? "展开全文" : "Expand")}
+                  </button>
+                </div>
               </li>
             ))}
           </ul>

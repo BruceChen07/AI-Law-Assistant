@@ -36,10 +36,10 @@ class Chunk:
 
 
 class SentenceTransformerEmbedder:
-    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5"):
+    def __init__(self, model_name: str = "BAAI/bge-small-zh-v1.5", local_files_only: bool = False):
         from sentence_transformers import SentenceTransformer
 
-        self.model = SentenceTransformer(model_name)
+        self.model = SentenceTransformer(model_name, local_files_only=bool(local_files_only))
 
     def encode(self, texts: Sequence[str]) -> np.ndarray:
         if not texts:

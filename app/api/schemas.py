@@ -4,6 +4,8 @@ from pydantic import BaseModel
 
 class SearchQuery(BaseModel):
     query: str
+    bm25_query: Optional[str] = None
+    semantic_query: Optional[str] = None
     language: str = "zh"
     top_k: int = 10
     date: Optional[str] = None
@@ -329,3 +331,11 @@ class TaxAuditIssueListResponse(BaseModel):
     language: str = "zh"
     total: int
     items: List[TaxAuditIssueItem]
+
+
+class TaxAuditPipelineRunResponse(BaseModel):
+    contract_id: str
+    analyze: TaxAuditContractAnalyzeResponse
+    match: TaxAuditMatchRunResponse
+    issues: TaxAuditIssueGenerateResponse
+    report: TaxAuditReportResponse

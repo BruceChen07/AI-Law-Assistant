@@ -8,14 +8,7 @@ OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 if [ "$OS" = "darwin" ]; then
   bash "$BIN_DIR/install_ocr_macos.sh"
 elif [ "$OS" = "linux" ]; then
-  if ! command -v tesseract >/dev/null 2>&1; then
-    echo "tesseract not found"
-    exit 1
-  fi
-  if ! command -v pdftoppm >/dev/null 2>&1; then
-    echo "poppler not found"
-    exit 1
-  fi
+  echo "linux native MinerU OCR does not require tesseract/poppler"
 else
   echo "unsupported os"
   exit 1
@@ -29,11 +22,9 @@ fi
 
 INDEX_URL=${OCR_PIP_INDEX:-}
 PKGS=(
-  "pytesseract==0.3.10"
-  "pdf2image==1.17.0"
   "pillow>=11.0.0"
   "pypdf>=5.6.0"
-  "mineru[all]==2.7.6"
+  "mineru==3.1.5"
 )
 
 if command -v uv >/dev/null 2>&1; then

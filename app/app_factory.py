@@ -4,12 +4,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.core.config import get_config, ensure_dirs
-from app.core.logger import setup_logging
+from app.core.config import get_config, ensure_dirs, get_config_path
+from app.core.logger import setup_logging, get_pipeline_logger
 from app.core.database import init_db, ensure_embedding_columns
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
 from app.core.llm import LLMService
+from app.core.translation import TranslationService
+from bin.ensure_local_models import ensure_models
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
@@ -23,15 +25,21 @@ def init_only():
     cfg = get_config()
     ensure_dirs(cfg)
     init_db(cfg)
+    from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
+    ensure_article_dsl_columns(cfg)
 
 
 def create_app():
     cfg = get_config()
     ensure_dirs(cfg)
     logger = setup_logging(cfg)
+    rag_logger = get_pipeline_logger(
+        cfg, name="rag_pipeline", filename="rag_pipeline.log")
     init_db(cfg)
+    from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
+    ensure_article_dsl_columns(cfg)
 
     embedder = EmbeddingService(default_language=str(
         cfg.get("default_language", "zh")).lower())
@@ -43,14 +51,75 @@ def create_app():
         embedder_count > 0,
         status["languages"],
     )
+    rag_logger.info("class=%s stage=service_ready db=%s",
+                    "AppFactory", cfg.get("db_path"))
 
+    reranker_enabled = bool(cfg.get("reranker_enabled", False))
     reranker = RerankerService(
-        cfg.get("reranker_model_path"),
-        profiles=cfg.get("reranker_profiles"),
+        cfg.get("reranker_model_path") if reranker_enabled else None,
+        profiles=cfg.get("reranker_profiles") if reranker_enabled else None,
         batch_size=cfg.get("rerank_batch_size", 8),
         max_len=cfg.get("rerank_max_len", 512),
     )
+    preflight_enabled = bool(cfg.get("model_preflight_check_on_startup", True))
+    preflight_auto_download = bool(
+        cfg.get("model_preflight_auto_download_on_startup", False))
+    preflight_include_optional = bool(
+        cfg.get("model_preflight_include_optional", True))
+    preflight_require_all = bool(cfg.get("model_preflight_require_all", True))
+    if preflight_enabled:
+        logger.info(
+            "model_preflight_start config_path=%s check_only=%s include_optional=%s types=all",
+            get_config_path(),
+            (not preflight_auto_download),
+            preflight_include_optional,
+        )
+        preflight = ensure_models(
+            cfg=cfg,
+            check_only=not preflight_auto_download,
+            include_optional=preflight_include_optional,
+            model_types="all",
+        )
+        rows = preflight.get("models") or []
+        logger.info(
+            "model_preflight_summary all_ready=%s checked=%s auto_download=%s include_optional=%s",
+            bool(preflight.get("all_ready", False)),
+            len(rows),
+            preflight_auto_download,
+            preflight_include_optional,
+        )
+        if not rows:
+            logger.warning("model_preflight_no_items_checked")
+        for item in rows:
+            logger.info(
+                "model_preflight_item name=%s type=%s ok=%s downloaded=%s path=%s model_id=%s reason=%s message=%s",
+                item.get("name", ""),
+                item.get("type", ""),
+                bool(item.get("ok", False)),
+                bool(item.get("downloaded", False)),
+                item.get("path", "") or (
+                    item.get("detail") or {}).get("path", ""),
+                item.get("model_id", ""),
+                item.get("reason", ""),
+                item.get("message", ""),
+            )
+        if not bool(preflight.get("all_ready", False)):
+            missing = [
+                str(x.get("name", ""))
+                for x in rows
+                if not bool(x.get("ok", False))
+            ]
+            if preflight_require_all:
+                hint = "python bin/ensure_local_models.py --types all"
+                if preflight_include_optional:
+                    hint = f"{hint} --include-optional"
+                raise RuntimeError(
+                    f"local model preflight failed, run: {hint}")
+            logger.warning("model_preflight_not_ready missing=%s", missing)
+    else:
+        logger.info("model_preflight_disabled")
     llm = LLMService(cfg)
+    translator = TranslationService(cfg)
 
     app = FastAPI(title="Law Assistant")
 
@@ -92,17 +161,19 @@ def create_app():
                              request.method, request.url.path, ms)
             raise
 
-    app.include_router(build_health_router(embedder))
-    app.include_router(build_embedding_router(embedder))
-    app.include_router(build_regulations_router(cfg, embedder, reranker))
+    app.include_router(build_health_router())
+    app.include_router(build_embedding_router())
+    app.include_router(build_regulations_router(cfg))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
-    app.include_router(build_contracts_router(cfg, llm, embedder, reranker))
+    app.include_router(build_contracts_router(cfg))
     app.include_router(build_tax_audit_router(cfg))
 
     app.state.cfg = cfg
     app.state.embedder = embedder
     app.state.reranker = reranker
     app.state.llm = llm
+    app.state.translator = translator
     app.state.logger = logger
+    app.state.rag_logger = rag_logger
     return app

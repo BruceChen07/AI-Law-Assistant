@@ -3,9 +3,13 @@ import logging
 import os
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional, Tuple
+from urllib.parse import urlsplit
+import httpx
 from openai import OpenAI, APITimeoutError
+from app.core.llm_router import resolve_llm_route
+from app.core.secure_store import get_llm_api_key
 
 logger = logging.getLogger("law_assistant")
 
@@ -27,10 +31,43 @@ class LLMService:
             return llm_cfg
         return {}
 
+    def _resolve_chat_target(
+        self, overrides: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+        merged_overrides = dict(overrides or {})
+        trace_meta = merged_overrides.get("_trace_meta") if isinstance(
+            merged_overrides.get("_trace_meta"), dict) else {}
+        task_profile = self._clean_text(
+            merged_overrides.pop("_task_profile", "")
+            or merged_overrides.pop("task_profile", "")
+        ) or "default"
+        model_role = self._clean_text(
+            merged_overrides.pop("_model_role", "")
+            or merged_overrides.pop("model_role", "")
+        )
+        cfg, route_meta = resolve_llm_route(
+            self.cfg,
+            task_profile=task_profile,
+            model_role=model_role,
+        )
+        visible_overrides = {
+            k: v for k, v in merged_overrides.items()
+            if not str(k).startswith("_")
+        }
+        cfg.update(visible_overrides)
+        route_trace = dict(route_meta)
+        route_trace["task_profile"] = task_profile
+        merged_trace_meta = dict(trace_meta)
+        merged_trace_meta["llm_route"] = route_trace
+        return cfg, route_meta, merged_trace_meta
+
     def _resolve_api_key(self, cfg: Dict[str, Any]) -> str:
         key = self._clean_text(cfg.get("api_key", ""))
         if key:
             return key
+        secure_key = self._clean_text(get_llm_api_key(self.cfg))
+        if secure_key:
+            return secure_key
         for name in ["LLM_API_KEY", "OPENAI_API_KEY", "DASHSCOPE_API_KEY"]:
             env_key = self._clean_text(os.environ.get(name, ""))
             if env_key:
@@ -38,11 +75,26 @@ class LLMService:
         return ""
 
     def _build_base_url(self, base: str) -> str:
-        if base.endswith("/chat/completions"):
-            return base[: -len("/chat/completions")]
-        if base.endswith("/"):
-            return base[:-1]
-        return base
+        s = re.sub(r"\s+", "", self._clean_text(base))
+        if not s:
+            return ""
+        if not re.match(r"^https?://", s, flags=re.IGNORECASE):
+            s = f"https://{s}"
+        if s.endswith("/chat/completions"):
+            s = s[: -len("/chat/completions")]
+        if s.endswith("/"):
+            s = s[:-1]
+        p = urlsplit(s)
+        if not p.scheme or not p.netloc:
+            raise RuntimeError("llm_config api_base invalid")
+        return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+
+    def _build_ollama_base_url(self, base: str) -> str:
+        s = self._build_base_url(base)
+        for suffix in ("/chat/completions", "/api/chat", "/api/generate", "/v1"):
+            if s.endswith(suffix):
+                s = s[: -len(suffix)]
+        return s.rstrip("/")
 
     def _build_headers(self, api_key: Optional[str], extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -129,7 +181,7 @@ class LLMService:
         opts = self._trace_options()
         if not opts["enabled"]:
             return
-        day = datetime.utcnow().strftime("%Y-%m-%d")
+        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         trace_dir = os.path.join(opts["dir"], day)
         os.makedirs(trace_dir, exist_ok=True)
         file_path = os.path.join(trace_dir, "llm_trace.jsonl")
@@ -151,8 +203,12 @@ class LLMService:
             try:
                 extra_body["thinking_budget_tokens"] = max(
                     0, int(thinking_budget))
-            except Exception:
-                pass
+            except (TypeError, ValueError) as e:
+                logger.warning(
+                    "llm_invalid_thinking_budget_tokens value=%s err=%s",
+                    str(thinking_budget),
+                    str(e),
+                )
         reasoning_effort = str(
             cfg.get("reasoning_effort") or "").strip().lower()
         if reasoning_effort in {"low", "medium", "high"}:
@@ -166,7 +222,14 @@ class LLMService:
             return client.chat.completions.create(**kwargs)
         except Exception as e:
             msg = str(e).lower()
-            if ("unsupported" in msg or "unknown" in msg or "unrecognized" in msg or "invalid" in msg) and (
+            if (
+                "unsupported" in msg
+                or "unknown" in msg
+                or "unrecognized" in msg
+                or "invalid" in msg
+                or "unexpected keyword" in msg
+                or "unexpected keyword argument" in msg
+            ) and (
                 "extra_body" in kwargs or "reasoning_effort" in kwargs
             ):
                 fallback_kwargs = dict(kwargs)
@@ -175,16 +238,135 @@ class LLMService:
                 return client.chat.completions.create(**fallback_kwargs)
             raise
 
+    def _build_ollama_chat_body(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        options: Dict[str, Any] = {
+            "temperature": temperature,
+            "num_predict": max_tokens,
+        }
+        if cfg.get("num_ctx") not in {None, ""}:
+            try:
+                options["num_ctx"] = int(cfg.get("num_ctx"))
+            except (TypeError, ValueError):
+                logger.warning("ollama_invalid_num_ctx value=%s",
+                               cfg.get("num_ctx"))
+        if cfg.get("top_p") not in {None, ""}:
+            try:
+                options["top_p"] = float(cfg.get("top_p"))
+            except (TypeError, ValueError):
+                logger.warning("ollama_invalid_top_p value=%s",
+                               cfg.get("top_p"))
+        body: Dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+            "stream": False,
+            "options": options,
+        }
+        body["think"] = bool(cfg.get("enable_thinking", False))
+        keep_alive = cfg.get("keep_alive")
+        if keep_alive not in {None, ""}:
+            body["keep_alive"] = keep_alive
+        return body
+
+    def _post_ollama_chat(
+        self,
+        url: str,
+        body: Dict[str, Any],
+        headers: Dict[str, str],
+        timeout: int,
+    ) -> Dict[str, Any]:
+        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
+
+    def _chat_via_ollama(
+        self,
+        api_base: str,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        timeout: int,
+        cfg: Dict[str, Any],
+        extra_headers: Optional[Dict[str, str]],
+    ) -> Tuple[str, Dict[str, Any]]:
+        base_url = self._build_ollama_base_url(api_base)
+        request_url = f"{base_url}/api/chat"
+        request_headers = self._build_headers(None, extra_headers)
+        request_body = self._build_ollama_chat_body(
+            model, messages, temperature, max_tokens, cfg
+        )
+        try:
+            raw = self._post_ollama_chat(
+                request_url, request_body, request_headers, timeout
+            )
+        except httpx.TimeoutException as e:
+            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
+            retry_cfg = dict(cfg)
+            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
+            retry_body = self._build_ollama_chat_body(
+                model, messages, temperature, retry_max_tokens, retry_cfg
+            )
+            logger.warning(
+                "ollama_request_timeout_retry url=%s model=%s timeout=%s->%s max_tokens=%s->%s",
+                request_url,
+                model,
+                timeout,
+                retry_timeout,
+                max_tokens,
+                retry_max_tokens,
+            )
+            try:
+                raw = self._post_ollama_chat(
+                    request_url, retry_body, request_headers, retry_timeout
+                )
+            except Exception as e2:
+                raise RuntimeError(
+                    f"ollama request failed after timeout retry: {str(e2)}"
+                ) from e2
+        message = raw.get("message") if isinstance(
+            raw.get("message"), dict) else {}
+        content = str(message.get("content") or "")
+        prompt_tokens = int(raw.get("prompt_eval_count") or 0)
+        completion_tokens = int(raw.get("eval_count") or 0)
+        parsed = {
+            "model": raw.get("model") or model,
+            "done": bool(raw.get("done", True)),
+            "done_reason": raw.get("done_reason") or "",
+            "message": {
+                "role": message.get("role") or "assistant",
+                "content": content,
+            },
+            "usage": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            },
+            "ollama_raw": raw,
+            "choices": [
+                {
+                    "message": {
+                        "role": message.get("role") or "assistant",
+                        "content": content,
+                    }
+                }
+            ],
+        }
+        return content, parsed
+
     def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
-        cfg = dict(self._get_llm_config())
-        trace_meta = {}
-        if overrides:
-            trace_meta = overrides.get("_trace_meta") if isinstance(
-                overrides.get("_trace_meta"), dict) else {}
-            cfg.update(
-                {k: v for k, v in overrides.items() if k != "_trace_meta"})
-        api_base = self._clean_text(cfg.get("api_base", ""))
-        api_key = self._resolve_api_key(cfg)
+        cfg, route_meta, trace_meta = self._resolve_chat_target(overrides)
+        api_base_raw = cfg.get("api_base", "")
+        api_base = self._build_base_url(str(api_base_raw or ""))
+        provider = self._clean_text(
+            cfg.get("provider", "openai_compatible")).lower()
+        api_key = "" if provider == "ollama" else self._resolve_api_key(cfg)
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
         max_tokens = int(cfg.get("max_tokens", 2048))
@@ -193,16 +375,18 @@ class LLMService:
         if not api_base or not model:
             raise RuntimeError("llm_config api_base or model missing")
 
-        base_url = self._build_base_url(api_base)
+        base_url = api_base
         timeout = int(cfg.get("timeout", 60))
         retries = max(1, int(cfg.get("retries", 2)))
         input_tokens_est = self._estimate_input_tokens(messages)
         t0 = time.perf_counter()
         logger.info(
-            "llm_request_start api_base=%s base_url=%s model=%s temperature=%s max_tokens=%s timeout=%s retries=%s input_tokens_est=%s message_count=%s",
+            "llm_request_start api_base=%s base_url=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s retries=%s input_tokens_est=%s message_count=%s",
             api_base,
             base_url,
             model,
+            route_meta.get("selected_role", ""),
+            route_meta.get("task_profile", "default"),
             temperature,
             max_tokens,
             timeout,
@@ -211,23 +395,41 @@ class LLMService:
             len(messages)
         )
         logger.debug(
-            "llm_request_debug api_key=%s raw_api_base=%r headers=%s message_count=%s",
+            "llm_request_debug provider=%s api_key=%s raw_api_base=%r headers=%s message_count=%s",
+            provider,
             self._mask_secret(api_key),
             cfg.get("api_base", ""),
             list((extra_headers or {}).keys()),
             len(messages)
         )
-        client = OpenAI(
-            api_key=api_key or None,
-            base_url=base_url,
-            timeout=timeout,
-            max_retries=max(0, retries - 1),
-            default_headers=extra_headers or None
-        )
-        request_kwargs = self._build_chat_kwargs(
-            model, messages, temperature, max_tokens, cfg)
         try:
-            resp = self._create_chat_completion(client, request_kwargs)
+            if provider == "ollama":
+                content, parsed = self._chat_via_ollama(
+                    api_base,
+                    model,
+                    messages,
+                    temperature,
+                    max_tokens,
+                    timeout,
+                    cfg,
+                    extra_headers,
+                )
+            else:
+                client = OpenAI(
+                    api_key=api_key or None,
+                    base_url=base_url,
+                    timeout=timeout,
+                    max_retries=max(0, retries - 1),
+                    default_headers=extra_headers or None
+                )
+                request_kwargs = self._build_chat_kwargs(
+                    model, messages, temperature, max_tokens, cfg)
+                resp = self._create_chat_completion(client, request_kwargs)
+                parsed = resp.model_dump()
+                try:
+                    content = resp.choices[0].message.content or ""
+                except Exception:
+                    content = json.dumps(parsed, ensure_ascii=False)
         except APITimeoutError as e:
             fallback_model = self._clean_text(cfg.get("fallback_model", ""))
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
@@ -256,6 +458,11 @@ class LLMService:
             try:
                 resp = self._create_chat_completion(
                     retry_client, retry_request_kwargs)
+                parsed = resp.model_dump()
+                try:
+                    content = resp.choices[0].message.content or ""
+                except Exception:
+                    content = json.dumps(parsed, ensure_ascii=False)
             except Exception as e2:
                 logger.exception(
                     "llm_request_failed_after_retry api_base=%s base_url=%s model=%s retry_model=%s timeout=%s retry_timeout=%s raw_api_base=%r api_key=%s headers=%s",
@@ -273,7 +480,8 @@ class LLMService:
                     f"llm request failed after timeout retry: {str(e2)}") from e2
         except Exception as e:
             logger.exception(
-                "llm_request_failed api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
+                "llm_request_failed provider=%s api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
+                provider,
                 api_base,
                 base_url,
                 model,
@@ -282,16 +490,22 @@ class LLMService:
                 self._mask_secret(api_key),
                 list((extra_headers or {}).keys())
             )
+            dns_hint = ""
+            low_err = str(e).lower()
+            if "getaddrinfo failed" in low_err or "name or service not known" in low_err:
+                host = urlsplit(base_url).netloc
+                dns_hint = f" (dns resolve failed for host: {host})"
             self._write_trace({
-                "ts": datetime.utcnow().isoformat(),
+                "ts": datetime.now(timezone.utc).isoformat(),
                 "ok": False,
                 "model": model,
                 "meta": trace_meta,
+                "route": route_meta,
                 "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
                 "error": self._clip(self._mask_text(str(e)), self._trace_options()["max_chars"]),
             })
-            raise RuntimeError(f"llm request failed: {str(e)}") from e
-        parsed = resp.model_dump()
+            raise RuntimeError(
+                f"llm request failed: {str(e)}{dns_hint}") from e
         usage = parsed.get("usage") if isinstance(
             parsed.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -308,20 +522,27 @@ class LLMService:
             total_tokens,
             latency_ms
         )
-        content = ""
-        try:
-            content = resp.choices[0].message.content or ""
-        except Exception:
-            content = json.dumps(parsed, ensure_ascii=False)
         self._write_trace({
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "ok": True,
             "model": model,
             "meta": trace_meta,
+            "route": route_meta,
             "latency_ms": latency_ms,
             "input_tokens_est": input_tokens_est,
             "usage": usage,
             "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
             "response": self._clip(self._mask_text(content), self._trace_options()["max_chars"]),
         })
+        parsed["_route"] = route_meta
         return content, parsed
+
+    def chat_with_profile(
+        self,
+        messages: List[Dict[str, str]],
+        task_profile: str,
+        overrides: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[str, Dict[str, Any]]:
+        next_overrides = dict(overrides or {})
+        next_overrides["_task_profile"] = task_profile
+        return self.chat(messages, overrides=next_overrides)

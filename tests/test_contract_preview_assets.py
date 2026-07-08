@@ -114,3 +114,25 @@ def test_docx_pdf_quality_gate_fail_falls_back_to_docx_raster(tmp_path, monkeypa
     assert manifest["meta"]["coord_provider"] == "docx_layout"
     assert manifest["meta"]["docx_pdf_conversion"]["method"] == "win32com"
     assert manifest["meta"]["docx_pdf_conversion"]["fallback"] == "docx_raster"
+
+
+def test_pdf_preview_without_raster_backend_falls_back_to_text(tmp_path, monkeypatch):
+    cfg = _base_cfg(tmp_path)
+    files_dir = Path(cfg["files_dir"])
+    files_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = files_dir / "demo.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7")
+
+    monkeypatch.setattr(cpa, "_render_pdf_pages", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("disabled")))
+    monkeypatch.setattr(cpa, "extract_text_with_config", lambda *_args, **_kwargs: ("第一页\n第二页", {"ocr_used": True, "ocr_engine": "mineru", "page_count": 1}))
+
+    manifest = cpa.build_contract_preview_manifest(
+        cfg=cfg,
+        document_id="pdf-fallback",
+        file_path=str(pdf_path),
+        mime_type="application/pdf",
+    )
+
+    assert manifest["mode"] == "text"
+    assert manifest["meta"]["ocr_engine"] == "mineru"
+    assert manifest["meta"]["coord_provider"] == "text_fallback"

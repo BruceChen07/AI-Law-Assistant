@@ -39,3 +39,16 @@ python -m app.main
   - `../models/embedding/zh/model.onnx`
   - `../models/embedding/en/model.onnx`
 
+### 5) 端侧大模型 CPU 本地部署支持（Phase 0-4 骨架）
+
+- **新增 LLM 路由层** (`app/core/llm_router.py`)：支持按 `task_profile` 自动选择主模型（main）/ 侧车模型（small）/ 云端兜底（cloud_fallback），预置 Qwen3.6-27B 主模型与 Llama 3.2-3B 侧车模型路由
+- **统一失败升级策略** (`app/services/local_llm_runtime.py`)：本地模型异常或无效结果时自动回退云端，高风险税务匹配支持强制复核
+- **JSON 输出容错** (`app/services/json_guard.py`)：自动修复 fenced JSON / 尾逗号 / 包裹文本等端侧模型常见脏输出
+- **业务链路接入**：`tax_contract_parser`、`tax_matcher`、`tax_risk`、`contract_audit`、`memory_pipeline callbacks` 均已接入任务画像路由与 fallback 策略
+- **并发收敛**：税务链路支持按本地执行配置收紧 worker 上限（`tax_match_max_workers` / `tax_risk_max_workers`）
+- **回归入口** (`bin/run-edge-llm-regression.ps1`)：一键执行端侧全链路回归（53 项测试通过）
+- **配套文档**：
+  - `plan/edge-llm-cpu-local-deployment-detailed-design.md` — 详细设计文档（含阶段进度与测试记录）
+  - `plan/edge-llm-cpu-local-deployment-runbook.md` — 部署与联调手册
+  - `plan/edge-llm-cpu-local-known-issues.md` — 已知问题清单
+

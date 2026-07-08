@@ -2,7 +2,6 @@ import os
 import re
 import zipfile
 import logging
-import importlib
 from html import unescape
 from datetime import datetime
 from xml.etree import ElementTree as ET
@@ -109,18 +108,11 @@ def _extract_xlsx(path: str) -> str:
 
 
 def _extract_image_with_ocr(cfg, path: str) -> str:
-    try:
-        pytesseract = importlib.import_module("pytesseract")
-        Image = importlib.import_module("PIL.Image")
-        lang = str(cfg.get("ocr_languages", "chi_sim+eng"))
-        img = Image.open(path)
-        return str(pytesseract.image_to_string(img, lang=lang) or "")
-    except Exception:
-        manager = OCREngineManager(cfg)
-        lang = str(cfg.get("ocr_languages", "chi_sim+eng"))
-        dpi = int(cfg.get("ocr_dpi", 220))
-        text, _, _ = manager.ocr_pdf(path, lang, dpi, doc_type="image")
-        return str(text or "")
+    manager = OCREngineManager(cfg)
+    lang = str(cfg.get("ocr_languages", "chi_sim+eng"))
+    dpi = int(cfg.get("ocr_dpi", 220))
+    text, _, _ = manager.ocr_document(path, lang, dpi, doc_type="image")
+    return str(text or "")
 
 
 def extract_regulation_text(cfg, file_path: str, file_type: str) -> tuple[str, dict]:
@@ -161,7 +153,7 @@ def split_tax_clauses(text: str) -> list[dict]:
     normalized = re.sub(r"\n{2,}", "\n\n", normalized)
     english_mode = len(re.findall(
         r"[A-Za-z]", normalized)) >= max(20, len(re.findall(r"[\u4e00-\u9fff]", normalized)))
-    marker_pattern = r"(第[一二三四五六七八九十百千0-9]+[章节条款项]|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)"
+    marker_pattern = r"(?m)^\s*(第[一二三四五六七八九十百千0-9]+[章节条款项]|(?:Article|Section|Chapter|Part)\s+[0-9IVXLCM]+(?:\.[0-9]+)*)"
     chunks = re.split(marker_pattern, normalized, flags=re.IGNORECASE)
     items = []
     if len(chunks) >= 3:

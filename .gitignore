@@ -1,5 +1,6 @@
 # Python
 __pycache__/
+app/__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -23,15 +24,17 @@ wheels/
 venv/
 ENV/
 env/
-*.db
 
 # Node
 node_modules/
+web/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 web/dist/
 web/.vite/
+web/.vite/deps/
+web/storybook-static/
 
 # IDE
 .idea/
@@ -42,14 +45,19 @@ web/.vite/
 
 # Data & Logs
 data/files/
+data/chroma_db/
+data/contracts/
+data/uploads/
 data/logs/
 data/memory/
 data/app.db
 logs/
 log/
-app/..\\data\\*
+models/
 models/embedding/
 models/reranker/
+models/translation/
+
 *.onnx
 !models/embedding/zh/model.onnx
 
@@ -65,3 +73,9 @@ Thumbs.db
 # Config (private)
 app/config.json
 !app/config.example.json
+
+# Runtime state
+.runtime/services.pids.json
+
+# Local IDE / agent assets
+.trae/skills/

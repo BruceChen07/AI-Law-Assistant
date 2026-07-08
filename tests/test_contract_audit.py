@@ -4,6 +4,17 @@ from app.services.contract_audit_modules.risk_suppression import (
     build_global_tax_context as _build_global_tax_context,
     reconcile_cross_clause_conflicts as _reconcile_cross_clause_conflicts
 )
+from app.services.contract_audit_modules.memory_pipeline import (
+    _resolve_risk_citation_id as _resolve_risk_citation_id,
+    _load_llm_json_object as _load_llm_json_object,
+)
+from app.services.contract_audit_modules.citation_catalog import (
+    build_citation_lookup as _build_citation_lookup,
+)
+from app.services.utils.contract_audit_utils import (
+    normalize_article_no as _normalize_article_no,
+    citation_match_key as _citation_match_key,
+)
 
 
 def test_normalize_audit_result_recompute_risk_summary():
@@ -107,3 +118,96 @@ def test_reconcile_cross_clause_conflicts_removes_remaining_missing_risk():
     assert kept[0]["location"]["risk_id"] == "r2"
     assert len(removed) == 1
     assert removed[0]["risk_id"] == "r1"
+
+
+def test_normalize_article_no_supports_english_article_format():
+    assert _normalize_article_no("Article 470") == "第470条"
+    assert _normalize_article_no("article.21") == "第21条"
+    assert _normalize_article_no("470") == "第470条"
+    assert _normalize_article_no("第五百条") == "第五百条"
+
+
+def test_citation_match_key_aligns_english_and_chinese_law_title():
+    key_en = _citation_match_key(
+        "Civil Code of the People's Republic of China", "Article 470")
+    key_zh = _citation_match_key("中华人民共和国民法典", "第470条")
+    assert key_en == key_zh
+
+
+def test_citation_match_key_aligns_vat_law_english_and_chinese_title():
+    key_en = _citation_match_key(
+        "Value Added Tax Law of the People's Republic of China", "Article 21")
+    key_zh = _citation_match_key("中华人民共和国增值税法", "第21条")
+    assert key_en == key_zh
+
+
+def test_build_citation_lookup_keeps_first_when_same_law_article_appears_twice():
+    evidence_items = [
+        {
+            "citation_id": "en:1:1:21",
+            "law_title": "Value Added Tax Law of the People's Republic of China",
+            "article_no": "Article 21",
+            "final_score": 0.95,
+        },
+        {
+            "citation_id": "zh:2:3:21",
+            "law_title": "中华人民共和国增值税法",
+            "article_no": "第21条",
+            "final_score": 0.88,
+        },
+    ]
+    lookup = _build_citation_lookup(evidence_items)
+    key = _citation_match_key("中华人民共和国增值税法", "第21条")
+    assert lookup[key] == "en:1:1:21"
+
+
+def test_resolve_risk_citation_id_accepts_case_insensitive_id():
+    out = _resolve_risk_citation_id(
+        citation_id_raw="C-LAW-470",
+        law_title="",
+        article_no="",
+        allowed_citation_ids={"c-law-470"},
+        citation_lookup={},
+        citation_alias_map={},
+        citation_id_casefold_map={"c-law-470": "c-law-470"},
+        article_citation_index={},
+        evidence_by_cid={},
+    )
+    assert out == "c-law-470"
+
+
+def test_resolve_risk_citation_id_fallbacks_by_article_and_law_title():
+    out = _resolve_risk_citation_id(
+        citation_id_raw="",
+        law_title="Civil Code of the People's Republic of China",
+        article_no="Article 470",
+        allowed_citation_ids={"cid-a", "cid-b"},
+        citation_lookup={},
+        citation_alias_map={},
+        citation_id_casefold_map={},
+        article_citation_index={"第470条": ["cid-a", "cid-b"]},
+        evidence_by_cid={
+            "cid-a": {"law_title": "中华人民共和国民法典"},
+            "cid-b": {"law_title": "中华人民共和国增值税法"},
+        },
+    )
+    assert out == "cid-a"
+
+
+def test_load_llm_json_object_accepts_markdown_fenced_json():
+    raw = """```json
+{
+  \"summary\": \"ok\",
+  \"risks\": []
+}
+```"""
+    parsed = _load_llm_json_object(raw)
+    assert parsed["summary"] == "ok"
+    assert parsed["risks"] == []
+
+
+def test_load_llm_json_object_accepts_wrapped_json_object():
+    raw = "Result:\n{\"summary\":\"ok\",\"risks\":[]}\nThanks"
+    parsed = _load_llm_json_object(raw)
+    assert parsed["summary"] == "ok"
+    assert parsed["risks"] == []

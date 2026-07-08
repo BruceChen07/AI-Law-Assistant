@@ -13,11 +13,7 @@ from pypdf import PdfReader
 
 from app.core.mineru_ocr import run_mineru_extract
 from app.core.utils import extract_text_with_config
-
-try:
-    from pdf2image import convert_from_path
-except Exception:
-    convert_from_path = None
+from app.services.audit_utils import _safe_int, _safe_float
 
 
 logger = logging.getLogger("law_assistant")
@@ -43,20 +39,6 @@ def _looks_like_heading_line(text: str) -> bool:
     if len(raw) <= 24 and not re.search(r"[。；;，,:：]", raw) and re.search(r"(合同|条款|价款|支付|期限|服务|违约|保密|发票|税率)", raw):
         return True
     return False
-
-
-def _safe_int(v: Any, default: int) -> int:
-    try:
-        return int(v)
-    except Exception:
-        return default
-
-
-def _safe_float(v: Any, default: float) -> float:
-    try:
-        return float(v)
-    except Exception:
-        return float(default)
 
 
 def _resolve_cache_dir(cfg: Dict[str, Any], preview_cfg: Dict[str, Any]) -> str:
@@ -142,27 +124,7 @@ def _build_text_pages(text: str, lines_per_page: int) -> List[Dict[str, Any]]:
 
 
 def _render_pdf_pages(file_path: str, out_dir: str, dpi: int, max_pages: int) -> List[Dict[str, Any]]:
-    if convert_from_path is None:
-        raise RuntimeError("pdf2image not available")
-    images = convert_from_path(
-        file_path,
-        dpi=max(72, _safe_int(dpi, 160)),
-        first_page=1,
-        last_page=max(1, _safe_int(max_pages, 30)),
-        fmt="png",
-    )
-    pages: List[Dict[str, Any]] = []
-    for i, image in enumerate(images, 1):
-        image_file = os.path.join(out_dir, f"page_{i}.png")
-        image.save(image_file, "PNG")
-        pages.append({
-            "page_no": i,
-            "width": int(getattr(image, "width", 0) or 0),
-            "height": int(getattr(image, "height", 0) or 0),
-            "blocks": [],
-            "image_file": image_file,
-        })
-    return pages
+    raise RuntimeError("pdf raster preview is disabled in mineru-only mode")
 
 
 def _extract_pdf_text_blocks(file_path: str, max_pages: int) -> Tuple[Dict[int, List[Dict[str, Any]]], int]:
@@ -362,8 +324,12 @@ def _convert_docx_to_pdf(docx_path: str, output_pdf: str) -> Tuple[str, str]:
     if os.path.exists(output_pdf):
         try:
             os.remove(output_pdf)
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning(
+                "preview_docx_pdf_remove_failed file=%s err=%s",
+                output_pdf,
+                str(e),
+            )
     tried: List[str] = []
     for method in ("docx2pdf", "win32com"):
         try:
@@ -410,8 +376,13 @@ def _load_preview_font(size: int) -> Any:
         try:
             if os.path.exists(path):
                 return ImageFont.truetype(path, size=size)
-        except Exception:
-            pass
+        except OSError as e:
+            logger.warning(
+                "preview_font_load_failed path=%s size=%s err=%s",
+                path,
+                int(size),
+                str(e),
+            )
     return ImageFont.load_default()
 
 
@@ -631,8 +602,12 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
                     cached["mime_type"] = str(
                         mime_type or cached.get("mime_type") or "")
                     return cached
-        except Exception:
-            pass
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                "preview_manifest_cache_read_failed path=%s err=%s",
+                manifest_path,
+                str(e),
+            )
 
     if os.path.exists(cache_dir):
         shutil.rmtree(cache_dir, ignore_errors=True)
@@ -759,8 +734,12 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
                 if not docx_pdf_keep_file and os.path.exists(converted_pdf):
                     try:
                         os.remove(converted_pdf)
-                    except Exception:
-                        pass
+                    except OSError as e:
+                        logger.warning(
+                            "preview_docx_temp_pdf_remove_failed file=%s err=%s",
+                            converted_pdf,
+                            str(e),
+                        )
             except Exception:
                 logger.exception(
                     "preview_docx_mineru_build_failed file=%s", file_path)

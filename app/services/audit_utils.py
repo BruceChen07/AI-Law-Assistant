@@ -1,6 +1,36 @@
 import re
 from typing import Dict, Any, List
 
+_TAX_KEYWORDS_ZH = [
+    "税",
+    "税务",
+    "税收",
+    "增值税",
+    "所得税",
+    "企业所得税",
+    "个人所得税",
+    "印花税",
+    "发票",
+    "进项",
+    "销项",
+    "代扣代缴",
+    "纳税",
+    "完税",
+]
+
+_TAX_KEYWORDS_EN = [
+    "vat",
+    "cit",
+    "pit",
+    "tax",
+    "invoice",
+    "withholding",
+    "withhold",
+    "deduct",
+    "remit",
+    "levy",
+]
+
 def _safe_float(v: Any, default: float) -> float:
     try:
         return float(v)
@@ -34,6 +64,29 @@ def _normalize_lang(lang: Any, default: str = "zh") -> str:
     if s.startswith("en"):
         return "en"
     return str(default or "zh").strip().lower()
+
+
+def is_tax_related_text(value: Any) -> bool:
+    """Unified tax relevance detector based on keyword + regex mixed strategy."""
+    text = str(value or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+
+    if any(k in text for k in _TAX_KEYWORDS_ZH):
+        return True
+    if any(k in low for k in _TAX_KEYWORDS_EN):
+        return True
+
+    # Mixed numeric cues: tax rate, amount+currency, and common tax expressions.
+    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*%", text):
+        return True
+    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元)", text):
+        return True
+    if re.search(r"(?:rmb|cny|usd|\$)\s*[0-9]+", low):
+        return True
+
+    return False
 
 def _normalize_risk_level(level: Any) -> str:
     s = str(level or "").strip().lower()

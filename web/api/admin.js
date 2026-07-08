@@ -27,6 +27,13 @@ export async function adminUpdateUserRole(userId, role) {
   })
 }
 
+export async function adminDeleteUser(userId) {
+  return requestJson(`${API_BASE}/api/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function adminGetStats() {
   return requestJson(`${API_BASE}/api/admin/stats`, {
     headers: { ...getAuthHeaders() }
@@ -47,6 +54,13 @@ export async function adminUpdateLLMConfig(payload) {
   })
 }
 
+export async function adminDeleteLLMApiKey() {
+  return requestJson(`${API_BASE}/api/admin/llm-config/api-key`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function adminGetUIConfig() {
   return requestJson(`${API_BASE}/api/admin/ui-config`, {
     headers: { ...getAuthHeaders() }
@@ -58,6 +72,41 @@ export async function adminUpdateUIConfig(payload) {
     method: "PUT",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify(payload)
+  })
+}
+
+export async function adminGetMemoryConfig() {
+  return requestJson(`${API_BASE}/api/admin/memory-config`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminUpdateMemoryConfig(payload) {
+  return requestJson(`${API_BASE}/api/admin/memory-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload || {})
+  })
+}
+
+export async function adminGetVectorStoreConfig() {
+  return requestJson(`${API_BASE}/api/admin/vector-store/config`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminUpdateVectorStoreConfig(payload) {
+  return requestJson(`${API_BASE}/api/admin/vector-store/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function adminCleanupVectorStore() {
+  return requestJson(`${API_BASE}/api/admin/vector-store/cleanup`, {
+    method: "POST",
+    headers: { ...getAuthHeaders() }
   })
 }
 

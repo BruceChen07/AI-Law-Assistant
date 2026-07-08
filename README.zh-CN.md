@@ -14,13 +14,14 @@
 
 ## 功能特性
 
-- **合同审计**：主界面上传合同（docx/pdf/扫描pdf），生成风险清单与摘要，并支持导出带有精准批注的 Word 文档（M1/M2无损批注技术）
-- **OCR 增强**：PDF 文本不足时自动回退 OCR，支持多引擎配置
-- **法规管理**：Admin 内上传法规文档并完成条款解析与检索
-- **混合检索**：BM25 + 向量召回 + 交叉编码重排
-- **进度追踪**：前端模拟与后端真实接口结合的审计进度条展示
-- **模型配置**：集中式 LLM 参数管理、热切换以及界面 UI 配置（如隐藏/显示证据来源）
-- **鉴权与管理**：用户登录与管理端 API
+- **合同审计**：上传合同（docx/pdf/扫描 pdf），输出风险清单、摘要与证据引用，并支持导出带精准批注的 Word 文档
+- **OCR 增强**：PDF 文本不足时自动回退 OCR，支持多引擎与按文件类型路由
+- **法规管理**：Admin 支持法规上传、条款解析、混合检索与任务追踪
+- **混合检索与跨语种召回**：BM25 + 向量召回 + 可选重排，支持翻译增强查询（translation_config）
+- **记忆式审计管线**：支持条款级轮次审计、引用白名单映射、未验证风险过滤与调试追踪
+- **安全配置**：LLM 密钥优先走安全存储/环境变量，避免在配置文件中明文持久化
+- **模型与界面配置**：集中式 LLM 参数、UI 开关、运行时热更新
+- **鉴权与管理**：用户登录、角色权限、管理员配置接口
 - **Web UI**：React + Vite 前端，中英文切换
 
 ## 技术架构
@@ -43,7 +44,7 @@ Models (Embedding + Reranker + LLM)
 | 层级    | 技术                                |
 | ----- | --------------------------------- |
 | 后端框架  | FastAPI, Uvicorn                  |
-| 数据库   | SQLite + FTS5                     |
+| 数据库   | SQLite + FTS5, 可选 ChromaDB        |
 | 向量/重排 | ONNX Runtime, Transformers, Torch |
 | 模型    | BGE-small-zh/en, BGE-reranker     |
 | 前端框架  | React 18, Vite 5                  |
@@ -58,6 +59,7 @@ Models (Embedding + Reranker + LLM)
 - Node.js 22+
 - Windows / Linux / macOS
 - OCR 依赖：tesseract、poppler, mineru（用于扫描 PDF）
+- 向量数据库：默认使用 SQLite 内存计算。如果是生产环境（百万级以上向量），建议安装 `chromadb` 并在后台配置切换。
 
 ### 1. 克隆项目
 
@@ -78,10 +80,14 @@ pip install -r requirements.txt
 复制配置示例文件：
 
 ```bash
+# Linux / macOS
 cp app/config.example.json app/config.json
+
+# Windows PowerShell
+Copy-Item app/config.example.json app/config.json
 ```
 
-根据需要修改 `app/config.json` 中的配置。
+根据需要修改 `app/config.json`。建议将 LLM 密钥通过环境变量或安全存储管理，不在配置文件中写入明文。
 
 ### 4. 初始化数据库
 
@@ -90,7 +96,7 @@ cp app/config.example.json app/config.json
 python -m app.main --init
 
 # 方式二：使用 PowerShell 脚本（Windows）
-.\app\init.ps1
+.\bin\init.ps1
 ```
 
 ### 5. 启动服务
@@ -160,6 +166,45 @@ npm run storybook
 2. 填写 API 端点、模型、温度、最大 Token 等
 3. 保存后立即生效
 
+### 记忆模块开关与成本控制（Admin 页面）
+
+1. 进入 Admin → 「模型配置」→「记忆审计配置」
+2. 开关 `启用经验记忆审计`：关闭后走 `classic` 低成本路径
+3. 勾选 `启用记忆 Token 守卫`，并设置预算上限
+
+建议参数（生产默认）：
+
+- `memory_module_enabled`: `true`（如需严格控成本可设为 `false`）
+- `memory_max_llm_calls_per_audit`: `8-16`（合同较长建议上调）
+- `memory_max_prompt_chars_per_clause`: `1600-2800`
+
+风险提示：
+
+- 启用记忆模式会增加 LLM 调用次数与 Token 消耗，成本通常高于 classic 模式
+- 关闭记忆模式后，复杂场景的跨条款召回与经验修正能力会下降
+- 预算过低时系统会优先高风险条款，低优先级条款可能被跳过（可在 trace 中观测）
+
+常见排查：
+
+- 如果发现命中率下降，先检查 `memory_max_llm_calls_per_audit` 是否过小
+- 如果出现条款被跳过，检查 `memory_llm_guard_skipped_low_priority_calls` 指标
+- 如果想快速止损，直接在 Admin 关闭 `启用经验记忆审计`
+
+### 记忆审计模块拆分说明
+
+当前记忆审计管线已拆分为目录化结构，旧导入路径保持兼容：
+
+- 兼容入口：`app/services/contract_audit_modules/memory_pipeline/__init__.py`
+- 审核主流程：`memory_pipeline/audit_loop.py`
+- 证据构建：`memory_pipeline/evidence_builder.py`
+- 风险归并：`memory_pipeline/risk_reconciliation.py`
+- 调试清理：`memory_pipeline/cleanup.py`
+
+说明：
+
+- 仍可通过 `from app.services.contract_audit_modules.memory_pipeline import execute_memory_audit` 调用主流程
+- 对历史私有符号（如 `_resolve_risk_citation_id`）保留兼容导出，便于测试与过渡
+
 ### OCR 验证
 
 ```bash
@@ -195,6 +240,92 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 }
 ```
 
+### 端侧大模型 CPU 本地部署（Phase 0-5）
+
+系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，并可在企业内网场景下以“纯本地、无云端兜底”方式运行。
+
+**本地模型配置示例**（`app/config.json` 中新增 `local_llm` 字段）：
+
+```json
+"local_llm": {
+    "enabled": true,
+    "routing_enabled": true,
+    "cloud_fallback_enabled": false,
+    "main_model": {
+        "provider": "ollama",
+        "model": "qwen3.6:27b",
+        "api_base": "http://127.0.0.1:11434/v1",
+        "max_tokens": 900,
+        "timeout": 60
+    },
+    "small_model": {
+        "provider": "ollama",
+        "model": "llama3.2:3b",
+        "api_base": "http://127.0.0.1:11434/v1",
+        "max_tokens": 400,
+        "timeout": 30
+    },
+    "routing": {
+        "task_profiles": {
+            "contract_audit_main": "main",
+            "contract_clause_audit": "main",
+            "tax_risk_main": "main",
+            "memory_flush": "small",
+            "entity_extract_small": "small",
+            "tax_match_small": "small"
+        },
+        "high_risk_force_cloud": false
+    },
+    "execution": {
+        "fallback_on_error": false,
+        "fallback_on_invalid_json": false,
+        "tax_match_cloud_review_labels": ["non_compliant"],
+        "tax_match_min_confidence": 0.7,
+        "tax_match_max_workers": 2,
+        "tax_risk_max_workers": 2
+    }
+}
+```
+
+**核心能力**：
+- **任务画像路由**：合同审计主流程走 `main` 模型，实体抽取与规则匹配走 `small` 模型
+- **纯本地执行**：所有大模型调用仅访问本机 Ollama，不上传到外部云端
+- **本地容错**：保留 JSON 容错和结果校验，但不再把异常或坏 JSON 升级到云端
+- **JSON 容错**：自动修复 fenced JSON / 尾逗号 / 包裹文本等本地模型常见脏输出
+- **并发约束**：本地模式可独立限制 worker 上限，避免 CPU 过载
+
+**启动方式**：
+```bash
+# 1) 初始化项目
+python .\bin\init.py
+
+# 2) 启动 Ollama 并确保模型已安装
+python .\bin\start-local-llm-servers.py
+python .\bin\download-local-llm-models.py
+
+# 3) 写入本地 LLM 配置
+python .\bin\apply-local-llm-config.py
+
+# 4) 启动后端与前端
+python .\bin\start-services.py
+```
+
+**推荐模型选型**：
+| 角色 | 推荐模型 | 量化 | 硬件要求 |
+|------|---------|------|---------|
+| 主审计模型 | `qwen3.6:27b` | Ollama | 64-128 GB RAM, 16-24 物理核 |
+| 侧车模型 | `llama3.2:3b` | Ollama | 8-12 GB RAM, 4-8 物理核 |
+
+**回归测试**：
+```bash
+python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
+```
+
+详细文档：
+- `plan/edge-llm-cpu-local-deployment-detailed-design.md` — 详细设计文档
+- `plan/edge-llm-cpu-local-deployment-runbook.md` — 部署与联调手册
+- `plan/edge-llm-cpu-local-known-issues.md` — 已知问题清单
+
 ### API 接口
 
 | 方法   | 路径                             | 描述        |
@@ -210,6 +341,8 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 | POST | `/embedding/compute`           | 计算向量      |
 | GET  | `/api/admin/llm-config`        | 获取 LLM 配置 |
 | PUT  | `/api/admin/llm-config`        | 更新 LLM 配置 |
+| GET  | `/api/admin/memory-config`     | 获取记忆运行配置 |
+| PUT  | `/api/admin/memory-config`     | 更新记忆运行配置 |
 
 ## 配置说明
 
@@ -229,14 +362,22 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
     "ocr_engine": "auto",
     "ocr_engine_order": ["tesseract", "mineru"],
     "llm_config": {
-        "provider": "openai_compatible",
-        "api_base": "https://api.openai.com/v1",
+        "provider": "ollama",
+        "api_base": "http://127.0.0.1:11434/v1",
         "api_key": "",
-        "model": "gpt-4o-mini",
+        "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 60,
         "headers": {}
+    },
+    "memory_runtime_config": {
+        "memory_module_enabled": true,
+        "memory_mode_when_disabled": "classic",
+        "memory_disable_fallback_on_error": true,
+        "memory_token_guard_enabled": true,
+        "memory_max_llm_calls_per_audit": 12,
+        "memory_max_prompt_chars_per_clause": 2400
     },
     "reranker_enabled": true,
     "reranker_model_path": "../models/reranker/zh",
@@ -271,6 +412,12 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 | `ocr_engine`             | string  | OCR 引擎（auto/tesseract/其他） |
 | `ocr_engine_order`       | array   | OCR 引擎优先级                 |
 | `llm_config`             | object  | LLM 参数配置                  |
+| `memory_runtime_config`  | object  | 记忆模块运行时开关与预算配置            |
+| `memory_module_enabled`  | boolean | 是否启用经验记忆审计（关闭后走 classic）    |
+| `memory_mode_when_disabled` | string | 禁用记忆后的模式（当前支持 `classic`） |
+| `memory_token_guard_enabled` | boolean | 是否启用记忆调用预算守卫             |
+| `memory_max_llm_calls_per_audit` | int | 单次审计允许的记忆路径最大 LLM 调用次数 |
+| `memory_max_prompt_chars_per_clause` | int | 单条款 prompt 最大字符数上限    |
 | `reranker_enabled`       | boolean | 是否启用重排                    |
 | `reranker_model_path`    | string  | 默认重排模型路径                  |
 | `reranker_profiles`      | object  | 重排模型多语言路径                 |
@@ -308,7 +455,7 @@ pytest tests/
 如果需要使用其他向量子模型，可以运行：
 
 ```bash
-python app/download_embedding_model.py
+python bin/download_embedding_model.py
 ```
 
 或将 ONNX 模型文件放入 `models/embedding/zh/` 目录。

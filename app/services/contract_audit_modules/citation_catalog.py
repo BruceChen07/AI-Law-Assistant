@@ -21,7 +21,7 @@ def build_citation_lookup(evidence_items: List[Dict[str, Any]]) -> Dict[str, str
         law = str(it.get("law_title") or it.get("title") or "").strip()
         article = str(it.get("article_no") or "").strip()
         key = citation_match_key(law, article)
-        if key:
+        if key and key not in lookup:
             lookup[key] = cid
     return lookup
 

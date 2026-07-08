@@ -1,6 +1,13 @@
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
+from app.services.tax_common import parse_llm_json_object
+from app.services.local_llm_runtime import (
+    call_with_fallback,
+    get_local_worker_limit,
+    is_high_risk_force_cloud,
+)
 from app.services.crud import (
     get_tax_contract_document,
     list_clause_rule_matches_by_contract,
@@ -10,8 +17,15 @@ from app.services.crud import (
     update_audit_issue_review,
     insert_audit_trace,
 )
+from app.memory_system.experience_repo import record_user_feedback
 
 logger = logging.getLogger("law_assistant")
+
+
+def _is_valid_risk_result(parsed: dict) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    return bool(str(parsed.get("issue_text") or "").strip() and str(parsed.get("suggestion") or "").strip())
 
 
 def _is_english_mode(doc: dict, matches: list[dict]) -> bool:
@@ -21,7 +35,12 @@ def _is_english_mode(doc: dict, matches: list[dict]) -> bool:
     for m in (matches or [])[:20]:
         try:
             evidence = json.loads(m.get("evidence_json") or "{}")
-        except Exception:
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "tax_risk_evidence_json_invalid_for_lang_detect clause_id=%s err=%s",
+                str(m.get("clause_id") or ""),
+                str(e),
+            )
             evidence = {}
         sample_parts.append(str(evidence.get("reason") or ""))
     sample = " ".join(x for x in sample_parts if x).strip()
@@ -57,7 +76,7 @@ def _build_suggestion(match_item: dict, english_mode: bool = False) -> str:
     return "Keep current clauses and retain supporting regulations in appendices." if english_mode else "建议保留现有约定并在附件中保留法规依据。"
 
 
-def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "") -> dict:
+def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", llm=None) -> dict:
     doc = get_tax_contract_document(cfg, contract_id)
     if not doc:
         raise ValueError("contract document not found")
@@ -72,28 +91,100 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "") -
         operator_id,
         len(matches),
     )
-    issue_items = []
-    for m in matches:
+
+    if llm is None:
+        raise ValueError("llm service is required")
+
+    def process_match(m):
         label = str(m.get("match_label") or "")
         if label not in ["non_compliant", "not_mentioned"]:
-            continue
+            return None
+
         evidence = {}
         try:
             evidence = json.loads(m.get("evidence_json") or "{}")
-        except Exception:
-            evidence = {}
-        issue_items.append(
-            {
-                "contract_document_id": contract_id,
-                "clause_id": m.get("clause_id", ""),
-                "rule_id": m.get("rule_id", ""),
-                "risk_level": _risk_level_by_label(label),
-                "issue_text": _build_issue_text(m, english_mode=english_mode),
-                "suggestion": _build_suggestion(m, english_mode=english_mode),
-                "reviewer_status": "pending",
-                "reviewer_note": evidence.get("reason", ""),
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "tax_risk_evidence_json_invalid_for_issue clause_id=%s err=%s",
+                str(m.get("clause_id") or ""),
+                str(e),
+            )
+
+        clause_text = evidence.get("clause_excerpt", "")
+        rule_text = evidence.get("rule_excerpt", "")
+
+        # Build prompt for dynamic risk issue generation
+        lang_instruction = "English" if english_mode else "Chinese"
+        prompt = f"""
+        You are a senior tax auditor. Based on the following contract clause and tax rule, generate a specific risk issue description and a concrete revision suggestion.
+        
+        Match Type: {label} ("non_compliant" means conflict, "not_mentioned" means missing key obligations)
+        Contract Clause: "{clause_text}"
+        Tax Rule: "{rule_text}"
+        
+        Respond ONLY with a JSON object in {lang_instruction} language, using this format:
+        {{
+            "issue_text": "Detailed description of the specific risk or conflict found.",
+            "suggestion": "Concrete, actionable suggestion on how to revise the clause."
+        }}
+        """
+
+        issue_text = _build_issue_text(m, english_mode=english_mode)
+        suggestion = _build_suggestion(m, english_mode=english_mode)
+
+        try:
+            response, _raw, fallback_meta = call_with_fallback(
+                llm,
+                cfg,
+                [{"role": "user", "content": prompt}],
+                "tax_risk_main",
+                force_cloud=(
+                    label == "non_compliant" and is_high_risk_force_cloud(cfg)),
+                validator=lambda text, _raw: _is_valid_risk_result(
+                    parse_llm_json_object(text)),
+            )
+            result = parse_llm_json_object(response)
+            issue_text = str(result.get("issue_text") or issue_text)
+            suggestion = str(result.get("suggestion") or suggestion)
+        except Exception as e:
+            logger.error(f"LLM risk generation failed: {e}")
+            fallback_meta = {
+                "fallback_used": False,
+                "fallback_reason": "exception",
+                "final_model_role": "",
             }
-        )
+
+        return {
+            "contract_document_id": contract_id,
+            "clause_id": m.get("clause_id", ""),
+            "rule_id": m.get("rule_id", ""),
+            "risk_level": _risk_level_by_label(label),
+            "issue_text": issue_text,
+            "suggestion": suggestion,
+            "reviewer_status": "pending",
+            "reviewer_note": " | ".join(
+                [x for x in [
+                    str(evidence.get("reason") or "").strip(),
+                    f"fallback_reason={fallback_meta.get('fallback_reason', '')}" if fallback_meta.get(
+                        "fallback_used") else "",
+                ] if x]
+            ),
+        }
+
+    issue_items = []
+    max_workers = get_local_worker_limit(
+        cfg,
+        local_key="tax_risk_max_workers",
+        global_key="tax_audit_max_workers",
+        default=4,
+        task_count=len(matches),
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(process_match, matches)
+        for item in results:
+            if item is not None:
+                issue_items.append(item)
+
     clear_audit_issues_by_contract(cfg, contract_id)
     create_audit_issues(cfg, issue_items, created_by=operator_id)
     high = len([x for x in issue_items if x["risk_level"] == "high"])
@@ -167,14 +258,31 @@ def review_audit_issue(
         payload_json=payload,
         created_by=operator_id,
     )
+    feedback_meta = {}
+    try:
+        feedback_meta = record_user_feedback(
+            cfg=cfg,
+            issue=issue,
+            reviewer_status=status,
+            reviewer_note=reviewer_note,
+            operator_id=operator_id,
+            risk_level=normalized_risk or issue.get("risk_level", ""),
+        )
+    except Exception as e:
+        logger.warning(
+            "record_user_feedback_failed issue_id=%s err=%s", issue_id, str(e))
+        feedback_meta = {"saved": False,
+                         "reason": "exception", "error": str(e)}
     updated = get_audit_issue(cfg, issue_id)
     logger.info(
-        "tax_issue_review_done issue_id=%s reviewer_status=%s risk_level=%s action=%s",
+        "tax_issue_review_done issue_id=%s reviewer_status=%s risk_level=%s action=%s feedback_saved=%s outcome=%s",
         issue_id,
         updated.get("reviewer_status", status),
         updated.get("risk_level", normalized_risk or issue.get(
             "risk_level", "")),
         action,
+        bool(feedback_meta.get("saved", False)),
+        str(feedback_meta.get("outcome", "")),
     )
     return {
         "issue_id": issue_id,

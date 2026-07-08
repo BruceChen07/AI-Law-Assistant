@@ -2,11 +2,14 @@ import logging
 import hashlib
 import sqlite3
 import re
+import time
 import numpy as np
 from fastapi import HTTPException
-from app.core.database import get_conn
+from app.core.database import get_conn, get_rag_conn, get_rag_db_path
+from app.core.logger import get_pipeline_logger
 from app.core.utils import tokenize_query, best_sentence
 from app.api.schemas import SearchQuery
+from app.services.tax_contract_parser import detect_text_language
 
 logger = logging.getLogger("law_assistant")
 
@@ -26,14 +29,44 @@ def _build_fts_match_query(raw_query: str) -> str:
     return '"contract"' if english_mode else '"合同"'
 
 
-def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
+def _table_exists(cur, table_name: str) -> bool:
+    cur.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+        (table_name,),
+    )
+    return cur.fetchone() is not None
+
+
+def search_regulations(cfg, q: SearchQuery, embedder, reranker=None, target_rag_lang: str = ""):
+    class_name = "RegulationSearchService"
+    rag_logger = get_pipeline_logger(
+        cfg, name="rag_pipeline", filename="rag_pipeline.log")
+    t0 = time.perf_counter()
     if not q.query.strip():
+        rag_logger.info(
+            "class=%s stage=search_skip_empty_query",
+            class_name)
         return []
     default_lang = embedder.get_registry_status()["default_language"]
+    
+    # Auto-detect query language to prevent mismatch when UI language differs
+    detected_lang = detect_text_language(q.query, default=default_lang)
     lang = (q.language or default_lang).lower()
+    
+    if q.query.strip() and detected_lang != lang:
+        logger.info("search_language_override query=%s original_lang=%s detected_lang=%s", 
+                    q.query[:20], lang, detected_lang)
+        rag_logger.info(
+            "class=%s stage=search_language_override query=%s original_lang=%s detected_lang=%s",
+            class_name, q.query[:20], lang, detected_lang)
+        lang = detected_lang
+
     prof = embedder.get_embed_profile(lang)
     active_lang = (prof or {}).get("lang", lang)
     if q.use_semantic and not prof:
+        rag_logger.warning(
+            "class=%s stage=search_semantic_model_unavailable query=%s lang=%s",
+            class_name, q.query[:80], lang)
         # Raise HTTPException or return error? Service usually raises specific exceptions or returns error.
         # But here let's propagate the logic from main.py
         # main.py raised HTTPException(503)
@@ -42,12 +75,27 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
         raise HTTPException(
             status_code=503, detail=f"semantic search enabled but embedding model is not ready for language={lang}")
 
-    logger.info("search_start query=%s lang=%s active_lang=%s top_k=%s semantic=%s model_id=%s",
-                q.query[:80], lang, active_lang, q.top_k, q.use_semantic, (prof or {}).get("model_id", "none"))
-    tokens = tokenize_query(q.query)
-    bm_query = _build_fts_match_query(q.query)
-    conn = get_conn(cfg)
+    rag_lang = str(target_rag_lang or lang).strip().lower()
+    rag_db_path = get_rag_db_path(cfg, rag_lang)
+    rag_logger.info(
+        "class=%s stage=search_start query=%s lang=%s rag_lang=%s rag_db=%s top_k=%s semantic=%s",
+        class_name, q.query[:80], lang, rag_lang, rag_db_path, q.top_k, q.use_semantic)
+    logger.info("search_start query=%s lang=%s active_lang=%s rag_lang=%s rag_db=%s top_k=%s semantic=%s model_id=%s",
+                q.query[:80], lang, active_lang, rag_lang, rag_db_path, q.top_k, q.use_semantic, (prof or {}).get("model_id", "none"))
+    bm25_query_text = str(q.bm25_query or q.query or "").strip()
+    semantic_query_text = str(q.semantic_query or q.query or "").strip()
+    tokens = tokenize_query(semantic_query_text)
+    bm_query = _build_fts_match_query(bm25_query_text)
+    conn = get_rag_conn(cfg, rag_lang) if target_rag_lang else get_conn(cfg)
     cur = conn.cursor()
+    required_tables = ("article", "article_fts", "regulation", "regulation_version")
+    if any(not _table_exists(cur, t) for t in required_tables):
+        logger.info("search_skip_missing_tables rag_lang=%s rag_db=%s", rag_lang, rag_db_path)
+        rag_logger.warning(
+            "class=%s stage=search_skip_missing_tables rag_lang=%s rag_db=%s",
+            class_name, rag_lang, rag_db_path)
+        conn.close()
+        return []
     candidate_min = 10
     candidate_max = 200
     candidate_size = q.candidate_size or candidate_min
@@ -87,22 +135,30 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     bm_params.append(candidate_n)
 
     bm_rows = []
+    t_bm25 = time.perf_counter()
     try:
         cur.execute(bm_sql, bm_params)
         bm_rows = [dict(r) for r in cur.fetchall()]
         logger.info("bm25_candidates query=%s count=%s",
-                    q.query[:80], len(bm_rows))
+                    bm25_query_text[:80], len(bm_rows))
+        rag_logger.info(
+            "class=%s stage=bm25_done query=%s count=%s cost_ms=%s",
+            class_name, bm25_query_text[:80], len(bm_rows), int((time.perf_counter() - t_bm25) * 1000))
     except sqlite3.OperationalError as e:
         logger.warning("bm25_failed query=%s match=%s err=%s",
-                       q.query[:80], bm_query[:120], str(e))
+                       bm25_query_text[:80], bm_query[:120], str(e))
+        rag_logger.warning(
+            "class=%s stage=bm25_failed query=%s err=%s",
+            class_name, bm25_query_text[:80], str(e))
     for idx, r in enumerate(bm_rows):
         r["bm25_score"] = 1.0 - (idx / max(1, len(bm_rows)))
 
     merged = {r["article_id"]: r for r in bm_rows}
 
     if q.use_semantic:
+        t_sem = time.perf_counter()
         qe = embedder.compute_embedding(
-            q.query, is_query=True, lang=active_lang)
+            semantic_query_text, is_query=True, lang=active_lang)
         if qe is not None:
             sem_sql = """
             SELECT
@@ -133,39 +189,52 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
             if q.date:
                 sem_sql += " AND (v.effective_date='' OR v.effective_date<=?) AND (v.expiry_date='' OR v.expiry_date>=?)"
                 sem_params.extend([q.date, q.date])
-            cur.execute(sem_sql, sem_params)
-            sem_rows = []
-            for row in cur.fetchall():
-                v = np.frombuffer(row[1], dtype=np.float32)
-                sim = float(np.dot(qe, v))
-                sem_rows.append({
-                    "article_id": row[0],
-                    "article_no": row[2],
-                    "content": row[3],
-                    "version_id": row[4],
-                    "regulation_id": row[5],
-                    "title": row[6],
-                    "effective_date": row[7],
-                    "expiry_date": row[8],
-                    "region": row[9],
-                    "industry": row[10],
-                    "semantic_raw": sim
-                })
-            sem_rows.sort(key=lambda x: x["semantic_raw"], reverse=True)
-            sem_rows = sem_rows[:candidate_n]
-            logger.info("semantic_candidates query=%s count=%s",
-                        q.query[:80], len(sem_rows))
-            for idx, r in enumerate(sem_rows):
-                r["semantic_score"] = 1.0 - (idx / max(1, len(sem_rows)))
-                found = merged.get(r["article_id"])
-                if found:
-                    found["semantic_raw"] = r["semantic_raw"]
-                    found["semantic_score"] = r["semantic_score"]
-                else:
-                    merged[r["article_id"]] = r
+            try:
+                cur.execute(sem_sql, sem_params)
+                sem_rows = []
+                for row in cur.fetchall():
+                    v = np.frombuffer(row[1], dtype=np.float32)
+                    sim = float(np.dot(qe, v))
+                    sem_rows.append({
+                        "article_id": row[0],
+                        "article_no": row[2],
+                        "content": row[3],
+                        "version_id": row[4],
+                        "regulation_id": row[5],
+                        "title": row[6],
+                        "effective_date": row[7],
+                        "expiry_date": row[8],
+                        "region": row[9],
+                        "industry": row[10],
+                        "semantic_raw": sim
+                    })
+                sem_rows.sort(key=lambda x: x["semantic_raw"], reverse=True)
+                sem_rows = sem_rows[:candidate_n]
+                logger.info("semantic_candidates query=%s count=%s",
+                            semantic_query_text[:80], len(sem_rows))
+                rag_logger.info(
+                    "class=%s stage=semantic_done query=%s count=%s cost_ms=%s",
+                    class_name, semantic_query_text[:80], len(sem_rows), int((time.perf_counter() - t_sem) * 1000))
+                for idx, r in enumerate(sem_rows):
+                    r["semantic_score"] = 1.0 - (idx / max(1, len(sem_rows)))
+                    found = merged.get(r["article_id"])
+                    if found:
+                        found["semantic_raw"] = r["semantic_raw"]
+                        found["semantic_score"] = r["semantic_score"]
+                    else:
+                        merged[r["article_id"]] = r
+            except sqlite3.OperationalError as e:
+                logger.warning("semantic_failed query=%s rag_lang=%s err=%s",
+                               semantic_query_text[:80], rag_lang, str(e))
+                rag_logger.warning(
+                    "class=%s stage=semantic_failed query=%s rag_lang=%s err=%s",
+                    class_name, semantic_query_text[:80], rag_lang, str(e))
         else:
             logger.warning(
-                "semantic_enabled_but_embedder_unavailable query=%s lang=%s", q.query[:80], lang)
+                "semantic_enabled_but_embedder_unavailable query=%s lang=%s", semantic_query_text[:80], lang)
+            rag_logger.warning(
+                "class=%s stage=semantic_skip_no_embedding query=%s lang=%s",
+                class_name, semantic_query_text[:80], lang)
 
     rows = list(merged.values())
     for r in rows:
@@ -186,7 +255,7 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
     elif q.rerank_mode == "on":
         rerank_enabled = True
     elif q.rerank_mode == "ab":
-        h = hashlib.md5(q.query.encode("utf-8")).hexdigest()
+        h = hashlib.md5(semantic_query_text.encode("utf-8")).hexdigest()
         rerank_enabled = int(h, 16) % 2 == 0
 
     rerank_top_n = q.rerank_top_n or candidate_size
@@ -196,13 +265,20 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
 
     if rerank_enabled and reranker:
         candidates = rows[:max(1, min(rerank_top_n, len(rows)))]
+        t_rerank = time.perf_counter()
         try:
-            rows = reranker.rerank(q.query, candidates,
+            rows = reranker.rerank(semantic_query_text, candidates,
                                    top_k=q.top_k, lang=lang)
+            rag_logger.info(
+                "class=%s stage=rerank_done query=%s in_count=%s out_count=%s cost_ms=%s",
+                class_name, semantic_query_text[:80], len(candidates), len(rows), int((time.perf_counter() - t_rerank) * 1000))
             if rerank_threshold > 0:
                 rows = [r for r in rows if r.get(
                     "rerank_score", 0.0) >= rerank_threshold]
         except Exception:
+            rag_logger.exception(
+                "class=%s stage=rerank_failed query=%s fallback=%s",
+                class_name, semantic_query_text[:80], bool(rerank_fallback))
             if not rerank_fallback:
                 raise
             rows = rows[:q.top_k]
@@ -222,6 +298,10 @@ def search_regulations(cfg, q: SearchQuery, embedder, reranker=None):
         content_low = str(r["content"]).lower()
         r["match_tokens"] = [t for t in tokens if (
             t in r["content"] or t.lower() in content_low)]
-        r["citation_id"] = f"{r['regulation_id']}:{r['version_id']}:{r['article_id']}"
+        r["citation_lang"] = rag_lang
+        r["citation_id"] = f"{rag_lang}:{r['regulation_id']}:{r['version_id']}:{r['article_id']}"
     logger.info("search_done query=%s results=%s", q.query[:80], len(rows))
+    rag_logger.info(
+        "class=%s stage=search_done query=%s results=%s total_ms=%s",
+        class_name, q.query[:80], len(rows), int((time.perf_counter() - t0) * 1000))
     return rows

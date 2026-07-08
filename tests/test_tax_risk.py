@@ -1,5 +1,7 @@
 import uuid
-from datetime import datetime
+import json
+from datetime import datetime, timezone
+import numpy as np
 from app.core.database import init_db, get_conn
 from app.services.crud import (
     create_tax_regulation_document,
@@ -13,8 +15,42 @@ from app.services.tax_risk import generate_issues_from_matches, review_audit_iss
 
 
 def test_generate_and_review_tax_audit_issues(tmp_path):
+    class FakeEmbedder:
+        def compute_embedding(self, text, lang="zh"):
+            vec = np.zeros(16, dtype=np.float32)
+            for i, ch in enumerate(str(text or "")[:64]):
+                vec[i % 16] += (ord(ch) % 19) / 19.0
+            return vec
+
+    class FakeLLM:
+        def __init__(self):
+            self.calls = []
+
+        def chat_with_profile(self, messages, task_profile, overrides=None):
+            self.calls.append(
+                {
+                    "task_profile": task_profile,
+                    "messages": messages,
+                    "overrides": dict(overrides or {}),
+                }
+            )
+            prompt = messages[-1]["content"] if messages else ""
+            if "Return ONLY a JSON object" in prompt:
+                if 'Contract Clause: "税率按9%执行"' in prompt:
+                    return ('{"label":"non_compliant","score":0.91,"reason":"税率与规则不一致"}', {})
+                return ('{"label":"not_mentioned","score":0.66,"reason":"未提及关键义务"}', {})
+            return ('```json\n{"issue_text":"具体风险说明","suggestion":"请补充修订建议",}\n```', {})
+
     db_path = tmp_path / "test.db"
-    cfg = {"db_path": str(db_path)}
+    cfg = {
+        "db_path": str(db_path),
+        "memory_dir": str(tmp_path / "memory"),
+        "local_llm": {
+            "cloud_fallback_enabled": True,
+            "routing": {"high_risk_force_cloud": True},
+            "execution": {"tax_risk_max_workers": 2},
+        },
+    }
     init_db(cfg)
 
     reg_id = str(uuid.uuid4())
@@ -56,7 +92,7 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
 
     conn = get_conn(cfg)
     cur = conn.cursor()
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     cur.execute(
         """
         INSERT INTO tax_rule(
@@ -93,14 +129,28 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
     conn.commit()
     conn.close()
 
+    llm = FakeLLM()
     match_contract_against_rules(
-        cfg, contract_id, operator_id="u1", top_k_per_clause=1)
-    gen = generate_issues_from_matches(cfg, contract_id, operator_id="u1")
+        cfg,
+        contract_id,
+        operator_id="u1",
+        top_k_per_clause=1,
+        llm=llm,
+        embedder=FakeEmbedder(),
+    )
+    gen = generate_issues_from_matches(
+        cfg, contract_id, operator_id="u1", llm=llm)
     assert gen["total"] == 2
     assert gen["high"] >= 1
     assert gen["medium"] >= 1
+    risk_calls = [x for x in llm.calls if x["task_profile"] == "tax_risk_main"]
+    assert len(risk_calls) >= 2
+    assert any(x["overrides"].get("_model_role") ==
+               "cloud_fallback" for x in risk_calls)
     items = list_tax_audit_issues_by_contract(cfg, contract_id)
     assert len(items) == 2
+    assert items[0]["issue_text"]
+    assert items[0]["suggestion"]
     issue_id = items[0]["id"]
     reviewed = review_audit_issue(
         cfg,
@@ -113,3 +163,13 @@ def test_generate_and_review_tax_audit_issues(tmp_path):
     traces = list_audit_trace_by_issue(cfg, issue_id, limit=20)
     assert len(traces) == 1
     assert traces[0]["action_type"] == "reviewer_confirm"
+    feedback_file = tmp_path / "memory" / "experience" / "feedback_events.jsonl"
+    assert feedback_file.exists()
+    rows = [json.loads(x) for x in feedback_file.read_text(
+        encoding="utf-8").splitlines() if x.strip()]
+    assert len(rows) >= 1
+    row = rows[-1]
+    assert row["issue_id"] == issue_id
+    assert row["outcome"] == "success"
+    assert row["feedback_source"] == "user_confirmed"
+    assert float(row["memory_quality_score"]) > 0.5

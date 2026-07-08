@@ -10,7 +10,14 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 
-app = create_app()
+app = None
+
+
+def get_app():
+    global app
+    if app is None:
+        app = create_app()
+    return app
 
 
 def _is_port_available(port: int) -> bool:
@@ -40,7 +47,7 @@ def main():
     auto_switch = os.environ.get("APP_PORT_AUTO_SWITCH", "1").strip().lower() not in {
         "0", "false", "no"}
     port = _pick_port(requested_port) if auto_switch else requested_port
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run(get_app(), host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

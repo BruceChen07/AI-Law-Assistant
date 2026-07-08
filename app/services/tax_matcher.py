@@ -2,12 +2,26 @@ import re
 import json
 import logging
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
+import numpy as np
+from app.core.llm import LLMService
+from app.core.embedding import EmbeddingService
 from app.services.crud import (
     get_tax_contract_document,
     list_contract_clauses,
     list_tax_rules,
     clear_clause_rule_matches_by_contract,
     create_clause_rule_matches,
+)
+from app.services.rule_engine import evaluate_rule, TaxRuleDSL
+from app.services.audit_utils import is_tax_related_text
+from app.services.tax_common import parse_llm_json_object
+from app.services.local_llm_runtime import (
+    call_with_fallback,
+    get_cloud_review_labels,
+    get_local_worker_limit,
+    get_tax_match_min_confidence,
+    is_high_risk_force_cloud,
 )
 
 logger = logging.getLogger("law_assistant")
@@ -17,33 +31,28 @@ def _utc_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _extract_percent(text: str) -> str:
-    m = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*%", str(text or ""))
-    return f"{m.group(1)}%" if m else ""
+def _is_valid_match_result(parsed: dict) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    label = str(parsed.get("label") or "").strip().lower()
+    if label not in {"compliant", "non_compliant", "not_mentioned"}:
+        return False
+    try:
+        score = float(parsed.get("score", 0.0))
+    except Exception:
+        return False
+    return 0.0 <= score <= 1.0
 
 
-def _extract_deadline_days(text: str) -> int:
-    m = re.search(r"([0-9]{1,3})\s*(?:日内|天内|个工作日内)", str(text or ""))
-    return int(m.group(1)) if m else 0
-
-
-def _keywords(text: str) -> set[str]:
-    parts = re.findall(r"[\u4e00-\u9fff]{2,}|[a-zA-Z0-9_]+", str(text or ""))
-    stop = {"应当", "按照", "以及", "或者", "进行", "相关", "条款", "规定", "合同"}
-    return {p for p in parts if p not in stop}
-
-
-def _overlap_score(rule_text: str, clause_text: str) -> float:
-    a = _keywords(rule_text)
-    b = _keywords(clause_text)
-    if not a or not b:
+def _cosine_similarity(vec1, vec2):
+    v1 = np.array(vec1)
+    v2 = np.array(vec2)
+    if np.linalg.norm(v1) == 0 or np.linalg.norm(v2) == 0:
         return 0.0
-    inter = len(a.intersection(b))
-    union = len(a.union(b))
-    return round(inter / max(union, 1), 4)
+    return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
 
 
-def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
+def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLMService = None) -> dict:
     clause_text = str(clause.get("clause_text") or "")
     rule_text = " ".join(
         [
@@ -54,59 +63,84 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
             str(rule.get("deadline_constraints") or ""),
         ]
     ).strip()
-    reason = ""
+
+    if llm is None:
+        raise ValueError("llm service is required")
+
+    prompt = f"""
+    You are an expert tax and legal auditor. 
+    Analyze the relationship between the following contract clause and the tax rule.
+    
+    Contract Clause:
+    "{clause_text}"
+    
+    Tax Rule:
+    "{rule_text}"
+    
+    Determine if the clause complies with the rule.
+    Return ONLY a JSON object with the following structure:
+    {{
+        "label": "compliant" | "non_compliant" | "not_mentioned",
+        "score": float between 0.0 and 1.0 (confidence score),
+        "reason": "short explanation of the relationship in English or Chinese"
+    }}
+    """
+
     label = "not_mentioned"
     score = 0.12
-    if str(rule.get("rule_type") or "") == "tax_rate":
-        rule_rate = _extract_percent(
-            rule.get("numeric_constraints") or rule_text)
-        clause_rate = _extract_percent(clause_text)
-        if not clause_rate:
-            label = "not_mentioned"
-            score = 0.15
-            reason = "clause_has_no_tax_rate"
-        elif clause_rate == rule_rate and rule_rate:
-            label = "compliant"
-            score = 0.96
-            reason = "tax_rate_consistent"
-        elif rule_rate and clause_rate != rule_rate:
-            label = "non_compliant"
-            score = 0.99
-            reason = "tax_rate_conflict"
-    elif str(rule.get("rule_type") or "") == "deadline":
-        rule_days = _extract_deadline_days(
-            rule.get("deadline_constraints") or rule_text)
-        clause_days = _extract_deadline_days(clause_text)
-        if clause_days == 0:
-            label = "not_mentioned"
-            score = 0.2
-            reason = "deadline_missing"
-        elif rule_days > 0 and clause_days <= rule_days:
-            label = "compliant"
-            score = 0.9
-            reason = "deadline_within_limit"
-        elif rule_days > 0 and clause_days > rule_days:
-            label = "non_compliant"
-            score = 0.95
-            reason = "deadline_exceeds_limit"
-        else:
-            label = "not_mentioned"
-            score = 0.22
-            reason = "deadline_unclear"
-    else:
-        overlap = _overlap_score(rule_text, clause_text)
-        if overlap >= 0.28:
-            label = "compliant"
-            score = min(0.88, 0.55 + overlap)
-            reason = "keyword_overlap_sufficient"
-        elif overlap <= 0.05:
-            label = "not_mentioned"
-            score = 0.12
-            reason = "keyword_overlap_missing"
-        else:
-            label = "not_mentioned"
-            score = 0.3 + overlap
-            reason = "keyword_overlap_weak"
+    reason = "LLM analysis failed or timeout"
+
+    try:
+        response, raw, fallback_meta = call_with_fallback(
+            llm,
+            cfg,
+            [{"role": "user", "content": prompt}],
+            "tax_match_small",
+            validator=lambda text, _raw: _is_valid_match_result(
+                parse_llm_json_object(text)),
+        )
+        result = parse_llm_json_object(response)
+        label = str(result.get("label", "not_mentioned") or "not_mentioned")
+        score = float(result.get("score", 0.5))
+        reason = str(result.get("reason") or "")
+        route = raw.get("_route") if isinstance(
+            raw, dict) and isinstance(raw.get("_route"), dict) else {}
+        needs_cloud_review = (
+            is_high_risk_force_cloud(cfg)
+            and str(label).lower() in set(get_cloud_review_labels(cfg))
+            and str(route.get("selected_role") or "") != "cloud_fallback"
+        )
+        if needs_cloud_review or float(score) < get_tax_match_min_confidence(cfg):
+            review_response, review_raw, review_meta = call_with_fallback(
+                llm,
+                cfg,
+                [{"role": "user", "content": prompt}],
+                "tax_match_small",
+                force_cloud=True,
+                retry_on_error=False,
+                retry_on_invalid=False,
+                validator=lambda text, _raw: _is_valid_match_result(
+                    parse_llm_json_object(text)),
+            )
+            review_result = parse_llm_json_object(review_response)
+            if _is_valid_match_result(review_result):
+                label = str(review_result.get("label") or label)
+                score = float(review_result.get("score", score))
+                reason = str(review_result.get("reason") or reason)
+                fallback_meta = {
+                    "fallback_used": True,
+                    "fallback_reason": "high_risk_review" if needs_cloud_review else "low_confidence_review",
+                    "final_model_role": "cloud_fallback",
+                    "review_meta": review_meta,
+                }
+    except Exception as e:
+        logger.error(f"LLM match evaluation failed: {e}")
+        fallback_meta = {
+            "fallback_used": False,
+            "fallback_reason": "exception",
+            "final_model_role": "",
+        }
+
     evidence = {
         "reason": reason,
         "clause_excerpt": clause_text[:300],
@@ -114,6 +148,9 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
         "rule_type": rule.get("rule_type", ""),
         "rule_article_no": rule.get("article_no", ""),
         "evaluated_at": _utc_now_iso(),
+        "fallback_used": bool(fallback_meta.get("fallback_used", False)),
+        "fallback_reason": str(fallback_meta.get("fallback_reason", "")),
+        "final_model_role": str(fallback_meta.get("final_model_role", "")),
     }
     return {
         "clause_id": clause.get("id", ""),
@@ -121,6 +158,64 @@ def evaluate_clause_rule_match(clause: dict, rule: dict) -> dict:
         "match_score": round(float(score), 4),
         "match_label": label,
         "evidence_json": json.dumps(evidence, ensure_ascii=False),
+    }
+
+
+def evaluate_clause_rule_match(clause: dict, rule: dict, cfg: dict = None, llm: LLMService = None) -> dict:
+    """
+    Evaluates if a clause matches a rule. 
+    First tries the hard DSL rule engine. If it fails or is inapplicable, falls back to LLM.
+    """
+    clause_id = clause.get("id")
+    rule_id = rule.get("id")
+
+    # 1. Extract entities and try DSL rule engine
+    entities = {}
+    if clause.get("entities_json"):
+        try:
+            entities = json.loads(clause.get("entities_json"))
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "tax_match_entities_json_invalid clause_id=%s err=%s",
+                clause_id,
+                str(e),
+            )
+
+    # Build TaxRuleDSL object if DB fields exist
+    # Note: the current tax_rule table does not have the JSON fields yet, they are in the article table.
+    # We will fallback to LLM if DSL is missing.
+
+    # 2. Fallback to LLM if DSL is not present or inapplicable
+    llm_cfg = (cfg or {}).get("llm_config") if isinstance(
+        (cfg or {}).get("llm_config"), dict) else {}
+    llm_ready = bool(str(llm_cfg.get("api_base") or "").strip()) and bool(
+        str(llm_cfg.get("model") or "").strip())
+    if cfg and llm_ready:
+        return evaluate_clause_rule_match_llm(clause, rule, cfg, llm)
+
+    # Simple fallback for tests without LLM config
+    c_text = str(clause.get("clause_text") or "")
+    r_text = str(rule.get("source_text") or "")
+    num = str(rule.get("numeric_constraints") or "")
+    label = "not_mentioned"
+    if num and num in c_text:
+        label = "compliant"
+    elif num and num not in c_text and "%" in c_text:
+        label = "non_compliant"
+
+    return {
+        "clause_id": clause_id,
+        "rule_id": rule_id,
+        "match_label": label,
+        "match_score": 0.8 if label != "not_mentioned" else 0.2,
+        "evidence_json": json.dumps(
+            {
+                "clause_excerpt": c_text[:100],
+                "rule_excerpt": r_text[:100],
+                "reason": "Fallback simple match",
+            },
+            ensure_ascii=False,
+        ),
     }
 
 
@@ -139,7 +234,14 @@ def _pick_matches_for_clause(evaluated: list[dict], top_k: int = 5) -> list[dict
     return selected + extra
 
 
-def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", top_k_per_clause: int = 5) -> dict:
+def match_contract_against_rules(
+    cfg,
+    contract_id: str,
+    operator_id: str = "",
+    top_k_per_clause: int = 5,
+    llm: LLMService = None,
+    embedder: EmbeddingService = None,
+) -> dict:
     contract = get_tax_contract_document(cfg, contract_id)
     if not contract:
         raise ValueError("contract document not found")
@@ -157,12 +259,106 @@ def match_contract_against_rules(cfg, contract_id: str, operator_id: str = "", t
         len(rules),
         int(top_k_per_clause),
     )
+
+    # 1. Initialize services
+    if embedder is None:
+        raise ValueError("embedding service is required")
+    if llm is None:
+        raise ValueError("llm service is required")
+
+    # 2. Get embeddings for rules
+    rule_texts = [
+        " ".join([
+            str(r.get("source_text") or ""),
+            str(r.get("required_action") or ""),
+            str(r.get("prohibited_action") or ""),
+            str(r.get("numeric_constraints") or ""),
+            str(r.get("deadline_constraints") or ""),
+        ]).strip() for r in rules
+    ]
+
+    # Simple language detection for embedding
+    sample_text = " ".join(rule_texts[:5])
+    lang = "en" if len(re.findall(r"[A-Za-z]", sample_text)) > len(
+        re.findall(r"[\u4e00-\u9fff]", sample_text)) else "zh"
+
+    rule_embeddings = []
+    for text in rule_texts:
+        emb = embedder.compute_embedding(text, lang=lang)
+        if emb is not None:
+            rule_embeddings.append(emb)
+        else:
+            rule_embeddings.append(
+                np.zeros(16, dtype=np.float32))  # Dummy fallback
+
     all_matches = []
-    for clause in clauses:
-        evaluated = [evaluate_clause_rule_match(
-            clause, rule) for rule in rules]
-        all_matches.extend(_pick_matches_for_clause(
-            evaluated, top_k=top_k_per_clause))
+
+    # 3. Process clauses concurrently
+    def process_clause(clause):
+        clause_text = str(clause.get("clause_text") or "")
+        if not is_tax_related_text(clause_text):
+            fallback_rule = rules[0] if rules else {}
+            evidence = {
+                "reason": "fast_path_not_tax_related_clause",
+                "clause_excerpt": clause_text[:300],
+                "rule_excerpt": str(fallback_rule.get("source_text") or "")[:300],
+                "rule_type": fallback_rule.get("rule_type", ""),
+                "rule_article_no": fallback_rule.get("article_no", ""),
+                "evaluated_at": _utc_now_iso(),
+            }
+            return [
+                {
+                    "clause_id": clause.get("id", ""),
+                    "rule_id": fallback_rule.get("id", ""),
+                    "match_score": 0.0,
+                    "match_label": "not_mentioned",
+                    "evidence_json": json.dumps(evidence, ensure_ascii=False),
+                }
+            ]
+        clause_emb = embedder.compute_embedding(clause_text, lang=lang)
+        if clause_emb is None:
+            clause_emb = np.zeros(16, dtype=np.float32)
+
+        # Calculate similarities
+        similarities = []
+        for idx, rule_emb in enumerate(rule_embeddings):
+            sim = _cosine_similarity(clause_emb, rule_emb)
+            similarities.append((idx, sim))
+
+        # Top-K relevant rules by vector similarity
+        similarities.sort(key=lambda x: x[1], reverse=True)
+        top_indices = [
+            # Threshold
+            idx for idx, sim in similarities[:top_k_per_clause] if sim > 0.3]
+
+        if not top_indices:
+            # If no rule is semantically close, fallback to top 1 just to be safe or skip
+            top_indices = [similarities[0][0]] if similarities else []
+
+        evaluated = []
+        sim_dict = dict(similarities)
+        for idx in top_indices:
+            rule = rules[idx]
+            match_result = evaluate_clause_rule_match(
+                clause, rule, cfg, llm)
+            # Add semantic similarity as part of the score or metadata if needed
+            match_result["match_score"] = float(sim_dict.get(idx, 0.0))
+            evaluated.append(match_result)
+
+        return _pick_matches_for_clause(evaluated, top_k=top_k_per_clause)
+
+    max_workers = get_local_worker_limit(
+        cfg,
+        local_key="tax_match_max_workers",
+        global_key="tax_audit_max_workers",
+        default=4,
+        task_count=len(clauses),
+    )
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(process_clause, clauses)
+        for matches in results:
+            all_matches.extend(matches)
+
     clear_clause_rule_matches_by_contract(cfg, contract_id)
     create_clause_rule_matches(cfg, all_matches, created_by=operator_id)
     compliant = len(

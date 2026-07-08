@@ -29,6 +29,35 @@ def test_extract_clause_entities():
     assert entities["amount"] == "100万元"
 
 
+def test_extract_clause_entities_uses_small_task_profile_with_llm():
+    calls = []
+
+    class FakeLLM:
+        def chat_with_profile(self, messages, task_profile, overrides=None):
+            calls.append(
+                {
+                    "messages": messages,
+                    "task_profile": task_profile,
+                    "overrides": dict(overrides or {}),
+                }
+            )
+            return (
+                '{"taxpayer_type":"一般纳税人","tax_category":"VAT","invoice_type":"专用发票"}',
+                {"_route": {"selected_role": "small"}},
+            )
+
+    cfg = {"local_llm": {"enabled": True}}
+    entities = extract_clause_entities(
+        "甲方作为一般纳税人，应开具增值税专用发票。",
+        cfg=cfg,
+        llm=FakeLLM(),
+    )
+    assert entities["taxpayer_type"] == "一般纳税人"
+    assert entities["tax_category"] == "VAT"
+    assert calls[0]["task_profile"] == "entity_extract_small"
+    assert calls[0]["overrides"]["temperature"] == 0.1
+
+
 def test_analyze_contract_document_end_to_end(tmp_path):
     db_path = tmp_path / "test.db"
     file_path = tmp_path / "contract.txt"
