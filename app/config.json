@@ -1,155 +1,225 @@
 {
-    "data_dir": "../data",
-    "db_path": "../data/app.db",
-    "files_dir": "../data/files",
-    "static_dir": "../web/dist",
-    "default_language": "zh",
-    "reranker_enabled": false,
-    "reranker_model_path": "",
-    "reranker_profiles": {},
-    "rerank_batch_size": 8,
-    "rerank_max_len": 512,
-    "rerank_fallback": true,
-    "rerank_score_threshold": 0.0,
-    "embedding_profiles": {
-        "zh": {
-            "embedding_model": "../models/embedding/zh/model.onnx",
-            "embedding_tokenizer_dir": "../models/embedding/zh",
-            "embedding_model_id": "BAAI/bge-small-zh-v1.5",
-            "embedding_source": "modelscope",
-            "embedding_max_seq_len": 512,
-            "embedding_pooling": "cls",
-            "embedding_query_instruction": "为这个句子生成表示以用于检索相关文章：",
-            "embedding_threads": 2
-        },
-        "en": {
-            "embedding_model": "../models/embedding/en/model.onnx",
-            "embedding_tokenizer_dir": "../models/embedding/en",
-            "embedding_model_id": "BAAI/bge-small-en-v1.5",
-            "embedding_source": "modelscope",
-            "embedding_max_seq_len": 512,
-            "embedding_pooling": "cls",
-            "embedding_threads": 2,
-            "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:"
-        }
+  "data_dir": "../data",
+  "db_path": "../data/app.db",
+  "files_dir": "../data/files",
+  "static_dir": "../web/dist",
+  "default_language": "zh",
+  "reranker_enabled": false,
+  "reranker_model_path": "",
+  "reranker_profiles": {},
+  "rerank_batch_size": 8,
+  "rerank_max_len": 512,
+  "rerank_fallback": true,
+  "rerank_score_threshold": 0.0,
+  "embedding_profiles": {
+    "zh": {
+      "embedding_model": "../models/embedding/zh/model.onnx",
+      "embedding_tokenizer_dir": "../models/embedding/zh",
+      "embedding_model_id": "BAAI/bge-small-zh-v1.5",
+      "embedding_source": "modelscope",
+      "embedding_max_seq_len": 512,
+      "embedding_pooling": "cls",
+      "embedding_query_instruction": "为这个句子生成表示以用于检索相关文章：",
+      "embedding_threads": 2
     },
-    "log_level": "DEBUG",
-    "log_base_dir": "../logs",
-    "log_dir": "../logs",
-    "log_max_bytes": 10485760,
-    "log_backup_count": 7,
-    "log_when": "midnight",
-    "log_interval": 1,
-    "ocr_enabled": true,
-    "ocr_languages": "chi_sim+eng",
-    "ocr_min_text_length": 200,
-    "ocr_dpi": 220,
-    "ocr_engine": "mineru",
-    "ocr_engine_order": [
-        "mineru"
-    ],
-    "ocr_engine_by_type": {
-        "pdf": "mineru",
-        "image": "mineru"
-    },
-    "ocr_engines": {
-        "mineru": {
-            "module": "app.core.mineru_ocr",
-            "function": "ocr_document"
-        }
-    },
-    "mineru": {
-        "mode": "auto",
-        "fallback_backends": [
-            "pipeline"
-        ],
-        "probe_cache_ttl_sec": 300,
-        "method": "auto",
-        "lang": "ch",
-        "device": "cpu",
-        "formula": false,
-        "table": false,
-        "model_source": "huggingface",
-        "timeout": 900
-    },
-    "llm_config": {
-        "provider": "qwen",
-        "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "api_key": "",
-        "model": "kimi-k2.5",
-        "temperature": 0.0,
-        "max_tokens": 2048,
-        "timeout": 120,
-        "headers": {}
-    },
-    "llm_trace_enabled": true,
-    "llm_trace_dir": "../data/memory/llm_interactions",
-    "llm_trace_max_chars": 12000,
-    "rag_trace_enabled": true,
-    "rag_trace_dir": "../data/memory/debug/rag_retrieval",
-    "rag_trace_max_chars": 3000,
-    "rag_trace_max_rows": 20,
-    "retrieval_regulation_language": "zh",
-    "jieba_user_dict_path": "../data/dict/law_dict.txt",
-    "jieba_hmm_enabled": false,
-    "jieba_force_words": [
-        "税收征收管理法实施细则",
-        "税收征收管理法",
-        "增值税专用缴款书",
-        "增值税专用发票",
-        "虚开增值税专用发票罪",
-        "代扣代缴义务人",
-        "小规模纳税人",
-        "一般纳税人",
-        "企业所得税法",
-        "个人所得税法",
-        "土地增值税暂行条例",
-        "营业税暂行条例",
-        "资源税暂行条例",
-        "税收强制执行措施",
-        "出口退税",
-        "税务稽查",
-        "税务行政复议",
-        "税务行政处罚",
-        "税前扣除",
-        "纳税申报",
-        "税务申报",
-        "会计基础工作规范",
-        "会计档案管理办法",
-        "中华人民共和国审计法",
-        "注册会计师法",
-        "银行承兑汇票",
-        "商业承兑汇票",
-        "国有资本经营预算制度"
-    ],
-    "translation_config": {
-        "enabled": false,
-        "backend": "hy_mt_local",
-        "mode": "dual",
-        "cross_lang_source_query_enabled": false,
-        "model_id": "tencent/HY-MT1.5-1.8B",
-        "model_dir": "",
-        "device": "cpu",
-        "source_langs": [
-            "en"
-        ],
-        "target_lang": "zh"
-    },
-    "memory_use_long_hits": false,
-    "memory_enable_long_memory": false,
-    "memory_enable_short_memory": false,
-    "max_upload_mb": 50,
-    "cors_allow_origins": [
-        "http://localhost:5173",
-        "http://localhost:5174"
-    ],
-    "ui_config": {
-        "show_citation_source": false,
-        "default_theme": "dark"
-    },
-    "memory_runtime_config": {
-        "memory_module_enabled": false,
-        "memory_mode_when_disabled": "classic",
-        "memory_disable_fallback_on_error": true
+    "en": {
+      "embedding_model": "../models/embedding/en/model.onnx",
+      "embedding_tokenizer_dir": "../models/embedding/en",
+      "embedding_model_id": "BAAI/bge-small-en-v1.5",
+      "embedding_source": "modelscope",
+      "embedding_max_seq_len": 512,
+      "embedding_pooling": "cls",
+      "embedding_threads": 2,
+      "embedding_query_instruction": "Represent this sentence for retrieving relevant passages:"
     }
+  },
+  "log_level": "DEBUG",
+  "log_base_dir": "../logs",
+  "log_dir": "../logs",
+  "log_max_bytes": 10485760,
+  "log_backup_count": 7,
+  "log_when": "midnight",
+  "log_interval": 1,
+  "ocr_enabled": true,
+  "ocr_languages": "chi_sim+eng",
+  "ocr_min_text_length": 200,
+  "ocr_dpi": 220,
+  "ocr_engine": "mineru",
+  "ocr_engine_order": [
+    "mineru"
+  ],
+  "ocr_engine_by_type": {
+    "pdf": "mineru",
+    "image": "mineru"
+  },
+  "ocr_engines": {
+    "mineru": {
+      "module": "app.core.mineru_ocr",
+      "function": "ocr_document"
+    }
+  },
+  "mineru": {
+    "mode": "auto",
+    "fallback_backends": [
+      "pipeline"
+    ],
+    "probe_cache_ttl_sec": 300,
+    "method": "auto",
+    "lang": "ch",
+    "device": "cpu",
+    "formula": false,
+    "table": false,
+    "model_source": "huggingface",
+    "timeout": 900
+  },
+  "llm_config": {
+    "provider": "ollama",
+    "api_base": "http://127.0.0.1:11434/v1",
+    "api_key": "",
+    "model": "qwen3.5:9b",
+    "temperature": 0.2,
+    "max_tokens": 2048,
+    "timeout": 60,
+    "headers": {}
+  },
+  "llm_trace_enabled": true,
+  "llm_trace_dir": "../data/memory/llm_interactions",
+  "llm_trace_max_chars": 12000,
+  "rag_trace_enabled": true,
+  "rag_trace_dir": "../data/memory/debug/rag_retrieval",
+  "rag_trace_max_chars": 3000,
+  "rag_trace_max_rows": 20,
+    "model_preflight_check_on_startup": true,
+    "model_preflight_auto_download_on_startup": false,
+    "model_preflight_include_optional": false,
+    "model_preflight_require_all": true,
+  "retrieval_regulation_language": "zh",
+  "jieba_user_dict_path": "../data/dict/law_dict.txt",
+  "jieba_hmm_enabled": false,
+  "jieba_force_words": [
+    "税收征收管理法实施细则",
+    "税收征收管理法",
+    "增值税专用缴款书",
+    "增值税专用发票",
+    "虚开增值税专用发票罪",
+    "代扣代缴义务人",
+    "小规模纳税人",
+    "一般纳税人",
+    "企业所得税法",
+    "个人所得税法",
+    "土地增值税暂行条例",
+    "营业税暂行条例",
+    "资源税暂行条例",
+    "税收强制执行措施",
+    "出口退税",
+    "税务稽查",
+    "税务行政复议",
+    "税务行政处罚",
+    "税前扣除",
+    "纳税申报",
+    "税务申报",
+    "会计基础工作规范",
+    "会计档案管理办法",
+    "中华人民共和国审计法",
+    "注册会计师法",
+    "银行承兑汇票",
+    "商业承兑汇票",
+    "国有资本经营预算制度"
+  ],
+  "translation_config": {
+    "enabled": true,
+    "backend": "hy_mt_local",
+    "mode": "dual",
+    "cross_lang_source_query_enabled": false,
+    "model_id": "tencent/HY-MT1.5-1.8B",
+    "model_dir": "D:\\Workspace\\AI-Law-Assistant\\models\\translation\\tencent__HY-MT1.5-1.8B",
+    "device": "cpu",
+    "source_langs": [
+      "en"
+    ],
+    "target_lang": "zh"
+  },
+  "memory_use_long_hits": false,
+  "memory_enable_long_memory": false,
+  "memory_enable_short_memory": false,
+  "max_upload_mb": 50,
+  "cors_allow_origins": [
+    "http://localhost:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5173"
+  ],
+  "ui_config": {
+    "show_citation_source": false,
+    "default_theme": "dark"
+  },
+  "memory_runtime_config": {
+    "memory_module_enabled": false,
+    "memory_mode_when_disabled": "classic",
+    "memory_disable_fallback_on_error": true,
+    "memory_token_guard_enabled": true,
+    "memory_max_llm_calls_per_audit": 12,
+    "memory_max_prompt_chars_per_clause": 2400
+  },
+  "local_llm": {
+    "enabled": true,
+    "routing_enabled": true,
+    "cloud_fallback_enabled": false,
+    "timeout_sec": 30,
+    "json_repair_enabled": true,
+    "main_model": {
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "api_key": "",
+      "model": "qwen3.5:9b",
+      "temperature": 0.2,
+      "max_tokens": 2048,
+      "timeout": 30,
+      "headers": {}
+    },
+    "small_model": {
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "api_key": "",
+      "model": "llama3.2:3b",
+      "temperature": 0.1,
+      "max_tokens": 1024,
+      "timeout": 20,
+      "headers": {}
+    },
+    "routing": {
+      "task_profiles": {
+        "default": "main",
+        "contract_audit_main": "main",
+        "contract_audit_memory": "main",
+        "contract_clause_audit": "main",
+        "tax_risk_main": "main",
+        "memory_flush": "small",
+        "tax_match_small": "small",
+        "entity_extract_small": "small"
+      },
+      "tax_match_use_small_model": true,
+      "entity_extract_use_small_model": true,
+      "high_risk_force_cloud": false
+    },
+    "execution": {
+      "fallback_on_error": false,
+      "fallback_on_invalid_json": false,
+      "tax_match_cloud_review_labels": [
+        "non_compliant"
+      ],
+      "tax_match_min_confidence": 0.65,
+      "tax_match_max_workers": 2,
+      "tax_risk_max_workers": 2,
+      "entity_extract_max_workers": 4,
+      "memory_clause_force_cloud_for_priority": false,
+      "memory_flush_force_cloud": false
+    }
+  },
+  "model_preflight_check_on_startup": true,
+  "model_preflight_auto_download_on_startup": false,
+  "model_preflight_include_optional": true,
+  "model_preflight_require_all": true,
+  "deployment_profile": "lite",
+  "deployment_last_backend_port": 8000,
+  "deployment_last_frontend_port": 5173
 }

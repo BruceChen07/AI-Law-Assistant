@@ -110,8 +110,11 @@ def create_app():
                 if not bool(x.get("ok", False))
             ]
             if preflight_require_all:
+                hint = "python bin/ensure_local_models.py --types all"
+                if preflight_include_optional:
+                    hint = f"{hint} --include-optional"
                 raise RuntimeError(
-                    "local model preflight failed, run: python bin/ensure_local_models.py --types all --include-optional")
+                    f"local model preflight failed, run: {hint}")
             logger.warning("model_preflight_not_ready missing=%s", missing)
     else:
         logger.info("model_preflight_disabled")
