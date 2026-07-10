@@ -141,6 +141,14 @@ export async function adminGetOllamaModels(params = {}) {
   })
 }
 
+export async function adminGetLlamaCppModels(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/llama-cpp/models${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 // ---- LLM Trace 全链路日志接口 ----
 
 export async function adminListLLMTraces(params = {}) {

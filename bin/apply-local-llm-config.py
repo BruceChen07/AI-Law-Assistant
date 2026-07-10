@@ -4,33 +4,75 @@ import sys
 from pathlib import Path
 
 
-def build_local_llm_config(enabled: bool) -> dict:
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+DEFAULT_LLAMACPP_HOST = "http://127.0.0.1:18080"
+DEFAULT_LLAMACPP_SMALL_HOST = "http://127.0.0.1:18081"
+DEFAULT_OLLAMA_MAIN_MODEL = "qwen3.6:27b"
+DEFAULT_OLLAMA_SMALL_MODEL = "qwen3:4b"
+DEFAULT_LLAMACPP_MAIN_MODEL = "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+DEFAULT_LLAMACPP_SMALL_MODEL = "Qwen3.6-27B-Q4_0.gguf"
+
+
+def _base_url(provider: str, ollama_host: str, llamacpp_host: str) -> str:
+    provider_name = str(provider or "").strip().lower()
+    if provider_name == "ollama":
+        return f"{ollama_host.rstrip('/')}/v1"
+    return f"{llamacpp_host.rstrip('/')}/v1"
+
+
+def _model_block(
+    *,
+    provider: str,
+    api_base: str,
+    model: str,
+    temperature: float,
+    max_tokens: int,
+    timeout: int,
+) -> dict:
+    return {
+        "provider": provider,
+        "api_base": api_base,
+        "api_key": "",
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "timeout": timeout,
+        "headers": {},
+    }
+
+
+def build_local_llm_config(
+    enabled: bool,
+    *,
+    main_provider: str,
+    main_api_base: str,
+    main_model: str,
+    small_provider: str,
+    small_api_base: str,
+    small_model: str,
+) -> dict:
     return {
         "enabled": enabled,
         "routing_enabled": True,
         "allow_small_to_main_fallback": True,
-        "timeout_sec": 30,
+        "timeout_sec": 600,
         "json_repair_enabled": True,
-        "main_model": {
-            "provider": "ollama",
-            "api_base": "http://127.0.0.1:11434/v1",
-            "api_key": "",
-            "model": "qwen3.6:27b",
-            "temperature": 0.2,
-            "max_tokens": 2048,
-            "timeout": 30,
-            "headers": {},
-        },
-        "small_model": {
-            "provider": "ollama",
-            "api_base": "http://127.0.0.1:11434/v1",
-            "api_key": "",
-            "model": "qwen3:4b",
-            "temperature": 0.1,
-            "max_tokens": 1024,
-            "timeout": 20,
-            "headers": {},
-        },
+        "main_model": _model_block(
+            provider=main_provider,
+            api_base=main_api_base,
+            model=main_model,
+            temperature=0.2,
+            max_tokens=2048,
+            timeout=600,
+        ),
+        "small_model": _model_block(
+            provider=small_provider,
+            api_base=small_api_base,
+            model=small_model,
+            temperature=0.1,
+            max_tokens=1024,
+            timeout=120,
+        ),
         "routing": {
             "task_profiles": {
                 "default": "main",
@@ -70,6 +112,43 @@ def parse_args() -> argparse.Namespace:
         default=str(repo_root / "app" / "config.json"),
         help="Path to app/config.json",
     )
+    parser.add_argument(
+        "--provider",
+        choices=["ollama", "llama_cpp"],
+        default="llama_cpp",
+        help="Main local provider to activate.",
+    )
+    parser.add_argument(
+        "--small-provider",
+        choices=["ollama", "llama_cpp"],
+        default="llama_cpp",
+        help="Provider used by the small model route.",
+    )
+    parser.add_argument(
+        "--ollama-host",
+        default=DEFAULT_OLLAMA_HOST,
+        help="Base host for the local Ollama service.",
+    )
+    parser.add_argument(
+        "--llama-cpp-host",
+        default=DEFAULT_LLAMACPP_HOST,
+        help="Base host for the local llama.cpp server.",
+    )
+    parser.add_argument(
+        "--small-llama-cpp-host",
+        default=DEFAULT_LLAMACPP_SMALL_HOST,
+        help="Base host for the small-model llama.cpp server.",
+    )
+    parser.add_argument(
+        "--main-model",
+        default="",
+        help="Override the main model name/id.",
+    )
+    parser.add_argument(
+        "--small-model",
+        default="",
+        help="Override the small model name/id.",
+    )
     parser.add_argument("--disable", action="store_true",
                         help="Disable local_llm instead of enabling it.")
     parser.add_argument("--dry-run", action="store_true",
@@ -96,17 +175,37 @@ def main() -> int:
     if isinstance(config.get("local_llm"), dict):
         previous_enabled = config["local_llm"].get("enabled")
 
-    config["local_llm"] = build_local_llm_config(enabled=not args.disable)
-    config["llm_config"] = {
-        "provider": "ollama",
-        "api_base": "http://127.0.0.1:11434/v1",
-        "api_key": "",
-        "model": "qwen3.6:27b",
-        "temperature": 0.2,
-        "max_tokens": 2048,
-        "timeout": 60,
-        "headers": {},
-    }
+    main_provider = args.provider
+    small_provider = args.small_provider
+    main_api_base = _base_url(
+        main_provider, args.ollama_host, args.llama_cpp_host)
+    small_llamacpp_host = args.small_llama_cpp_host or args.llama_cpp_host
+    small_api_base = _base_url(
+        small_provider, args.ollama_host, small_llamacpp_host)
+    main_model = args.main_model or (
+        DEFAULT_LLAMACPP_MAIN_MODEL if main_provider == "llama_cpp" else DEFAULT_OLLAMA_MAIN_MODEL
+    )
+    small_model = args.small_model or (
+        DEFAULT_OLLAMA_SMALL_MODEL if small_provider == "ollama" else DEFAULT_LLAMACPP_SMALL_MODEL
+    )
+
+    config["local_llm"] = build_local_llm_config(
+        enabled=not args.disable,
+        main_provider=main_provider,
+        main_api_base=main_api_base,
+        main_model=main_model,
+        small_provider=small_provider,
+        small_api_base=small_api_base,
+        small_model=small_model,
+    )
+    config["llm_config"] = _model_block(
+        provider=main_provider,
+        api_base=main_api_base,
+        model=main_model,
+        temperature=0.2,
+        max_tokens=2048,
+        timeout=600,
+    )
     config["network_policy"] = {
         "enabled": True,
         "mode": "offline_strict",
@@ -116,6 +215,7 @@ def main() -> int:
             "localhost",
             "llm-gateway.intra",
             "ollama.intra",
+            "llamacpp.intra",
             "ocr-gateway.intra",
         ],
         "allowed_domain_suffixes": [
@@ -143,11 +243,19 @@ def main() -> int:
     if not args.disable:
         print()
         print("Enterprise offline mode is now ACTIVE:")
-        print("  Main model:  http://127.0.0.1:11434/v1 (qwen3.6:27b)")
-        print("  Small model: http://127.0.0.1:11434/v1 (qwen3:4b)")
-        print("  Fallback policy: small -> main only; no public cloud route")
+        print(f"  Main model:  {main_api_base} ({main_provider}:{main_model})")
+        print(
+            f"  Small model: {small_api_base} ({small_provider}:{small_model})")
+        print(
+            "  Runtime policy: dual llama.cpp or local-only fallback; no public cloud route")
         print()
-        print(r"Next step: stage local model assets and run python .\bin\download-local-llm-models.py --verify-only")
+        if main_provider == "llama_cpp" and small_provider == "llama_cpp":
+            print(r"Next step: start both local llama.cpp runtimes with python .\bin\start-local-llamacpp-stack.py")
+        elif main_provider == "llama_cpp":
+            print(
+                r"Next step: stage the GGUF model and run python .\bin\start-local-llamacpp-server.py")
+        else:
+            print(r"Next step: stage local model assets and run python .\bin\download-local-llm-models.py --verify-only")
     else:
         print("[OK] Local LLM mode disabled. Base internal service route only.")
 

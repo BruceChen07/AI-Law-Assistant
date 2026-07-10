@@ -1,0 +1,97 @@
+{
+  "generated_at": "2026-07-09T16:36:55.386835+00:00",
+  "config_path": "E:\\workspace\\AI-Law-Assistant\\app\\config.local-llamacpp.example.json",
+  "repo_root": "E:\\workspace\\AI-Law-Assistant",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "config_summary": {
+    "llm_provider": "llama_cpp",
+    "llm_api_base": "http://127.0.0.1:18080/v1",
+    "llm_model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "local_llm_enabled": true,
+    "main_provider": "llama_cpp",
+    "main_api_base": "http://127.0.0.1:18080/v1",
+    "main_model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "small_provider": "ollama",
+    "small_api_base": "http://127.0.0.1:11434/v1",
+    "small_model": "qwen3:4b",
+    "offline_mode": "offline_strict",
+    "allowed_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "llm-gateway.intra",
+      "ollama.intra",
+      "llamacpp.intra",
+      "ocr-gateway.intra"
+    ]
+  },
+  "config_checks": [
+    {
+      "check": "llm_config.provider == llama_cpp",
+      "ok": true,
+      "detail": "current=llama_cpp"
+    },
+    {
+      "check": "local_llm.enabled == true",
+      "ok": true,
+      "detail": "current=True"
+    },
+    {
+      "check": "local_llm.main_model.provider == llama_cpp",
+      "ok": true,
+      "detail": "current=llama_cpp"
+    },
+    {
+      "check": "network_policy.mode == offline_strict",
+      "ok": true,
+      "detail": "current=offline_strict"
+    },
+    {
+      "check": "allowed_hosts contains loopback",
+      "ok": true,
+      "detail": "current=['127.0.0.1', 'llamacpp.intra', 'llm-gateway.intra', 'localhost', 'ocr-gateway.intra', 'ollama.intra']"
+    },
+    {
+      "check": "allowed_hosts contains llamacpp.intra",
+      "ok": true,
+      "detail": "current=['127.0.0.1', 'llamacpp.intra', 'llm-gateway.intra', 'localhost', 'ocr-gateway.intra', 'ollama.intra']"
+    }
+  ],
+  "service_checks": {
+    "llama_cpp_models": {
+      "name": "llama_cpp_models",
+      "ok": false,
+      "status_code": 0,
+      "latency_ms": 2088,
+      "payload": {},
+      "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+    },
+    "ollama_models": {
+      "name": "ollama_models",
+      "ok": false,
+      "status_code": 0,
+      "latency_ms": 2036,
+      "payload": {},
+      "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+    },
+    "backend_health": {
+      "name": "backend_health",
+      "skipped": true
+    }
+  },
+  "discovered_models": {
+    "llama_cpp": [],
+    "ollama": []
+  },
+  "smoke_chat": {
+    "ok": false,
+    "status_code": 0,
+    "latency_ms": 2033,
+    "content": "",
+    "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+  },
+  "ok": false
+}

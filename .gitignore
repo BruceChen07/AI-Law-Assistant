@@ -24,6 +24,7 @@ wheels/
 venv/
 ENV/
 env/
+app/venv/
 
 # Node
 node_modules/
@@ -51,11 +52,17 @@ data/uploads/
 data/logs/
 data/memory/
 data/app.db
+data/llm_trace.db
+data/llm_traces_full/
 logs/
 log/
 models/embedding/
 models/reranker/
 models/translation/
+models/llm/
+
+# Local runtime binaries
+third_party/llama.cpp/bin-win-cpu-x64/
 
 *.onnx
 !models/embedding/zh/model.onnx

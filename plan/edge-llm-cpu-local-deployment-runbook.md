@@ -1,5 +1,14 @@
 # Edge LLM CPU Local Deployment Runbook
 
+> Update 2026-07:
+> This document is now superseded for the main-model cutover path.
+> The active local-only llama.cpp migration runbook is:
+> `plan/local-llm-llamacpp/phase-03-runtime-cutover-runbook.md`
+>
+> Reason:
+> the old version below still describes an Ollama-only topology and includes cloud fallback wording,
+> which no longer matches the approved local-only replacement direction.
+
 ## 1. Purpose
 
 This runbook describes how to prepare, start, validate, and operate the CPU-only local edge LLM deployment for this repository.

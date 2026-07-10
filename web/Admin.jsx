@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminGetOllamaModels, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminGetOllamaModels, adminGetLlamaCppModels, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import LlmTraceViewer from "./LlmTraceViewer"
 import { adminI18n } from "./i18n/adminI18n"
 
 const OLLAMA_MODEL_STORAGE_KEY = "admin.selectedOllamaModel"
+const LLAMACPP_MODEL_STORAGE_KEY = "admin.selectedLlamaCppModel"
 const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor", "llm-traces"])
 
 export default function Admin({ onBack, lang, tab: externalTab = "documents", onTabChange }) {
@@ -34,6 +35,19 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   const [ollamaSearch, setOllamaSearch] = useState("")
   const [ollamaMeta, setOllamaMeta] = useState({
     host: "http://127.0.0.1:11434",
+    cached: false,
+    stale: false,
+    current_model: "",
+    recommended_model: "",
+    cached_at: "",
+    expires_at: ""
+  })
+  const [llamaCppModels, setLlamaCppModels] = useState([])
+  const [llamaCppModelsLoading, setLlamaCppModelsLoading] = useState(false)
+  const [llamaCppModelsError, setLlamaCppModelsError] = useState("")
+  const [llamaCppSearch, setLlamaCppSearch] = useState("")
+  const [llamaCppMeta, setLlamaCppMeta] = useState({
+    host: "http://127.0.0.1:18080",
     cached: false,
     stale: false,
     current_model: "",
@@ -89,6 +103,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   const user = getCurrentUser()
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
+  const showLegacyOllamaTools = false
   
   useEffect(() => {
     const nextTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
@@ -106,7 +121,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     if (tab === "stats") loadStats()
     if (tab === "model") {
       loadLLM()
-      loadOllamaModels()
+      loadLlamaCppModels()
       loadUIConfig()
       loadVectorStoreConfig()
       loadMemoryConfig()
@@ -128,16 +143,34 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     }
   }
 
+  const readRememberedLlamaCppModel = () => {
+    try {
+      return localStorage.getItem(LLAMACPP_MODEL_STORAGE_KEY) || ""
+    } catch {
+      return ""
+    }
+  }
+
   const rememberOllamaModel = (modelName) => {
     try {
       if (modelName) localStorage.setItem(OLLAMA_MODEL_STORAGE_KEY, modelName)
     } catch {}
   }
 
+  const rememberLlamaCppModel = (modelName) => {
+    try {
+      if (modelName) localStorage.setItem(LLAMACPP_MODEL_STORAGE_KEY, modelName)
+    } catch {}
+  }
+
   const syncLlmConfigState = (data, keepApiKeyEmpty = true) => {
+    const provider = data.provider || "llama_cpp"
+    const fallbackApiBase = provider === "llama_cpp"
+      ? "http://127.0.0.1:18080/v1"
+      : "http://127.0.0.1:11434/v1"
     setLlmConfig({
-      provider: data.provider || "ollama",
-      api_base: data.api_base || "http://127.0.0.1:11434/v1",
+      provider,
+      api_base: data.api_base || fallbackApiBase,
       api_key: keepApiKeyEmpty ? "" : (data.api_key || ""),
       model: data.model || "",
       temperature: data.temperature ?? 0.2,
@@ -166,6 +199,9 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     syncLlmConfigState(saved)
     if (saved.provider === "ollama" && saved.model) {
       rememberOllamaModel(saved.model)
+    }
+    if (saved.provider === "llama_cpp" && saved.model) {
+      rememberLlamaCppModel(saved.model)
     }
     return saved
   }
@@ -241,6 +277,76 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     }
   }
 
+  const loadLlamaCppModels = async (forceRefresh = false) => {
+    setLlamaCppModelsLoading(true)
+    try {
+      const data = await adminGetLlamaCppModels(forceRefresh ? { force_refresh: "true" } : {})
+      const models = Array.isArray(data.models) ? data.models : []
+      setLlamaCppModels(models)
+      setLlamaCppMeta({
+        host: data.host || "http://127.0.0.1:18080",
+        cached: !!data.cached,
+        stale: !!data.stale,
+        current_model: data.current_model || "",
+        recommended_model: data.recommended_model || "",
+        cached_at: data.cached_at || "",
+        expires_at: data.expires_at || ""
+      })
+      setLlamaCppModelsError(data.error || "")
+      const names = models.map(item => item.name || item.model).filter(Boolean)
+      const remembered = readRememberedLlamaCppModel()
+      const fallbackModel = names.includes(remembered)
+        ? remembered
+        : names.includes(data.current_model)
+          ? data.current_model
+          : names.includes(data.recommended_model)
+            ? data.recommended_model
+            : ""
+      if (fallbackModel) {
+        setLlmConfig(prev => {
+          if (!prev) return prev
+          const currentModel = String(prev.model || "")
+          const currentValid = names.includes(currentModel)
+          if (prev.provider === "llama_cpp" && currentValid) return prev
+          if (prev.provider !== "llama_cpp" && prev.model) return prev
+          return {
+            ...prev,
+            api_base: `${String(data.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
+            model: fallbackModel
+          }
+        })
+      }
+    } catch (err) {
+      setLlamaCppModels([])
+      setLlamaCppModelsError(err.message)
+    } finally {
+      setLlamaCppModelsLoading(false)
+    }
+  }
+
+  const applyLlamaCppModel = async (modelName) => {
+    if (!llmConfig || !modelName) return
+    const nextConfig = {
+      ...llmConfig,
+      provider: "llama_cpp",
+      api_base: `${String(llamaCppMeta.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
+      api_key: "",
+      model: modelName
+    }
+    setLlmSaving(true)
+    setLlmError("")
+    setLlmConfig(nextConfig)
+    rememberLlamaCppModel(modelName)
+    try {
+      await persistLLMConfig(nextConfig)
+      setLlmError(t.saved)
+    } catch (err) {
+      setLlmError(err.message)
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
   const filteredOllamaModels = useMemo(() => {
     const keyword = String(ollamaSearch || "").trim().toLowerCase()
     if (!keyword) return ollamaModels
@@ -255,6 +361,21 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
       return haystack.includes(keyword)
     })
   }, [ollamaModels, ollamaSearch])
+
+  const filteredLlamaCppModels = useMemo(() => {
+    const keyword = String(llamaCppSearch || "").trim().toLowerCase()
+    if (!keyword) return llamaCppModels
+    return llamaCppModels.filter(item => {
+      const haystack = [
+        item.name,
+        item.model,
+        item.owner,
+        item.family,
+        item.quantization_level
+      ].join(" ").toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [llamaCppModels, llamaCppSearch])
   
   const loadDocuments = async () => {
     setLoading(true)
@@ -745,7 +866,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
           <h2>{t.llmTitle}</h2>
           {llmConfig && (
             <div className="form">
-              <div className="llm-test">
+              {showLegacyOllamaTools && <div className="llm-test">
                 <div className="row">
                   <label>{t.ollamaDetectedModels}</label>
                   <button disabled={ollamaModelsLoading} onClick={() => loadOllamaModels(true)}>
@@ -822,15 +943,90 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
                     </div>
                   </>
                 )}
+              </div>}
+              <div className="llm-test">
+                <div className="row">
+                  <label>{lang === "zh" ? "本地 llama.cpp 模型" : "Local llama.cpp Models"}</label>
+                  <button disabled={llamaCppModelsLoading} onClick={() => loadLlamaCppModels(true)}>
+                    {llamaCppModelsLoading ? (lang === "zh" ? "刷新中..." : "Refreshing...") : (lang === "zh" ? "刷新模型" : "Refresh Models")}
+                  </button>
+                </div>
+                <div className="row">
+                  <label>{lang === "zh" ? "识别状态" : "Discovery Status"}</label>
+                  <div>
+                    {llamaCppMeta.host}
+                    {llamaCppMeta.cached ? ` | ${t.ollamaCacheHit}` : ""}
+                    {llamaCppMeta.stale ? ` | ${t.ollamaCacheStale}` : ""}
+                    {llamaCppMeta.expires_at ? ` | ${t.ollamaCacheExpire}: ${formatDate(llamaCppMeta.expires_at)}` : ""}
+                  </div>
+                </div>
+                <div className="row">
+                  <label>{lang === "zh" ? "模型搜索" : "Model Search"}</label>
+                  <input
+                    value={llamaCppSearch}
+                    placeholder={lang === "zh" ? "按别名、架构或量化方式筛选" : "Filter by alias, family, or quantization"}
+                    onChange={e => setLlamaCppSearch(e.target.value)}
+                  />
+                </div>
+                {llamaCppModelsError && (
+                  <div className="row">
+                    <span className="llm-test-error">{llamaCppModelsError}</span>
+                  </div>
+                )}
+                {!!filteredLlamaCppModels.length && (
+                  <>
+                    <div className="row">
+                      <label>{lang === "zh" ? "已识别模型" : "Detected Models"}</label>
+                      <select
+                        value={llmConfig.provider === "llama_cpp" ? llmConfig.model : ""}
+                        onChange={async e => {
+                          const modelName = e.target.value
+                          setLlmConfig(prev => prev ? {
+                            ...prev,
+                            provider: "llama_cpp",
+                            api_base: `${String(llamaCppMeta.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
+                            api_key: "",
+                            model: modelName
+                          } : prev)
+                          await applyLlamaCppModel(modelName)
+                        }}
+                      >
+                        <option value="">{lang === "zh" ? "请选择模型" : "Select a model"}</option>
+                        {filteredLlamaCppModels.map(item => (
+                          <option key={item.name || item.model} value={item.name || item.model}>
+                            {item.name || item.model}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="row">
+                      <div className="llm-test-result">
+                        {filteredLlamaCppModels.map(item => {
+                          const modelName = item.name || item.model
+                          const isCurrent = llmConfig.provider === "llama_cpp" && modelName === llmConfig.model
+                          return (
+                            <div key={modelName} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid #eee" }}>
+                              <div>
+                                <strong>{modelName}</strong>
+                                <div style={{ fontSize: 12, color: "#666" }}>
+                                  {[item.family, item.quantization_level, item.owner].filter(Boolean).join(" | ") || t.ollamaMetaFallback}
+                                </div>
+                              </div>
+                              <button disabled={llmSaving && isCurrent} onClick={() => applyLlamaCppModel(modelName)}>
+                                {isCurrent ? (lang === "zh" ? "当前使用中" : "In Use") : (lang === "zh" ? "切换到此模型" : "Use This Model")}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
               <div className="row">
                 <label>{t.provider}</label>
                 <select value={llmConfig.provider} onChange={e => setLlmConfig(prev => ({ ...prev, provider: e.target.value }))}>
-                  <option value="ollama">ollama</option>
-                  <option value="openai_compatible">openai_compatible</option>
-                  <option value="openai">openai</option>
-                  <option value="qwen">qwen</option>
-                  <option value="wenxin">wenxin</option>
+                  <option value="llama_cpp">llama_cpp</option>
                 </select>
               </div>
               <div className="row">
@@ -842,7 +1038,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
                 <input
                   type="password"
                   value={llmConfig.api_key}
-                  disabled={llmConfig.provider === "ollama"}
+                  disabled={llmConfig.provider === "ollama" || llmConfig.provider === "llama_cpp"}
                   placeholder={llmHasApiKey && !llmConfig.api_key ? t.llmApiKeySavedMask : ""}
                   onChange={e => setLlmConfig(prev => ({ ...prev, api_key: e.target.value }))}
                 />

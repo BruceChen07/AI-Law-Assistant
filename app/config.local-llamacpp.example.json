@@ -1,0 +1,57 @@
+{
+    "llm_config": {
+        "provider": "llama_cpp",
+        "api_base": "http://127.0.0.1:18080/v1",
+        "api_key": "",
+        "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 600,
+        "headers": {}
+    },
+    "local_llm": {
+        "enabled": true,
+        "routing_enabled": true,
+        "allow_small_to_main_fallback": true,
+        "timeout_sec": 600,
+        "json_repair_enabled": true,
+        "main_model": {
+            "provider": "llama_cpp",
+            "api_base": "http://127.0.0.1:18080/v1",
+            "api_key": "",
+            "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "temperature": 0.2,
+            "max_tokens": 2048,
+            "timeout": 600,
+            "headers": {}
+        },
+        "small_model": {
+            "provider": "llama_cpp",
+            "api_base": "http://127.0.0.1:18081/v1",
+            "api_key": "",
+            "model": "Qwen3.6-27B-Q4_0.gguf",
+            "temperature": 0.1,
+            "max_tokens": 1024,
+            "timeout": 120,
+            "headers": {}
+        }
+    },
+    "network_policy": {
+        "enabled": true,
+        "mode": "offline_strict",
+        "allow_private_ip_ranges": true,
+        "allowed_hosts": [
+            "127.0.0.1",
+            "localhost",
+            "llm-gateway.intra",
+            "ollama.intra",
+            "llamacpp.intra",
+            "ocr-gateway.intra"
+        ],
+        "allowed_domain_suffixes": [
+            ".intra",
+            ".corp.local",
+            ".svc.cluster.local"
+        ]
+    }
+}

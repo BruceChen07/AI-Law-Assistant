@@ -1,0 +1,214 @@
+{
+  "generated_at": "2026-07-09T17:06:47.555584+00:00",
+  "config_path": "E:\\workspace\\AI-Law-Assistant\\app\\config.json",
+  "repo_root": "E:\\workspace\\AI-Law-Assistant",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "config_summary": {
+    "llm_provider": "llama_cpp",
+    "llm_api_base": "http://127.0.0.1:18080/v1",
+    "llm_model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "local_llm_enabled": true,
+    "main_provider": "llama_cpp",
+    "main_api_base": "http://127.0.0.1:18080/v1",
+    "main_model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "small_provider": "llama_cpp",
+    "small_api_base": "http://127.0.0.1:18081/v1",
+    "small_model": "Qwen3.6-27B-Q4_0.gguf",
+    "offline_mode": "offline_strict",
+    "allowed_hosts": [
+      "127.0.0.1",
+      "localhost",
+      "llm-gateway.intra",
+      "ollama.intra",
+      "llamacpp.intra",
+      "ocr-gateway.intra"
+    ]
+  },
+  "config_checks": [
+    {
+      "check": "llm_config.provider == llama_cpp",
+      "ok": true,
+      "detail": "current=llama_cpp"
+    },
+    {
+      "check": "local_llm.enabled == true",
+      "ok": true,
+      "detail": "current=True"
+    },
+    {
+      "check": "local_llm.main_model.provider == llama_cpp",
+      "ok": true,
+      "detail": "current=llama_cpp"
+    },
+    {
+      "check": "local_llm.small_model.provider == llama_cpp",
+      "ok": true,
+      "detail": "current=llama_cpp"
+    },
+    {
+      "check": "network_policy.mode == offline_strict",
+      "ok": true,
+      "detail": "current=offline_strict"
+    },
+    {
+      "check": "allowed_hosts contains loopback",
+      "ok": true,
+      "detail": "current=['127.0.0.1', 'llamacpp.intra', 'llm-gateway.intra', 'localhost', 'ocr-gateway.intra', 'ollama.intra']"
+    },
+    {
+      "check": "allowed_hosts contains llamacpp.intra",
+      "ok": true,
+      "detail": "current=['127.0.0.1', 'llamacpp.intra', 'llm-gateway.intra', 'localhost', 'ocr-gateway.intra', 'ollama.intra']"
+    }
+  ],
+  "service_checks": {
+    "llama_cpp_main_models": {
+      "name": "llama_cpp_main_models",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 81,
+      "payload": {
+        "models": [
+          {
+            "name": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "modified_at": "",
+            "size": "",
+            "digest": "",
+            "type": "model",
+            "description": "",
+            "tags": [
+              ""
+            ],
+            "capabilities": [
+              "completion"
+            ],
+            "parameters": "",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "",
+              "families": [
+                ""
+              ],
+              "parameter_size": "",
+              "quantization_level": ""
+            }
+          }
+        ],
+        "object": "list",
+        "data": [
+          {
+            "id": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+            "aliases": [
+              "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+            ],
+            "tags": [],
+            "object": "model",
+            "created": 1783616801,
+            "owned_by": "llamacpp",
+            "meta": {
+              "vocab_type": 2,
+              "n_vocab": 248320,
+              "n_ctx": 4096,
+              "n_ctx_train": 262144,
+              "n_embd": 2048,
+              "n_params": 34660610688,
+              "size": 22123538944,
+              "ftype": "Q4_K - Medium"
+            }
+          }
+        ]
+      },
+      "error": ""
+    },
+    "llama_cpp_small_models": {
+      "name": "llama_cpp_small_models",
+      "ok": true,
+      "status_code": 200,
+      "latency_ms": 0,
+      "payload": {
+        "models": [
+          {
+            "name": "Qwen3.6-27B-Q4_0.gguf",
+            "model": "Qwen3.6-27B-Q4_0.gguf",
+            "modified_at": "",
+            "size": "",
+            "digest": "",
+            "type": "model",
+            "description": "",
+            "tags": [
+              ""
+            ],
+            "capabilities": [
+              "completion"
+            ],
+            "parameters": "",
+            "details": {
+              "parent_model": "",
+              "format": "gguf",
+              "family": "",
+              "families": [
+                ""
+              ],
+              "parameter_size": "",
+              "quantization_level": ""
+            }
+          }
+        ],
+        "object": "list",
+        "data": [
+          {
+            "id": "Qwen3.6-27B-Q4_0.gguf",
+            "aliases": [
+              "Qwen3.6-27B-Q4_0.gguf"
+            ],
+            "tags": [],
+            "object": "model",
+            "created": 1783616801,
+            "owned_by": "llamacpp",
+            "meta": {
+              "vocab_type": 2,
+              "n_vocab": 248320,
+              "n_ctx": 2048,
+              "n_ctx_train": 262144,
+              "n_embd": 5120,
+              "n_params": 27320697856,
+              "size": 16045481984,
+              "ftype": "Q4_0"
+            }
+          }
+        ]
+      },
+      "error": ""
+    },
+    "backend_health": {
+      "name": "backend_health",
+      "ok": false,
+      "status_code": 0,
+      "latency_ms": 2024,
+      "payload": {},
+      "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+    }
+  },
+  "discovered_models": {
+    "llama_cpp_main": [
+      "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    ],
+    "llama_cpp_small": [
+      "Qwen3.6-27B-Q4_0.gguf"
+    ]
+  },
+  "smoke_chat": {
+    "ok": true,
+    "status_code": 200,
+    "latency_ms": 4245,
+    "content": "",
+    "error": "",
+    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+  },
+  "ok": false
+}

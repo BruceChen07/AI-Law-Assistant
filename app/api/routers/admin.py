@@ -27,6 +27,7 @@ from app.services.memory_promotion import (
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger("law_assistant")
 DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
+DEFAULT_LLAMACPP_HOST = "http://127.0.0.1:18080"
 OLLAMA_CACHE_TTL_SEC = 300
 _OLLAMA_MODELS_CACHE: Dict[str, Any] = {
     "host": "",
@@ -35,6 +36,14 @@ _OLLAMA_MODELS_CACHE: Dict[str, Any] = {
     "error": "",
 }
 _OLLAMA_MODELS_CACHE_LOCK = threading.Lock()
+LLAMACPP_CACHE_TTL_SEC = 300
+_LLAMACPP_MODELS_CACHE: Dict[str, Any] = {
+    "host": "",
+    "ts": 0.0,
+    "models": [],
+    "error": "",
+}
+_LLAMACPP_MODELS_CACHE_LOCK = threading.Lock()
 
 
 # ============ Document Models ============
@@ -109,6 +118,31 @@ class OllamaModelListResponse(BaseModel):
     current_model: str = ""
     recommended_model: str = ""
     models: List[OllamaModelItem]
+    error: str = ""
+
+
+class LlamaCppModelItem(BaseModel):
+    name: str
+    model: str
+    owner: str = ""
+    context_length: int = 0
+    size_bytes: int = 0
+    family: str = ""
+    quantization_level: str = ""
+
+
+class LlamaCppModelListResponse(BaseModel):
+    ok: bool
+    host: str
+    reachable: bool
+    cached: bool
+    stale: bool = False
+    cache_ttl_sec: int
+    cached_at: str = ""
+    expires_at: str = ""
+    current_model: str = ""
+    recommended_model: str = ""
+    models: List[LlamaCppModelItem]
     error: str = ""
 
 
@@ -244,6 +278,14 @@ def _normalize_ollama_host(value: str) -> str:
     return host.rstrip("/")
 
 
+def _normalize_openai_host(value: str, default_host: str = DEFAULT_LLAMACPP_HOST) -> str:
+    host = _clean_text(value) or default_host
+    for suffix in ("/chat/completions", "/v1/chat/completions", "/v1/completions", "/v1"):
+        if host.endswith(suffix):
+            host = host[: -len(suffix)]
+    return host.rstrip("/")
+
+
 def _iso_from_ts(ts: float) -> str:
     if not ts:
         return ""
@@ -340,11 +382,100 @@ def _get_cached_ollama_models(host: str, force_refresh: bool = False) -> Tuple[L
         return [], False, False, err, 0.0
 
 
+def _extract_llamacpp_models(payload: dict) -> List[Dict[str, Any]]:
+    rows = payload.get("data") if isinstance(payload.get("data"), list) else []
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        meta = _clean_dict(row.get("metadata"))
+        out.append({
+            "name": _clean_text(row.get("id") or row.get("model")),
+            "model": _clean_text(row.get("id") or row.get("model")),
+            "owner": _clean_text(row.get("owned_by")),
+            "context_length": int(meta.get("context_length") or meta.get("n_ctx_train") or 0),
+            "size_bytes": int(meta.get("size_bytes") or meta.get("model_size") or 0),
+            "family": _clean_text(meta.get("family") or meta.get("general.architecture")),
+            "quantization_level": _clean_text(meta.get("quantization") or meta.get("general.file_type")),
+        })
+    return sorted(out, key=lambda item: item.get("name", ""))
+
+
+def _get_cached_llamacpp_models(host: str, force_refresh: bool = False) -> Tuple[List[Dict[str, Any]], bool, bool, str, float]:
+    now = time.time()
+    with _LLAMACPP_MODELS_CACHE_LOCK:
+        cache_host = _clean_text(_LLAMACPP_MODELS_CACHE.get("host"))
+        cache_ts = float(_LLAMACPP_MODELS_CACHE.get("ts") or 0.0)
+        cache_models = list(_LLAMACPP_MODELS_CACHE.get("models") or [])
+        cache_error = _clean_text(_LLAMACPP_MODELS_CACHE.get("error"))
+        cache_ok = bool(cache_models) and cache_host == host and (
+            now - cache_ts) < LLAMACPP_CACHE_TTL_SEC
+        if cache_ok and not force_refresh:
+            return cache_models, True, False, cache_error, cache_ts
+    try:
+        response = httpx.get(f"{host}/v1/models", timeout=10)
+        response.raise_for_status()
+        models = _extract_llamacpp_models(response.json())
+        with _LLAMACPP_MODELS_CACHE_LOCK:
+            _LLAMACPP_MODELS_CACHE["host"] = host
+            _LLAMACPP_MODELS_CACHE["ts"] = now
+            _LLAMACPP_MODELS_CACHE["models"] = models
+            _LLAMACPP_MODELS_CACHE["error"] = ""
+        return models, False, False, "", now
+    except Exception as e:
+        err = f"llama.cpp models fetch failed: {str(e)}"
+        with _LLAMACPP_MODELS_CACHE_LOCK:
+            cache_host = _clean_text(_LLAMACPP_MODELS_CACHE.get("host"))
+            cache_ts = float(_LLAMACPP_MODELS_CACHE.get("ts") or 0.0)
+            cache_models = list(_LLAMACPP_MODELS_CACHE.get("models") or [])
+        if cache_models and cache_host == host:
+            return cache_models, False, True, err, cache_ts
+        return [], False, False, err, 0.0
+
+
 def _ollama_unreachable_message(llm_cfg: dict) -> str:
     configured = _normalize_ollama_host(
         _clean_text(llm_cfg.get("api_base")) or DEFAULT_OLLAMA_HOST
     )
     return f"Ollama 服务未启动或 {configured} 不可达，请先启动 Ollama 后重试。"
+
+
+def _llamacpp_unreachable_message(llm_cfg: dict) -> str:
+    configured = _normalize_openai_host(
+        _clean_text(llm_cfg.get("api_base")) or DEFAULT_LLAMACPP_HOST
+    )
+    return f"llama.cpp 服务未启动或 {configured} 不可达，请先启动 llama-server 后重试。"
+
+
+def _friendly_llm_test_error(llm_cfg: dict, raw_err: str) -> str:
+    low_err = raw_err.lower()
+    provider = _clean_text(llm_cfg.get("provider")).lower()
+    model = _clean_text(llm_cfg.get("model"))
+    configured_host = _clean_text(llm_cfg.get("api_base"))
+
+    if provider == "ollama":
+        ollama_host = _normalize_ollama_host(
+            configured_host or DEFAULT_OLLAMA_HOST)
+        if "10061" in low_err or "connection refused" in low_err:
+            return f"Ollama 服务未启动，或 {ollama_host} 不可达。请先启动本地 Ollama 后重试。"
+        if "not found" in low_err and "model" in low_err:
+            return f"Ollama 模型不存在：{model}。请先执行 `ollama pull`，或切换到已安装模型。"
+        if "timed out" in low_err or "timeout" in low_err:
+            return f"Ollama 模型响应超时：{model}。请增大超时时间，或切换到更小模型。"
+
+    if provider == "llama_cpp":
+        llamacpp_host = _normalize_openai_host(
+            configured_host or DEFAULT_LLAMACPP_HOST)
+        if "10061" in low_err or "connection refused" in low_err:
+            return f"llama.cpp 服务未启动，或 {llamacpp_host} 不可达。请先启动本地 llama-server 后重试。"
+        if "not found" in low_err and "model" in low_err:
+            return f"llama.cpp 未加载目标模型：{model}。请确认 llama-server 的 `--alias` 与管理端配置一致。"
+        if "timed out" in low_err or "timeout" in low_err:
+            return f"llama.cpp 模型响应超时：{model}。请检查 GGUF 量化规格、上下文窗口或线程参数。"
+
+    if "10061" in low_err or "connection refused" in low_err:
+        return f"LLM 接口不可达：{configured_host}。请确认当前配置指向本地端侧模型服务。"
+    return raw_err
 
 
 def _sync_llm_patch(cfg_current: dict, data: dict) -> dict:
@@ -837,7 +968,7 @@ def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: 
     )
     cfg_now = get_config()
     plain_api_key = _clean_text(data.get("api_key", ""))
-    if data.get("provider") == "ollama":
+    if data.get("provider") in {"ollama", "llama_cpp"}:
         data["api_key"] = ""
         plain_api_key = ""
     if plain_api_key and not set_llm_api_key(cfg_now, plain_api_key):
@@ -919,6 +1050,51 @@ def get_ollama_models(
         current_model=current_model,
         recommended_model=recommended_model,
         models=[OllamaModelItem(**item) for item in models],
+        error=error,
+    )
+
+
+@router.get("/llama-cpp/models", response_model=LlamaCppModelListResponse)
+def get_llamacpp_models(
+    force_refresh: bool = Query(False),
+    current_user: dict = Depends(require_admin),
+):
+    cfg = get_config()
+    effective_cfg, _source, _enabled = _effective_llm_config(cfg)
+    current_model = _clean_text(effective_cfg.get("model"))
+    provider = _clean_text(effective_cfg.get("provider")).lower()
+    configured_host = ""
+    if provider == "llama_cpp":
+        configured_host = _normalize_openai_host(
+            _clean_text(effective_cfg.get("api_base")) or DEFAULT_LLAMACPP_HOST
+        )
+    host = configured_host if configured_host else DEFAULT_LLAMACPP_HOST
+    models, cached, stale, error, cache_ts = _get_cached_llamacpp_models(
+        host, force_refresh=bool(force_refresh)
+    )
+    recommended_model = current_model or (models[0]["name"] if models else "")
+    logger.info(
+        "admin_llamacpp_models user_id=%s host=%s cached=%s stale=%s model_count=%s error=%s",
+        str(current_user.get("id") or ""),
+        host,
+        cached,
+        stale,
+        len(models),
+        error,
+    )
+    expires_at = cache_ts + LLAMACPP_CACHE_TTL_SEC if cache_ts else 0.0
+    return LlamaCppModelListResponse(
+        ok=bool(models) and not error,
+        host=host,
+        reachable=not bool(error),
+        cached=bool(cached),
+        stale=bool(stale),
+        cache_ttl_sec=LLAMACPP_CACHE_TTL_SEC,
+        cached_at=_iso_from_ts(cache_ts),
+        expires_at=_iso_from_ts(expires_at),
+        current_model=current_model,
+        recommended_model=recommended_model,
+        models=[LlamaCppModelItem(**item) for item in models],
         error=error,
     )
 
@@ -1258,18 +1434,7 @@ def test_llm(
         answer, _ = llm.chat(messages)
     except Exception as e:
         raw_err = str(e)
-        low_err = raw_err.lower()
-        user_err = raw_err
-        provider = str(llm_cfg.get("provider", "")).lower()
-        if provider == "ollama":
-            if "10061" in low_err or "connection refused" in low_err:
-                user_err = _ollama_unreachable_message(llm_cfg)
-            elif "not found" in low_err and "model" in low_err:
-                user_err = f"Ollama 模型不存在：{str(llm_cfg.get('model', ''))}。请先执行 `ollama pull` 或切换到已下载模型。"
-            elif "timed out" in low_err or "timeout" in low_err:
-                user_err = f"Ollama 模型响应超时：{str(llm_cfg.get('model', ''))}。请增大超时或切换到更小模型。"
-        elif "10061" in low_err or "connection refused" in low_err:
-            user_err = f"LLM 接口不可达：{str(llm_cfg.get('api_base', ''))}。当前项目已迁移到 Ollama，本地建议改为 http://127.0.0.1:11434/v1。"
+        user_err = _friendly_llm_test_error(llm_cfg, raw_err)
         logger.exception(
             "admin_llm_test_failed user_id=%s provider=%s api_base=%s model=%s err=%s",
             str(current_user.get("id") or ""),

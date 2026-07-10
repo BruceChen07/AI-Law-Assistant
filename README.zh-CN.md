@@ -497,3 +497,53 @@ python bin/download_embedding_model.py
 ## 许可证
 
 MIT License
+
+## 端侧 llama.cpp 本地替换说明（2026-07 更新）
+
+当前仓库已开始推进 `llama.cpp` 替换主模型运行时，目标是：
+
+- 主模型统一切换为端侧本地 `llama-server`
+- 小模型在迁移阶段可继续保留 Ollama
+- 禁止将云端大模型作为默认路径或回退路径
+
+推荐文件与入口：
+
+- 启动 `llama.cpp`：`bin/start-local-llamacpp-server.py`
+- 应用本地配置：`bin/apply-local-llm-config.py --provider llama_cpp`
+- 配置样例：`app/config.local-llamacpp.example.json`
+- 阶段记录索引：`plan/local-llm-llamacpp/README.md`
+
+推荐主模型映射：
+
+```json
+{
+  "llm_config": {
+    "provider": "llama_cpp",
+    "api_base": "http://127.0.0.1:18080/v1",
+    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+  },
+  "local_llm": {
+    "main_model": {
+      "provider": "llama_cpp",
+      "api_base": "http://127.0.0.1:18080/v1",
+      "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    },
+    "small_model": {
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "model": "qwen3:4b"
+    }
+  }
+}
+```
+
+运行约束：
+
+- `llama.cpp` 与 Ollama 都应部署在本机或企业内网
+- `network_policy.mode` 保持 `offline_strict`
+- `allowed_hosts` 至少包含 `127.0.0.1`、`localhost`、`llamacpp.intra`、`ollama.intra`
+
+说明：
+
+- 当前 Admin 页面已支持发现本地 `llama.cpp` 模型、切换模型、执行 `llm-test`
+- 详细切换步骤、测试要求与回退方案见 `plan/local-llm-llamacpp/` 下的阶段文档与 runbook

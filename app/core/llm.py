@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import httpx
 
 from app.core.llm_router import resolve_llm_route
+from app.core.llm_trace import LlmTraceCollector, get_trace_collector
 from app.core.secure_store import get_llm_api_key
 
 logger = logging.getLogger("law_assistant")
@@ -71,6 +72,9 @@ class LLMService:
         if secure_key:
             return secure_key
         return self._clean_text(os.environ.get("LLM_API_KEY", ""))
+
+    def _provider_uses_local_runtime(self, provider: str) -> bool:
+        return self._clean_text(provider).lower() in {"ollama", "llama_cpp"}
 
     def _build_base_url(self, base: str) -> str:
         s = re.sub(r"\s+", "", self._clean_text(base))
@@ -359,6 +363,8 @@ class LLMService:
         timeout: int,
         cfg: Dict[str, Any],
         extra_headers: Optional[Dict[str, str]],
+        trace_span=None,
+        trace_collector: Optional[LlmTraceCollector] = None,
     ) -> Tuple[str, Dict[str, Any]]:
         base_url = self._build_ollama_base_url(api_base)
         request_url = f"{base_url}/api/chat"
@@ -366,14 +372,28 @@ class LLMService:
         request_body = self._build_ollama_chat_body(
             model, messages, temperature, max_tokens, cfg
         )
+
+        def _try_ollama_request(_url: str, _body: Dict, _hdr: Dict, _to: int, _desc: str = "") -> Dict:
+            nonlocal trace_span, trace_collector
+            if trace_span and trace_collector:
+                trace_collector.record_thinking(trace_span)
+            return self._post_ollama_chat(_url, _body, _hdr, _to)
+
         try:
-            raw = self._post_ollama_chat(
-                request_url, request_body, request_headers, timeout
-            )
+            raw = _try_ollama_request(
+                request_url, request_body, request_headers, timeout, "primary")
         except httpx.HTTPStatusError as e:
             err_text = self._extract_http_error_text(e).lower()
             if e.response is not None and e.response.status_code == 404 and "model" in err_text and "not found" in err_text:
+                if trace_span and trace_collector:
+                    trace_collector.record_error(
+                        trace_span, error_type="model_not_found",
+                        error_message=f"ollama model not found: {model}")
                 raise RuntimeError(f"ollama model not found: {model}") from e
+            if trace_span and trace_collector:
+                trace_collector.record_error(
+                    trace_span, error_type="http_error",
+                    error_message=str(e))
             raise
         except httpx.ReadError as e:
             logger.warning(
@@ -385,15 +405,22 @@ class LLMService:
             )
             time.sleep(0.2)
             try:
-                raw = self._post_ollama_chat(
-                    request_url, request_body, request_headers, timeout
-                )
+                raw = _try_ollama_request(
+                    request_url, request_body, request_headers, timeout, "read_retry")
             except Exception as e2:
+                if trace_span and trace_collector:
+                    trace_collector.record_error(
+                        trace_span, error_type="read_error_retry_failed",
+                        error_message=str(e2))
                 raise RuntimeError(
                     f"ollama request failed after read retry: {str(e2)}"
                 ) from e2
         except httpx.TimeoutException:
             # ---- first retry: extended timeout + reduced max_tokens ----
+            if trace_span and trace_collector:
+                trace_collector.record_error(
+                    trace_span, error_type="timeout_retry_1",
+                    error_message=f"timeout after {timeout}s, retrying with extended timeout")
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 900)))
             retry_cfg = dict(cfg)
             retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
@@ -410,11 +437,14 @@ class LLMService:
                 retry_max_tokens,
             )
             try:
-                raw = self._post_ollama_chat(
-                    request_url, retry_body, request_headers, retry_timeout
-                )
+                raw = _try_ollama_request(
+                    request_url, retry_body, request_headers, retry_timeout, "retry_1")
             except httpx.TimeoutException:
                 # ---- last-chance retry: full timeout + aggressive reduction ----
+                if trace_span and trace_collector:
+                    trace_collector.record_error(
+                        trace_span, error_type="timeout_retry_2",
+                        error_message=f"timeout again after {retry_timeout}s, last-chance retry with reduced tokens")
                 last_timeout = retry_timeout
                 last_max_tokens = max(64, int(max_tokens * 0.3))
                 last_body = self._build_ollama_chat_body(
@@ -428,16 +458,22 @@ class LLMService:
                     max_tokens,
                     last_max_tokens,
                 )
-                raw = self._post_ollama_chat(
-                    request_url, last_body, request_headers, last_timeout
-                )
+                raw = _try_ollama_request(
+                    request_url, last_body, request_headers, last_timeout, "retry_2")
             except Exception as e2:
+                if trace_span and trace_collector:
+                    trace_collector.record_error(
+                        trace_span, error_type="timeout_retry_failed",
+                        error_message=str(e2))
                 raise RuntimeError(
                     f"ollama request failed after timeout retry: {str(e2)}"
                 ) from e2
         message = raw.get("message") if isinstance(
             raw.get("message"), dict) else {}
         content = str(message.get("content") or "")
+        # 捕获思考内容（部分模型如 deepseek-r1 会返回 reasoning_content）
+        thinking_content = str(message.get(
+            "reasoning_content") or message.get("thinking") or "")
         prompt_tokens = int(raw.get("prompt_eval_count") or 0)
         completion_tokens = int(raw.get("eval_count") or 0)
         parsed = {
@@ -463,6 +499,17 @@ class LLMService:
                 }
             ],
         }
+        # ---- 记录 Trace 响应 ----
+        if trace_span and trace_collector:
+            if thinking_content:
+                trace_collector.record_thinking(
+                    trace_span, thinking_content=thinking_content)
+            trace_collector.record_response(
+                trace_span,
+                content=content,
+                usage=parsed["usage"],
+                ollama_raw=raw,
+            )
         return content, parsed
 
     def _chat_via_openai_compatible(
@@ -519,6 +566,24 @@ class LLMService:
         content = message.get("content", "")
         if isinstance(content, list):
             content = json.dumps(content, ensure_ascii=False)
+        reasoning_content = message.get("reasoning_content", "")
+        if isinstance(reasoning_content, list):
+            reasoning_content = json.dumps(
+                reasoning_content, ensure_ascii=False)
+        provider_name = self._clean_text(
+            cfg.get("provider", "openai_compatible")).lower()
+        used_reasoning_fallback = False
+        if provider_name == "llama_cpp" and not str(content or "").strip() and str(reasoning_content or "").strip():
+            # Some llama.cpp + reasoning-capable templates return the full model output in
+            # `reasoning_content` while leaving `content` empty. Fallback here so the
+            # application does not treat a successful inference as a blank response.
+            content = reasoning_content
+            used_reasoning_fallback = True
+            logger.warning(
+                "llama_cpp_reasoning_content_fallback model=%s api_base=%s",
+                model,
+                api_base,
+            )
         parsed = dict(raw)
         if not isinstance(parsed.get("usage"), dict):
             parsed["usage"] = {
@@ -526,6 +591,21 @@ class LLMService:
                 "completion_tokens": 0,
                 "total_tokens": 0,
             }
+        if choices:
+            first_parsed_choice = parsed.setdefault("choices", [{}])[0]
+            if not isinstance(first_parsed_choice, dict):
+                first_parsed_choice = {}
+                parsed["choices"][0] = first_parsed_choice
+            first_parsed_message = first_parsed_choice.get("message")
+            if not isinstance(first_parsed_message, dict):
+                first_parsed_message = {}
+                first_parsed_choice["message"] = first_parsed_message
+            if reasoning_content:
+                first_parsed_message["reasoning_content"] = str(
+                    reasoning_content)
+            first_parsed_message["content"] = str(content or "")
+        if used_reasoning_fallback:
+            parsed["_used_reasoning_content_fallback"] = True
         return str(content or ""), parsed
 
     def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
@@ -534,7 +614,8 @@ class LLMService:
         api_base = self._build_base_url(str(api_base_raw or ""))
         provider = self._clean_text(
             cfg.get("provider", "openai_compatible")).lower()
-        api_key = "" if provider == "ollama" else self._resolve_api_key(cfg)
+        api_key = "" if self._provider_uses_local_runtime(
+            provider) else self._resolve_api_key(cfg)
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
         max_tokens = int(cfg.get("max_tokens", 2048))
@@ -548,6 +629,41 @@ class LLMService:
         timeout = int(cfg.get("timeout", 60))
         input_tokens_est = self._estimate_input_tokens(messages)
         t0 = time.perf_counter()
+
+        # ---- Trace: 创建 Span ----
+        trace_collector = get_trace_collector(self.cfg)
+        audit_id = str(trace_meta.get("audit_id") or "")
+        task_profile = str(route_meta.get("task_profile", "default"))
+        model_role = str(route_meta.get("selected_role", "main"))
+        stage = str(trace_meta.get("stage", "llm_call"))
+        trace_span = None
+        if trace_collector.enabled:
+            trace_span = trace_collector.new_span(
+                trace_id=str(trace_meta.get("trace_id") or ""),
+                audit_id=audit_id,
+                stage=stage,
+                task_profile=task_profile,
+                model_role=model_role,
+                span_metadata={
+                    "lang": str(trace_meta.get("lang", "")),
+                    "module": str(trace_meta.get("module", "llm")),
+                },
+            )
+            trace_collector.record_request(
+                trace_span,
+                provider=provider,
+                api_base=str(cfg.get("api_base", "")),
+                model_name=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                timeout=timeout,
+                input_tokens_est=input_tokens_est,
+            )
+            # 将 trace_id 回写 trace_meta，供调用方关联
+            trace_meta["trace_id"] = trace_span.trace_id
+            trace_meta["span_id"] = trace_span.span_id
+
         logger.info(
             "llm_request_start api_base=%s base_url=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s input_tokens_est=%s message_count=%s",
             api_base,
@@ -580,6 +696,8 @@ class LLMService:
                     timeout,
                     cfg,
                     extra_headers,
+                    trace_span=trace_span,
+                    trace_collector=trace_collector,
                 )
             else:
                 content, parsed = self._chat_via_openai_compatible(
@@ -605,6 +723,11 @@ class LLMService:
                 self._mask_secret(api_key),
                 list((extra_headers or {}).keys())
             )
+            # ---- Trace: 记录失败 ----
+            if trace_span and trace_collector.enabled:
+                latency_ms = int((time.perf_counter() - t0) * 1000)
+                trace_collector.finish_span(
+                    trace_span, status="failed", duration_ms=latency_ms)
             dns_hint = ""
             low_err = str(e).lower()
             if "getaddrinfo failed" in low_err or "name or service not known" in low_err:
@@ -628,6 +751,12 @@ class LLMService:
         total_tokens = int(usage.get("total_tokens") or (
             prompt_tokens + completion_tokens))
         latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        # ---- Trace: 记录成功 ----
+        if trace_span and trace_collector.enabled:
+            trace_collector.finish_span(
+                trace_span, status="success", duration_ms=latency_ms)
+
         logger.info(
             "llm_request_done model=%s input_tokens_est=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s",
             model,
