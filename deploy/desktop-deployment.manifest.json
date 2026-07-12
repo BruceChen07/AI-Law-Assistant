@@ -1,0 +1,78 @@
+{
+  "manifest_version": 1,
+  "generated_from_local_assets_at": "2026-07-12T00:00:00Z",
+  "allowed_download_hosts": [
+    "huggingface.co",
+    "cdn-lfs.huggingface.co",
+    "hf-mirror.com",
+    "modelscope.cn",
+    "www.modelscope.cn",
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com"
+  ],
+  "prerequisites": {
+    "python_min_version": "3.10",
+    "git_min_version": "2.40",
+    "cmake_min_version": "3.20",
+    "node_min_version": "22.0"
+  },
+  "service_defaults": {
+    "main_port": 18080,
+    "small_port": 18081,
+    "backend_port": 8000,
+    "frontend_port": 5173
+  },
+  "models": [
+    {
+      "name": "qwen_main",
+      "role": "main",
+      "relative_path": "models/llm/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+      "source_provider": "official_repo_required",
+      "source_repo": "",
+      "exact_version": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+      "parameter_scale": "35B-A3B",
+      "quantization": "Q4_K_M",
+      "sha256": "ac0e2c1189e055faa36eff361580e79c5bd6f8e76bffb4ce547f167d53e31a61",
+      "download_urls": [],
+      "notes": "Fill official Hugging Face or ModelScope GGUF URL before auto-download. Empty download_urls means verify staged asset only."
+    },
+    {
+      "name": "qwen_small",
+      "role": "small",
+      "relative_path": "models/llm/Qwen3.6-27B-Q4_0.gguf",
+      "source_provider": "official_repo_required",
+      "source_repo": "",
+      "exact_version": "Qwen3.6-27B-Q4_0.gguf",
+      "parameter_scale": "27B",
+      "quantization": "Q4_0",
+      "sha256": "20c9c45d4d25b492b82117960b5f715ef9daff75e4e14c4fb878fa3793fb379a",
+      "download_urls": [],
+      "notes": "Fill official Hugging Face or ModelScope GGUF URL before auto-download. Empty download_urls means verify staged asset only."
+    }
+  ],
+  "llama_cpp": {
+    "source": {
+      "repo": "https://github.com/ggml-org/llama.cpp",
+      "release_tag": "b9940",
+      "expected_commit": "259f2e2a531af9ed3efa7f66adaa5eb5b53da95f",
+      "notes": "Pinned to official ggml-org/llama.cpp release b9940."
+    },
+    "runtime_bundles": [
+      {
+        "name": "windows_x64",
+        "relative_path": "third_party/llama.cpp/bin-win-cpu-x64/llama-server.exe",
+        "sha256": "e3f35520ca9dcb448fc5471c881dc55059a0e5622b832213745c8e5bb71a560e",
+        "download_urls": [],
+        "archive": {
+          "filename": "llama-b9940-bin-win-cpu-x64.zip",
+          "download_urls": [
+            "https://github.com/ggml-org/llama.cpp/releases/download/b9940/llama-b9940-bin-win-cpu-x64.zip"
+          ],
+          "sha256": ""
+        },
+        "notes": "Official ggml-org release archive is configured for Windows x64 CPU bundle extraction."
+      }
+    ]
+  }
+}
