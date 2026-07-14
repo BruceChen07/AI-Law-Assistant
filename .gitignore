@@ -81,6 +81,7 @@ Thumbs.db
 
 # Config (private)
 app/config.json
+app/config.test.json
 !app/config.example.json
 
 # Runtime state

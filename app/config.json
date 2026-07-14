@@ -106,11 +106,11 @@
         },
         "small_model": {
             "provider": "llama_cpp",
-            "api_base": "http://127.0.0.1:18081/v1",
+            "api_base": "http://127.0.0.1:18080/v1",
             "api_key": "",
-            "model": "Qwen3.6-27B-Q4_0.gguf",
+            "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
             "temperature": 0.1,
-            "max_tokens": 1024,
+            "max_tokens": 512,
             "timeout": 120,
             "headers": {}
         },

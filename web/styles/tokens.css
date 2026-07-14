@@ -24,6 +24,16 @@
   --stat-card-bg: rgba(16, 19, 26, 0.8);
   --admin-panel-bg: rgba(12, 15, 22, 0.7);
   --admin-result-bg: rgba(16, 19, 26, 0.8);
+
+  /* LlmTraceViewer compatibility — bridge to app tokens */
+  --text-primary: var(--text);
+  --text-secondary: var(--muted);
+  --text-tertiary: var(--hint-text);
+  --bg-primary: var(--bg);
+  --bg-card: var(--panel);
+  --bg-input: var(--panel-2);
+  --bg-secondary: var(--stat-card-bg);
+  --border-color: var(--border);
 }
 
 :root[data-theme="light"] {
@@ -52,4 +62,14 @@
   --stat-card-bg: rgba(239, 245, 253, 0.96);
   --admin-panel-bg: rgba(241, 247, 255, 0.95);
   --admin-result-bg: rgba(246, 250, 255, 0.96);
+
+  /* LlmTraceViewer compatibility — bridge to app tokens */
+  --text-primary: var(--text);
+  --text-secondary: var(--muted);
+  --text-tertiary: var(--hint-text);
+  --bg-primary: var(--bg);
+  --bg-card: var(--panel);
+  --bg-input: var(--panel-2);
+  --bg-secondary: var(--stat-card-bg);
+  --border-color: var(--border);
 }
