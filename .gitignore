@@ -64,6 +64,9 @@ models/llm/
 # Local runtime binaries
 third_party/llama.cpp/bin-win-cpu-x64/
 
+# Deployment pre-built archives (explicitly tracked in Git for offline deployment)
+!deploy/*.zip
+
 *.onnx
 !models/embedding/zh/model.onnx
 

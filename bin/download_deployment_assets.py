@@ -66,7 +66,32 @@ def _download_single_asset(
             "path": str(target_path),
             "downloaded": False,
             "verified": True,
+            "source": "already_staged",
         }
+
+    # === Local archive priority: use bundled zip instead of downloading ===
+    local_archive_path_str = str(archive_cfg.get("local_path") or "").strip()
+    if local_archive_path_str:
+        local_archive = (ROOT / local_archive_path_str).resolve()
+        if local_archive.exists():
+            archive_sha = str(archive_cfg.get("sha256") or "").strip().lower()
+            if not archive_sha or verify_sha256(local_archive, archive_sha):
+                logger.info("using local archive: %s", local_archive)
+                extract_archive(local_archive, target_path.parent)
+                if target_path.exists() and verify_sha256(target_path, expected_sha):
+                    return {
+                        "name": asset.get("name", target_path.name),
+                        "path": str(target_path),
+                        "downloaded": False,
+                        "verified": True,
+                        "source": "local_archive",
+                    }
+                raise DeployError(
+                    f"local archive extracted but target binary verification failed: {target_path}"
+                )
+            logger.warning(
+                "local archive SHA256 mismatch, will fall back to download: %s", local_archive
+            )
 
     parts = asset.get("parts") if isinstance(asset.get("parts"), list) else []
     if parts:

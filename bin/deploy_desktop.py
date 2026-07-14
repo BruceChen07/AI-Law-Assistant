@@ -1,5 +1,6 @@
 import argparse
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -64,7 +65,7 @@ def _log_name(prefix: str) -> Path:
     return LOG_DIR / f"{prefix}-{stamp}.log"
 
 
-def _check_minimum_tooling(env_info: Dict[str, Any], skip_frontend: bool) -> None:
+def _check_minimum_tooling(env_info: Dict[str, Any], skip_frontend: bool, logger: Optional[logging.Logger] = None) -> None:
     tooling = env_info.get("tooling") or {}
     if not version_gte(str(tooling.get("python") or ""), "3.10"):
         raise DeployError(f"python 3.10+ required, current={tooling.get('python')}")
@@ -73,7 +74,12 @@ def _check_minimum_tooling(env_info: Dict[str, Any], skip_frontend: bool) -> Non
         raise DeployError(f"git 2.40+ required, current={git_version or '<missing>'}")
     cmake_version = str(tooling.get("cmake") or "")
     if not cmake_version or not version_gte(cmake_version, "3.20"):
-        raise DeployError(f"cmake 3.20+ required, current={cmake_version or '<missing>'}")
+        msg = f"cmake 3.20+ not found (current={cmake_version or '<missing>'}). " \
+              f"Source build of llama.cpp will be unavailable, but pre-built binary can still be used."
+        if logger:
+            logger.warning(msg)
+        else:
+            logging.warning(msg)
     if not skip_frontend:
         node_version = str(tooling.get("node") or "")
         if not node_version or not version_gte(node_version, "22.0"):
@@ -298,7 +304,7 @@ def main() -> int:
     try:
         env_info = detect_environment()
         build_profile = detect_llamacpp_build_profile(env_info)
-        _check_minimum_tooling(env_info, args.skip_frontend)
+        _check_minimum_tooling(env_info, args.skip_frontend, logger)
         logger.info("environment detected: %s", json.dumps(env_info, ensure_ascii=False))
         logger.info("recommended llama.cpp build profile: %s", json.dumps(build_profile, ensure_ascii=False))
 
