@@ -140,6 +140,12 @@ def parse_args() -> argparse.Namespace:
         help="Base host for the small-model llama.cpp server.",
     )
     parser.add_argument(
+        "--single-instance",
+        action="store_true",
+        default=False,
+        help="Auto-configure small model to use the same host and model as main (single-instance mode).",
+    )
+    parser.add_argument(
         "--main-model",
         default="",
         help="Override the main model name/id.",
@@ -188,6 +194,12 @@ def main() -> int:
     small_model = args.small_model or (
         DEFAULT_OLLAMA_SMALL_MODEL if small_provider == "ollama" else DEFAULT_LLAMACPP_SMALL_MODEL
     )
+
+    # Single-instance convenience: override small to match main
+    if args.single_instance:
+        small_provider = main_provider
+        small_api_base = main_api_base
+        small_model = main_model
 
     config["local_llm"] = build_local_llm_config(
         enabled=not args.disable,
@@ -241,16 +253,27 @@ def main() -> int:
     print(f"     Previous: {previous_enabled}")
 
     if not args.disable:
+        single_instance = (
+            main_provider == "llama_cpp"
+            and small_provider == "llama_cpp"
+            and main_api_base == small_api_base
+        )
         print()
         print("Enterprise offline mode is now ACTIVE:")
         print(f"  Main model:  {main_api_base} ({main_provider}:{main_model})")
         print(
             f"  Small model: {small_api_base} ({small_provider}:{small_model})")
-        print(
-            "  Runtime policy: dual llama.cpp or local-only fallback; no public cloud route")
+        if single_instance:
+            print("  Runtime policy: single-instance (small tasks auto-fallback to main)")
+        else:
+            print("  Runtime policy: dual llama.cpp or local-only fallback; no public cloud route")
         print()
-        if main_provider == "llama_cpp" and small_provider == "llama_cpp":
-            print(r"Next step: start both local llama.cpp runtimes with python .\bin\start-local-llamacpp-stack.py")
+        if single_instance:
+            print(
+                r"Next step: start the llama.cpp runtime with python .\bin\start-local-llamacpp-stack.py")
+        elif main_provider == "llama_cpp" and small_provider == "llama_cpp":
+            print(
+                r"Next step: start both local llama.cpp runtimes with python .\bin\start-local-llamacpp-stack.py --no-single-instance")
         elif main_provider == "llama_cpp":
             print(
                 r"Next step: stage the GGUF model and run python .\bin\start-local-llamacpp-server.py")

@@ -396,6 +396,14 @@ def detect_environment() -> Dict[str, Any]:
 
 def detect_tool_version(tool_name: str, cmd: List[str]) -> str:
     executable = shutil.which(cmd[0])
+    if executable and os.name == "nt" and "." not in Path(executable).suffix:
+        # On Windows, shutil.which may find an extensionless script (e.g. npm)
+        # that subprocess.run cannot execute directly. Prefer the .cmd wrapper.
+        for suffix in (".cmd", ".exe", ".bat"):
+            alt = shutil.which(f"{cmd[0]}{suffix}")
+            if alt:
+                executable = alt
+                break
     if not executable and os.name == "nt" and "." not in cmd[0]:
         for suffix in (".cmd", ".exe", ".bat"):
             executable = shutil.which(f"{cmd[0]}{suffix}")

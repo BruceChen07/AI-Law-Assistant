@@ -110,7 +110,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MODEL_NAME,
         help="Model alias returned by /v1/models and used by the app.",
     )
-    parser.add_argument("--ctx-size", type=int, default=8192,
+    parser.add_argument("--ctx-size", type=int, default=16384,
                         help="Context window size.")
     parser.add_argument("--threads", type=int, default=max(4,
                         (os.cpu_count() or 8) - 2), help="Inference threads.")

@@ -50,6 +50,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--frontend-port", type=int, default=5173, help="Frontend port.")
     parser.add_argument("--main-port", type=int, default=18080, help="Main llama.cpp port.")
     parser.add_argument("--small-port", type=int, default=18081, help="Small llama.cpp port.")
+    parser.add_argument(
+        "--single-instance",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Deploy with a single main llama.cpp instance (default: True). "
+        "Use --no-single-instance for the legacy dual-instance layout.",
+    )
     parser.add_argument("--monitor-seconds", type=int, default=300, help="Availability monitor duration after startup.")
     parser.add_argument("--skip-download", action="store_true", help="Skip asset download step.")
     parser.add_argument("--skip-frontend", action="store_true", help="Skip frontend install and startup.")
@@ -65,21 +72,21 @@ def _log_name(prefix: str) -> Path:
     return LOG_DIR / f"{prefix}-{stamp}.log"
 
 
-def _check_minimum_tooling(env_info: Dict[str, Any], skip_frontend: bool, logger: Optional[logging.Logger] = None) -> None:
+def _check_minimum_tooling(env_info: Dict[str, Any], skip_frontend: bool, require_build_tools: bool) -> None:
     tooling = env_info.get("tooling") or {}
     if not version_gte(str(tooling.get("python") or ""), "3.10"):
         raise DeployError(f"python 3.10+ required, current={tooling.get('python')}")
-    git_version = str(tooling.get("git") or "")
-    if not git_version or not version_gte(git_version, "2.40"):
-        raise DeployError(f"git 2.40+ required, current={git_version or '<missing>'}")
+    if require_build_tools:
+        git_version = str(tooling.get("git") or "")
+        if not git_version or not version_gte(git_version, "2.25"):
+            raise DeployError(f"git 2.25+ required for source verification, current={git_version or '<missing>'}")
     cmake_version = str(tooling.get("cmake") or "")
-    if not cmake_version or not version_gte(cmake_version, "3.20"):
-        msg = f"cmake 3.20+ not found (current={cmake_version or '<missing>'}). " \
-              f"Source build of llama.cpp will be unavailable, but pre-built binary can still be used."
-        if logger:
-            logger.warning(msg)
-        else:
-            logging.warning(msg)
+    if require_build_tools and (not cmake_version or not version_gte(cmake_version, "3.20")):
+        logging.warning(
+            "cmake 3.20+ not found (current=%s). "
+            "Source build of llama.cpp will be unavailable, but pre-built binary can still be used.",
+            cmake_version or "<missing>",
+        )
     if not skip_frontend:
         node_version = str(tooling.get("node") or "")
         if not node_version or not version_gte(node_version, "22.0"):
@@ -167,37 +174,49 @@ def _safe_stop_process(proc: Optional[subprocess.Popen], logger) -> None:
 
 
 def _start_llama_stack(python_exe: Path, args: argparse.Namespace, logger) -> None:
+    stack_args = [
+        "--main-port",
+        str(args.main_port),
+        "--small-port",
+        str(args.small_port),
+    ]
+    if args.single_instance:
+        stack_args.append("--single-instance")
+    else:
+        stack_args.append("--no-single-instance")
     _run_script(
         python_exe,
         ROOT / "bin" / "start-local-llamacpp-stack.py",
-        [
-            "--main-port",
-            str(args.main_port),
-            "--small-port",
-            str(args.small_port),
-        ],
+        stack_args,
         logger,
     )
     if not wait_http_ok(f"http://127.0.0.1:{args.main_port}/v1/models", 240):
         raise DeployError("main llama.cpp endpoint did not become ready")
-    if not wait_http_ok(f"http://127.0.0.1:{args.small_port}/v1/models", 240):
-        raise DeployError("small llama.cpp endpoint did not become ready")
+    if not args.single_instance:
+        if not wait_http_ok(f"http://127.0.0.1:{args.small_port}/v1/models", 240):
+            raise DeployError("small llama.cpp endpoint did not become ready")
 
 
 def _apply_local_config(python_exe: Path, args: argparse.Namespace, logger) -> None:
+    # In single-instance mode the small role shares the main endpoint and relies
+    # on allow_small_to_main_fallback; point it at the main port instead of 18081.
+    small_host_port = args.main_port if args.single_instance else args.small_port
+    config_args = [
+        "--provider",
+        "llama_cpp",
+        "--small-provider",
+        "llama_cpp",
+        "--llama-cpp-host",
+        f"http://127.0.0.1:{args.main_port}",
+        "--small-llama-cpp-host",
+        f"http://127.0.0.1:{small_host_port}",
+    ]
+    if args.single_instance:
+        config_args.append("--single-instance")
     _run_script(
         python_exe,
         ROOT / "bin" / "apply-local-llm-config.py",
-        [
-            "--provider",
-            "llama_cpp",
-            "--small-provider",
-            "llama_cpp",
-            "--llama-cpp-host",
-            f"http://127.0.0.1:{args.main_port}",
-            "--small-llama-cpp-host",
-            f"http://127.0.0.1:{args.small_port}",
-        ],
+        config_args,
         logger,
     )
 
@@ -246,7 +265,7 @@ def _monitor_services(
         state = {
             "timestamp": utc_now(),
             "llama_main_ok": http_ok(f"http://127.0.0.1:{args.main_port}/v1/models", timeout=5),
-            "llama_small_ok": http_ok(f"http://127.0.0.1:{args.small_port}/v1/models", timeout=5),
+            "llama_small_ok": True if args.single_instance else http_ok(f"http://127.0.0.1:{args.small_port}/v1/models", timeout=5),
             "backend_port_ok": is_port_open("127.0.0.1", args.backend_port),
             "backend_health_ok": http_ok(f"http://127.0.0.1:{args.backend_port}/health", timeout=5),
             "backend_pid_alive": backend_proc.poll() is None,
@@ -304,7 +323,7 @@ def main() -> int:
     try:
         env_info = detect_environment()
         build_profile = detect_llamacpp_build_profile(env_info)
-        _check_minimum_tooling(env_info, args.skip_frontend, logger)
+        _check_minimum_tooling(env_info, args.skip_frontend, require_build_tools=bool(args.source_dir))
         logger.info("environment detected: %s", json.dumps(env_info, ensure_ascii=False))
         logger.info("recommended llama.cpp build profile: %s", json.dumps(build_profile, ensure_ascii=False))
 

@@ -134,6 +134,7 @@ def _build_classic_audit(
         for it in evidence_items
         if str(it.get("citation_id") or "").strip()
     }
+    # Build whitelist (citation IDs only) for structured matching
     lines = []
     for idx, it in enumerate(list(evidence_items or [])[:24], start=1):
         cid = str(it.get("citation_id") or "").strip()
@@ -143,6 +144,29 @@ def _build_classic_audit(
             continue
         lines.append(f"- C{idx} [{cid}] {law} {article}".strip())
     whitelist_text = "\n".join(lines) if lines else "-"
+
+    # Build reference evidence text from ALL evidence items (text content, not just IDs)
+    # This ensures LLM has regulatory context even when structured fields are missing.
+    reference_lines = []
+    for idx, it in enumerate(list(evidence_items or [])[:24], start=1):
+        content = (
+            str(it.get("content") or it.get("source_text") or it.get("excerpt") or "")
+        ).strip()
+        law = str(it.get("law_title") or it.get("title") or "").strip()
+        article = str(it.get("article_no") or "").strip()
+        header = f"[E{idx}] {law} {article}".strip()
+        if content:
+            reference_lines.append(f"{header}\n{content[:1200]}")
+        elif law:
+            reference_lines.append(header)
+    reference_evidence_text = "\n\n".join(
+        reference_lines) if reference_lines else ""
+    if reference_evidence_text:
+        reference_evidence_text = (
+            "参考法规证据（共{}条）:\n".format(len(reference_lines))
+            + reference_evidence_text
+        )
+
     max_clause_chars = int(_get_memory_runtime_config(
         cfg).get("memory_max_prompt_chars_per_clause") or 2400)
     clause_lines = []
@@ -156,21 +180,21 @@ def _build_classic_audit(
 
     if norm_lang == "en":
         system = "You are a senior contract audit lawyer. Output ONLY JSON."
-        user = (
-            "Use only the contract text and whitelist evidence below.\n"
-            "Do not output reasoning process.\n"
-            f"Whitelist:\n{whitelist_text}\n\n"
-            f"Contract Clauses:\n{clause_text}\n\n"
-            "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
-        )
+        user = "Use only the contract text and reference evidence below.\n"
+        user += "Do not output reasoning process.\n"
+        if reference_evidence_text:
+            user += f"{reference_evidence_text}\n\n"
+        user += f"Whitelist (citation IDs):\n{whitelist_text}\n\n"
+        user += f"Contract Clauses:\n{clause_text}\n\n"
+        user += "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
     else:
         system = "你是资深合同审计律师。只输出JSON。"
-        user = (
-            "仅根据合同文本与白名单证据输出结果；不要输出推理过程。\n"
-            f"白名单:\n{whitelist_text}\n\n"
-            f"合同条款:\n{clause_text}\n\n"
-            "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
-        )
+        user = "仅根据合同文本与参考法规证据输出结果；不要输出推理过程。\n"
+        if reference_evidence_text:
+            user += f"{reference_evidence_text}\n\n"
+        user += f"白名单（引用ID）:\n{whitelist_text}\n\n"
+        user += f"合同条款:\n{clause_text}\n\n"
+        user += "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
 
     trace_meta = {
         "module": "contract_audit",
@@ -185,7 +209,7 @@ def _build_classic_audit(
         [{"role": "system", "content": system},
          {"role": "user", "content": user}],
         "contract_audit_main",
-        overrides={"max_tokens": 900, "enable_thinking": False, "reasoning_effort": "low",
+        overrides={"max_tokens": 2048, "enable_thinking": False, "reasoning_effort": "low",
                    "thinking_budget_tokens": 0, "_trace_meta": trace_meta},
     )
     parsed = _load_llm_json_object(result_text)
@@ -207,16 +231,21 @@ def _build_classic_audit(
         law_title = str(r.get("law_title") or "")
         article_no = str(r.get("article_no") or "")
         basis = f"{law_title} {article_no}".strip()
+        issue_text = str(r.get("issue") or "").strip()
+        evidence_text = str(r.get("evidence") or "").strip()
+        # Skip risks with completely empty content (LLM returned a skeleton without substance)
+        if len(issue_text) < 6 and len(evidence_text) < 6:
+            continue
         normalized_risks.append(
             {
                 "level": level,
-                "issue": str(r.get("issue") or ""),
+                "issue": issue_text,
                 "suggestion": str(r.get("suggestion") or ""),
                 "basis": basis,
                 "law_reference": basis,
                 "citation_id": mapped_cid,
                 "citation_status": "mapped" if mapped_cid else "unmapped",
-                "evidence": str(r.get("evidence") or ""),
+                "evidence": evidence_text,
                 "law_title": law_title,
                 "article_no": article_no,
                 "location": {
@@ -226,7 +255,7 @@ def _build_classic_audit(
                     "page_no": int(c.get("page_no") or 0),
                     "paragraph_no": str(c.get("paragraph_no") or ""),
                     "clause_path": str(c.get("clause_path") or ""),
-                    "quote": str(r.get("evidence") or ""),
+                    "quote": evidence_text,
                     "score": round(float(r.get("confidence") or 0.0), 4),
                 },
             }

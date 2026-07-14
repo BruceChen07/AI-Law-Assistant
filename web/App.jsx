@@ -90,6 +90,7 @@ export default function App() {
   const [contractLoading, setContractLoading] = useState(false)
   const [contractResult, setContractResult] = useState(null)
   const [contractMeta, setContractMeta] = useState(null)
+  const [showEvidence, setShowEvidence] = useState(false)
   const [documentId, setDocumentId] = useState("")
   const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: true })
   const [previewLoading, setPreviewLoading] = useState(false)
@@ -799,6 +800,7 @@ export default function App() {
       setContract(prev => ({ ...prev, language: detectedLang }))
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)
+      setShowEvidence(false)
       setDocumentId(nextDocumentId)
       await loadContractPreview(nextDocumentId)
     } catch (err) {
@@ -1309,11 +1311,57 @@ export default function App() {
               <span>{t.modelMeta}: {contractMeta.llm_model || "-"}</span>
               <span>{t.retrievalMode}: {contractMeta.retrieval_mode || "-"}</span>
               <span>{t.taxFocusMeta}: {contractMeta.tax_focus ? "on" : "off"}</span>
-              <span>{t.evidenceMeta}: {contractMeta.evidence_count ?? 0}</span>
+              <span
+                className={`meta-clickable${showEvidence ? " active" : ""}`}
+                role="button"
+                tabIndex={0}
+                title={t.evidenceViewHint}
+                onClick={() => setShowEvidence(v => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setShowEvidence(v => !v)
+                  }
+                }}
+              >
+                {t.evidenceMeta}: {contractMeta.evidence_count ?? 0} {showEvidence ? "▲" : "▼"}
+              </span>
               <span>{t.queryMeta}: {contractMeta.retrieval_queries ?? 0}</span>
               <span>{t.promptMeta}: {contractMeta.prompt_tokens_est ?? "-"}</span>
               <span>{t.clauseCount}: {contractMeta.preview_clause_total ?? previewMeta?.clause_total ?? "-"}</span>
               <span>ID: {documentId || "-"}</span>
+            </div>
+          )}
+          {contractMeta && showEvidence && (
+            <div className="evidence-detail-panel">
+              <div className="evidence-detail-title">
+                {t.evidenceListTitle} ({citationList.length})
+              </div>
+              {citationList.length > 0 ? (
+                <ol className="evidence-detail-list">
+                  {citationList.map((c, i) => {
+                    const title = buildCitationTitle(c)
+                    const content = getCitationContent(c)
+                    const cid = String(c?.citation_id || "").trim()
+                    return (
+                      <li key={cid || i} className="evidence-detail-item">
+                        <div className="evidence-detail-head">
+                          <span className="evidence-detail-index">E{i + 1}</span>
+                          {title && <span className="evidence-detail-law">{title}</span>}
+                          {cid && (
+                            <span className="evidence-detail-cid">
+                              {t.evidenceCidLabel}: {cid}
+                            </span>
+                          )}
+                        </div>
+                        {content && <div className="evidence-detail-body">{content}</div>}
+                      </li>
+                    )
+                  })}
+                </ol>
+              ) : (
+                <div className="empty-risk">{t.evidenceEmpty}</div>
+              )}
             </div>
           )}
         </section>
