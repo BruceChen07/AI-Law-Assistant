@@ -17,8 +17,11 @@ from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
 from app.api.routers.auth import build_router as build_auth_router
 from app.api.routers.admin import router as admin_router
+from app.api.routers.agents import build_router as build_agents_router
+from app.api.routers.capabilities import build_router as build_capabilities_router
 from app.api.routers.contracts import build_router as build_contracts_router
 from app.api.routers.tax_audit import build_router as build_tax_audit_router
+from app.services.audit_capabilities import ensure_audit_capabilities_seeded
 
 
 def init_only():
@@ -28,6 +31,7 @@ def init_only():
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
+    ensure_audit_capabilities_seeded(cfg)
 
 
 def create_app():
@@ -40,6 +44,7 @@ def create_app():
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
+    ensure_audit_capabilities_seeded(cfg)
 
     embedder = EmbeddingService(default_language=str(
         cfg.get("default_language", "zh")).lower())
@@ -162,6 +167,8 @@ def create_app():
     app.include_router(build_regulations_router(cfg))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
+    app.include_router(build_agents_router())
+    app.include_router(build_capabilities_router())
     app.include_router(build_contracts_router(cfg))
     app.include_router(build_tax_audit_router(cfg))
 

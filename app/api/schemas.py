@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 from pydantic import BaseModel
 
 
@@ -338,4 +338,55 @@ class TaxAuditPipelineRunResponse(BaseModel):
     analyze: TaxAuditContractAnalyzeResponse
     match: TaxAuditMatchRunResponse
     issues: TaxAuditIssueGenerateResponse
-    report: TaxAuditReportResponse
+    report: Optional[TaxAuditReportResponse] = None
+    runtime: Optional[dict] = None
+
+
+class TaxAuditRuntimeSessionItem(BaseModel):
+    id: str
+    contract_document_id: str
+    owner_id: str
+    operator_id: Optional[str] = None
+    agent_profile_id: Optional[str] = None
+    template_id: Optional[str] = None
+    replay_of_session_id: Optional[str] = None
+    sandbox_mode: str
+    status: str
+    request: Dict[str, Any] = {}
+    runtime: Dict[str, Any] = {}
+    result: Dict[str, Any] = {}
+    error_message: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class TaxAuditRuntimeSessionListResponse(BaseModel):
+    total: int
+    items: List[TaxAuditRuntimeSessionItem]
+
+
+class TaxAuditRuntimeSkillRunItem(BaseModel):
+    id: str
+    session_id: str
+    skill_id: str
+    stage: str
+    sandbox_mode: str
+    status: str
+    llm_cost: int
+    position_no: int
+    reason: Optional[str] = None
+    input_summary: Dict[str, Any] = {}
+    output_summary: Dict[str, Any] = {}
+    error_message: Optional[str] = None
+    started_at: str
+    finished_at: Optional[str] = None
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class TaxAuditRuntimeSkillRunListResponse(BaseModel):
+    session_id: str
+    total: int
+    items: List[TaxAuditRuntimeSkillRunItem]

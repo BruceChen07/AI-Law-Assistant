@@ -234,6 +234,58 @@ def _pick_matches_for_clause(evaluated: list[dict], top_k: int = 5) -> list[dict
     return selected + extra
 
 
+def _filter_rules_by_selectors(rules: list[dict], rule_pack_selectors: list[dict] | None) -> list[dict]:
+    if not rule_pack_selectors:
+        return list(rules)
+
+    allow_all = False
+    allowed_rule_types = set()
+    for selector in rule_pack_selectors:
+        if not isinstance(selector, dict):
+            continue
+        rule_types = selector.get("rule_types")
+        if isinstance(rule_types, list) and rule_types:
+            allowed_rule_types.update(
+                [str(item or "").strip()
+                 for item in rule_types if str(item or "").strip()]
+            )
+        else:
+            allow_all = True
+            break
+    if allow_all or not allowed_rule_types:
+        return list(rules)
+    return [
+        item for item in rules
+        if str(item.get("rule_type") or "").strip() in allowed_rule_types
+    ]
+
+
+def _summarize_and_persist_matches(cfg, contract_id: str, operator_id: str, all_matches: list[dict]) -> dict:
+    clear_clause_rule_matches_by_contract(cfg, contract_id)
+    create_clause_rule_matches(cfg, all_matches, created_by=operator_id)
+    compliant = len(
+        [x for x in all_matches if x["match_label"] == "compliant"])
+    non_compliant = len(
+        [x for x in all_matches if x["match_label"] == "non_compliant"])
+    not_mentioned = len(
+        [x for x in all_matches if x["match_label"] == "not_mentioned"])
+    logger.info(
+        "tax_match_done contract_id=%s total=%s compliant=%s non_compliant=%s not_mentioned=%s",
+        contract_id,
+        len(all_matches),
+        compliant,
+        non_compliant,
+        not_mentioned,
+    )
+    return {
+        "contract_id": contract_id,
+        "total_matches": len(all_matches),
+        "compliant_count": compliant,
+        "non_compliant_count": non_compliant,
+        "not_mentioned_count": not_mentioned,
+    }
+
+
 def match_contract_against_rules(
     cfg,
     contract_id: str,
@@ -241,6 +293,7 @@ def match_contract_against_rules(
     top_k_per_clause: int = 5,
     llm: LLMService = None,
     embedder: EmbeddingService = None,
+    rule_pack_selectors: list[dict] | None = None,
 ) -> dict:
     contract = get_tax_contract_document(cfg, contract_id)
     if not contract:
@@ -249,6 +302,7 @@ def match_contract_against_rules(
     if not clauses:
         raise ValueError("contract clauses not found, run analyze first")
     rules = list_tax_rules(cfg, limit=5000)
+    rules = _filter_rules_by_selectors(rules, rule_pack_selectors)
     if not rules:
         raise ValueError("tax rules not found, run regulation parse first")
     logger.info(
@@ -261,10 +315,18 @@ def match_contract_against_rules(
     )
 
     # 1. Initialize services
-    if embedder is None:
-        raise ValueError("embedding service is required")
-    if llm is None:
-        raise ValueError("llm service is required")
+    if embedder is None or llm is None:
+        all_matches = []
+        candidate_rules = rules[:max(
+            1, min(len(rules), int(top_k_per_clause or 1)))]
+        for clause in clauses:
+            evaluated = [
+                evaluate_clause_rule_match(clause, rule, cfg, llm)
+                for rule in candidate_rules
+            ]
+            all_matches.extend(_pick_matches_for_clause(
+                evaluated, top_k=top_k_per_clause))
+        return _summarize_and_persist_matches(cfg, contract_id, operator_id, all_matches)
 
     # 2. Get embeddings for rules
     rule_texts = [
@@ -359,26 +421,4 @@ def match_contract_against_rules(
         for matches in results:
             all_matches.extend(matches)
 
-    clear_clause_rule_matches_by_contract(cfg, contract_id)
-    create_clause_rule_matches(cfg, all_matches, created_by=operator_id)
-    compliant = len(
-        [x for x in all_matches if x["match_label"] == "compliant"])
-    non_compliant = len(
-        [x for x in all_matches if x["match_label"] == "non_compliant"])
-    not_mentioned = len(
-        [x for x in all_matches if x["match_label"] == "not_mentioned"])
-    logger.info(
-        "tax_match_done contract_id=%s total=%s compliant=%s non_compliant=%s not_mentioned=%s",
-        contract_id,
-        len(all_matches),
-        compliant,
-        non_compliant,
-        not_mentioned,
-    )
-    return {
-        "contract_id": contract_id,
-        "total_matches": len(all_matches),
-        "compliant_count": compliant,
-        "non_compliant_count": non_compliant,
-        "not_mentioned_count": not_mentioned,
-    }
+    return _summarize_and_persist_matches(cfg, contract_id, operator_id, all_matches)

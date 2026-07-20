@@ -483,6 +483,212 @@ def init_db(cfg):
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_upload_log_status ON upload_log(status)")
 
+    # Audit capability registry: skills / rule packs / templates
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_skill(
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        scene TEXT NOT NULL,
+        description TEXT,
+        owner_type TEXT NOT NULL DEFAULT 'system',
+        owner_id TEXT,
+        visibility TEXT NOT NULL DEFAULT 'public',
+        status TEXT NOT NULL DEFAULT 'active',
+        source_url TEXT,
+        reference_summary TEXT,
+        input_schema_json TEXT,
+        output_schema_json TEXT,
+        config_schema_json TEXT,
+        tags_json TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_skill_scene_status ON audit_skill(scene, status)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_skill_category ON audit_skill(category)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_rule_pack(
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        scene TEXT NOT NULL,
+        description TEXT,
+        owner_type TEXT NOT NULL DEFAULT 'system',
+        owner_id TEXT,
+        visibility TEXT NOT NULL DEFAULT 'public',
+        status TEXT NOT NULL DEFAULT 'active',
+        selector_json TEXT,
+        source_note TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_rule_pack_scene_status ON audit_rule_pack(scene, status)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_rule_pack_draft(
+        id TEXT PRIMARY KEY,
+        base_pack_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        scene TEXT NOT NULL,
+        description TEXT,
+        selector_json TEXT NOT NULL,
+        source_note TEXT,
+        change_summary TEXT,
+        status TEXT NOT NULL DEFAULT 'draft',
+        review_comment TEXT,
+        submitted_at TEXT,
+        reviewed_by TEXT,
+        reviewed_at TEXT,
+        published_version_no INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (base_pack_id) REFERENCES audit_rule_pack(id),
+        FOREIGN KEY (owner_id) REFERENCES users(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_rule_pack_draft_owner_status ON audit_rule_pack_draft(owner_id, status)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_rule_pack_draft_base_status ON audit_rule_pack_draft(base_pack_id, status)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_rule_pack_version(
+        id TEXT PRIMARY KEY,
+        pack_id TEXT NOT NULL,
+        draft_id TEXT,
+        version_no INTEGER NOT NULL,
+        display_name TEXT NOT NULL,
+        scene TEXT NOT NULL,
+        description TEXT,
+        selector_json TEXT NOT NULL,
+        source_note TEXT,
+        change_summary TEXT,
+        published_by TEXT,
+        published_at TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (pack_id) REFERENCES audit_rule_pack(id),
+        FOREIGN KEY (draft_id) REFERENCES audit_rule_pack_draft(id)
+    )
+    """)
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_rule_pack_version_pack_no ON audit_rule_pack_version(pack_id, version_no)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_rule_pack_version_pack_published ON audit_rule_pack_version(pack_id, published_at)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_template(
+        id TEXT PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        scene TEXT NOT NULL,
+        description TEXT,
+        owner_type TEXT NOT NULL DEFAULT 'system',
+        owner_id TEXT,
+        visibility TEXT NOT NULL DEFAULT 'public',
+        status TEXT NOT NULL DEFAULT 'active',
+        skill_ids_json TEXT,
+        rule_pack_ids_json TEXT,
+        max_llm_steps INTEGER NOT NULL DEFAULT 2,
+        max_skills_per_run INTEGER NOT NULL DEFAULT 6,
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_template_scene_status ON audit_template(scene, status)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS agent_profile(
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        description TEXT,
+        scene TEXT NOT NULL,
+        template_id TEXT,
+        enabled_skill_ids_json TEXT NOT NULL,
+        enabled_rule_pack_ids_json TEXT NOT NULL,
+        system_prompt TEXT,
+        max_llm_steps INTEGER NOT NULL DEFAULT 2,
+        max_skills_per_run INTEGER NOT NULL DEFAULT 6,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (owner_id) REFERENCES users(id),
+        FOREIGN KEY (template_id) REFERENCES audit_template(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_profile_owner_status ON agent_profile(owner_id, status)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agent_profile_scene ON agent_profile(scene)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_runtime_session(
+        id TEXT PRIMARY KEY,
+        contract_document_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        operator_id TEXT,
+        agent_profile_id TEXT,
+        template_id TEXT,
+        replay_of_session_id TEXT,
+        sandbox_mode TEXT NOT NULL DEFAULT 'builtin_only',
+        status TEXT NOT NULL DEFAULT 'running',
+        request_json TEXT NOT NULL,
+        runtime_json TEXT,
+        result_json TEXT,
+        error_message TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (contract_document_id) REFERENCES contract_document(id),
+        FOREIGN KEY (owner_id) REFERENCES users(id),
+        FOREIGN KEY (agent_profile_id) REFERENCES agent_profile(id),
+        FOREIGN KEY (replay_of_session_id) REFERENCES audit_runtime_session(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_runtime_session_contract_started ON audit_runtime_session(contract_document_id, started_at)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_runtime_session_owner_started ON audit_runtime_session(owner_id, started_at)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_runtime_session_replay_of ON audit_runtime_session(replay_of_session_id)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_runtime_skill_run(
+        id TEXT PRIMARY KEY,
+        session_id TEXT NOT NULL,
+        skill_id TEXT NOT NULL,
+        stage TEXT NOT NULL,
+        sandbox_mode TEXT NOT NULL DEFAULT 'builtin_only',
+        status TEXT NOT NULL,
+        llm_cost INTEGER NOT NULL DEFAULT 0,
+        position_no INTEGER NOT NULL DEFAULT 0,
+        reason TEXT,
+        input_summary_json TEXT,
+        output_summary_json TEXT,
+        error_message TEXT,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (session_id) REFERENCES audit_runtime_session(id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_runtime_skill_run_session_position ON audit_runtime_skill_run(session_id, position_no)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_runtime_skill_run_session_status ON audit_runtime_skill_run(session_id, status)")
+
     conn.commit()
     conn.close()
 

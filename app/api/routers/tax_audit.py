@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 import hashlib
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Query
 from fastapi.responses import FileResponse
 from app.api.dependencies import get_current_user, get_app_llm, get_app_embedder
 from app.api.schemas import (
@@ -27,6 +27,9 @@ from app.api.schemas import (
     TaxAuditCleanupJobListResponse,
     TaxAuditArchiveRecordListResponse,
     TaxAuditPipelineRunResponse,
+    TaxAuditRuntimeSessionItem,
+    TaxAuditRuntimeSessionListResponse,
+    TaxAuditRuntimeSkillRunListResponse,
 )
 from app.services.crud import (
     create_tax_regulation_document,
@@ -47,10 +50,16 @@ from app.services.audit_orchestrator import (
     tax_generate_issues,
     tax_build_report,
     resolve_tax_contract_language,
-    run_tax_pipeline_bundle,
 )
 from app.services.tax_lifecycle import run_tax_cleanup, retry_tax_cleanup
 from app.services.export_jobs import submit_tax_report_export_job, get_tax_report_export_job
+from app.services.tax_pipeline_runtime import (
+    get_runtime_session,
+    list_runtime_sessions,
+    list_runtime_skill_runs,
+    replay_runtime_session,
+    run_tax_pipeline_with_runtime,
+)
 
 
 ALLOWED_TAX_AUDIT_EXTENSIONS = {
@@ -246,16 +255,94 @@ def build_router(cfg):
     @router.post("/tax-audit/contracts/{contract_id}/pipeline/run", response_model=TaxAuditPipelineRunResponse)
     def run_tax_pipeline(
         contract_id: str,
+        profile_id: str = Query("", description="可选 agent profile ID"),
         current_user: dict = Depends(get_current_user),
         llm=Depends(get_app_llm),
         embedder=Depends(get_app_embedder),
     ):
         try:
             services = AuditServices(llm=llm, embedder=embedder)
-            result = run_tax_pipeline_bundle(
+            result = run_tax_pipeline_with_runtime(
                 cfg,
                 services,
                 contract_id=contract_id,
+                owner_id=current_user["id"],
+                operator_id=current_user["id"],
+                profile_id=str(profile_id or "").strip(),
+            )
+            return TaxAuditPipelineRunResponse(**result)
+        except ValueError as e:
+            msg = str(e)
+            if "not found" in msg:
+                raise HTTPException(status_code=404, detail=msg)
+            raise HTTPException(status_code=400, detail=msg)
+
+    @router.get("/tax-audit/contracts/{contract_id}/sessions", response_model=TaxAuditRuntimeSessionListResponse)
+    def list_tax_runtime_sessions(
+        contract_id: str,
+        limit: int = Query(20, ge=1, le=100),
+        current_user: dict = Depends(get_current_user),
+    ):
+        items = list_runtime_sessions(
+            cfg,
+            owner_id=current_user["id"],
+            contract_id=contract_id,
+            limit=limit,
+        )
+        return TaxAuditRuntimeSessionListResponse(total=len(items), items=items)
+
+    @router.get("/tax-audit/runtime/sessions/{session_id}", response_model=TaxAuditRuntimeSessionItem)
+    def get_tax_runtime_session(
+        session_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        item = get_runtime_session(
+            cfg,
+            session_id=session_id,
+            owner_id=current_user["id"],
+        )
+        if not item:
+            raise HTTPException(status_code=404, detail="runtime session not found")
+        return TaxAuditRuntimeSessionItem(**item)
+
+    @router.get("/tax-audit/runtime/sessions/{session_id}/skills", response_model=TaxAuditRuntimeSkillRunListResponse)
+    def list_tax_runtime_skill_runs(
+        session_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        items = list_runtime_skill_runs(
+            cfg,
+            session_id=session_id,
+            owner_id=current_user["id"],
+        )
+        if not items:
+            session = get_runtime_session(
+                cfg,
+                session_id=session_id,
+                owner_id=current_user["id"],
+            )
+            if not session:
+                raise HTTPException(status_code=404, detail="runtime session not found")
+        return TaxAuditRuntimeSkillRunListResponse(
+            session_id=session_id,
+            total=len(items),
+            items=items,
+        )
+
+    @router.post("/tax-audit/runtime/sessions/{session_id}/replay", response_model=TaxAuditPipelineRunResponse)
+    def replay_tax_runtime_session(
+        session_id: str,
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+        embedder=Depends(get_app_embedder),
+    ):
+        try:
+            services = AuditServices(llm=llm, embedder=embedder)
+            result = replay_runtime_session(
+                cfg,
+                services,
+                session_id=session_id,
+                owner_id=current_user["id"],
                 operator_id=current_user["id"],
             )
             return TaxAuditPipelineRunResponse(**result)

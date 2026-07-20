@@ -92,9 +92,6 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
         len(matches),
     )
 
-    if llm is None:
-        raise ValueError("llm service is required")
-
     def process_match(m):
         label = str(m.get("match_label") or "")
         if label not in ["non_compliant", "not_mentioned"]:
@@ -132,25 +129,32 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
         issue_text = _build_issue_text(m, english_mode=english_mode)
         suggestion = _build_suggestion(m, english_mode=english_mode)
 
-        try:
-            response, _raw, fallback_meta = call_with_fallback(
-                llm,
-                cfg,
-                [{"role": "user", "content": prompt}],
-                "tax_risk_main",
-                force_main=(
-                    label == "non_compliant" and is_high_risk_force_main(cfg)),
-                validator=lambda text, _raw: _is_valid_risk_result(
-                    parse_llm_json_object(text)),
-            )
-            result = parse_llm_json_object(response)
-            issue_text = str(result.get("issue_text") or issue_text)
-            suggestion = str(result.get("suggestion") or suggestion)
-        except Exception as e:
-            logger.error(f"LLM risk generation failed: {e}")
+        if llm is not None:
+            try:
+                response, _raw, fallback_meta = call_with_fallback(
+                    llm,
+                    cfg,
+                    [{"role": "user", "content": prompt}],
+                    "tax_risk_main",
+                    force_main=(
+                        label == "non_compliant" and is_high_risk_force_main(cfg)),
+                    validator=lambda text, _raw: _is_valid_risk_result(
+                        parse_llm_json_object(text)),
+                )
+                result = parse_llm_json_object(response)
+                issue_text = str(result.get("issue_text") or issue_text)
+                suggestion = str(result.get("suggestion") or suggestion)
+            except Exception as e:
+                logger.error(f"LLM risk generation failed: {e}")
+                fallback_meta = {
+                    "fallback_used": False,
+                    "fallback_reason": "exception",
+                    "final_model_role": "",
+                }
+        else:
             fallback_meta = {
                 "fallback_used": False,
-                "fallback_reason": "exception",
+                "fallback_reason": "no_llm_service",
                 "final_model_role": "",
             }
 

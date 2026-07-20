@@ -1098,3 +1098,35 @@ def create_evidence_anchor(
     conn.commit()
     conn.close()
     return anchor_id
+
+
+def clear_evidence_anchors_by_contract(cfg, contract_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM evidence_anchor WHERE contract_document_id=?",
+        (contract_id,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_evidence_anchors_by_contract(cfg, contract_id, limit=500):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, contract_document_id, issue_id, snapshot_hash, locator_type,
+               start_offset, end_offset, page_no, paragraph_no, clause_id, clause_path,
+               quote_text, context_before, context_after, confidence, is_stale,
+               created_by, created_at, updated_at
+        FROM evidence_anchor
+        WHERE contract_document_id=?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (contract_id, int(limit)),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
