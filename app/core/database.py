@@ -510,6 +510,66 @@ def init_db(cfg):
         "CREATE INDEX IF NOT EXISTS idx_audit_skill_scene_status ON audit_skill(scene, status)")
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_audit_skill_category ON audit_skill(category)")
+    cur.execute("PRAGMA table_info(audit_skill)")
+    skill_columns = {str(row[1]) for row in cur.fetchall()}
+    skill_extra_columns = [
+        ("publisher_name", "TEXT"),
+        ("publisher_handle", "TEXT"),
+        ("install_command", "TEXT"),
+        ("skill_md_text", "TEXT"),
+        ("skill_card_json", "TEXT"),
+        ("current_version", "TEXT"),
+        ("license_name", "TEXT"),
+        ("security_audit_status", "TEXT"),
+        ("downloads_30d", "INTEGER NOT NULL DEFAULT 0"),
+        ("downloads_all_time", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_published_at", "TEXT"),
+    ]
+    for col_name, col_type in skill_extra_columns:
+        if col_name not in skill_columns:
+            cur.execute(f"ALTER TABLE audit_skill ADD COLUMN {col_name} {col_type}")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_skill_file(
+        id TEXT PRIMARY KEY,
+        skill_id TEXT NOT NULL,
+        path TEXT NOT NULL,
+        entry_type TEXT NOT NULL DEFAULT 'file',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        branch_name TEXT,
+        content_text TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (skill_id) REFERENCES audit_skill(id)
+    )
+    """)
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_skill_file_skill_path ON audit_skill_file(skill_id, path)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_skill_file_skill_sort ON audit_skill_file(skill_id, sort_order)")
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_skill_version(
+        id TEXT PRIMARY KEY,
+        skill_id TEXT NOT NULL,
+        version_tag TEXT NOT NULL,
+        release_label TEXT,
+        published_at TEXT,
+        is_latest INTEGER NOT NULL DEFAULT 0,
+        download_url TEXT,
+        changelog_text TEXT,
+        changelog_json TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 100,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        FOREIGN KEY (skill_id) REFERENCES audit_skill(id)
+    )
+    """)
+    cur.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_skill_version_skill_tag ON audit_skill_version(skill_id, version_tag)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_skill_version_skill_sort ON audit_skill_version(skill_id, sort_order)")
 
     cur.execute("""
     CREATE TABLE IF NOT EXISTS audit_rule_pack(
