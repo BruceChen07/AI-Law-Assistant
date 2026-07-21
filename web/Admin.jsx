@@ -217,6 +217,9 @@ export default function Admin({ onBack, lang }) {
     templateDocPath: t.skillTemplateDocPath,
     basicSection: t.skillBasicSection,
     detailSection: t.skillDetailSection,
+    tab_basic: t.skillTabBasic,
+    tab_publishing: t.skillTabPublishing,
+    tab_schema: t.skillTabSchema,
     tab_overview: t.skillTab_overview,
     tab_skill_md: t.skillTab_skill_md,
     tab_skill_card: t.skillTab_skill_card,
@@ -272,7 +275,9 @@ export default function Admin({ onBack, lang }) {
     hintSkillCard: t.skillHintSkillCard,
     hintFiles: t.skillHintFiles,
     hintVersions: t.skillHintVersions,
-    hintChangelog: t.skillHintChangelog
+    hintChangelog: t.skillHintChangelog,
+    guideExpand: t.skillGuideExpand,
+    guideCollapse: t.skillGuideCollapse
   }
   
   useEffect(() => {
