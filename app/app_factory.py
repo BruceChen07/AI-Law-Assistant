@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_config, ensure_dirs, get_config_path
 from app.core.logger import setup_logging, get_pipeline_logger
 from app.core.database import init_db, ensure_embedding_columns
+from app.core.auth import ensure_default_admin
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
 from app.core.llm import LLMService
@@ -32,6 +33,8 @@ def init_only():
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
     ensure_audit_capabilities_seeded(cfg)
+    # Bootstrap default admin
+    ensure_default_admin(cfg)
 
 
 def create_app():
@@ -45,6 +48,12 @@ def create_app():
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
     ensure_audit_capabilities_seeded(cfg)
+
+    # Bootstrap: ensure at least one admin user always exists
+    admin_bootstrap = ensure_default_admin(cfg, logger)
+    if admin_bootstrap["action"] != "skip":
+        logger.warning("bootstrap_admin action=%s username=%s",
+                       admin_bootstrap["action"], admin_bootstrap.get("username", ""))
 
     embedder = EmbeddingService(default_language=str(
         cfg.get("default_language", "zh")).lower())

@@ -182,6 +182,22 @@ def update_user_role(user_id: str, role: str) -> bool:
     return affected > 0
 
 
+def update_user_password(user_id: str, password: str) -> bool:
+    from app.core.config import get_config
+
+    cfg = get_config()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
+        (hash_password(password), datetime.now(timezone.utc).isoformat(), user_id),
+    )
+    conn.commit()
+    affected = cur.rowcount
+    conn.close()
+    return affected > 0
+
+
 def log_audit(user_id: str, action: str, resource_type: str = None, resource_id: str = None,
               ip_address: str = None, user_agent: str = None, details: str = None):
     from app.core.config import get_config
@@ -198,3 +214,92 @@ def log_audit(user_id: str, action: str, resource_type: str = None, resource_id:
     """, (log_id, user_id, action, resource_type, resource_id, ip_address, user_agent, details, now))
     conn.commit()
     conn.close()
+
+
+def count_admin_users() -> int:
+    """Count users with admin role."""
+    from app.core.config import get_config
+
+    cfg = get_config()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1")
+    row = cur.fetchone()
+    conn.close()
+    return row[0] if row else 0
+
+
+def ensure_default_admin(cfg: dict = None, logger=None) -> dict:
+    """
+    Ensure at least one admin user exists in the database.
+    Creates a default admin account if no admin users are found.
+    Returns dict with info about what was done.
+    """
+    if cfg is None:
+        from app.core.config import get_config
+        cfg = get_config()
+
+    default_username = "admin"
+    default_password = "adminMars654321"
+    default_email = "admin@local.internal"
+    placeholder_emails = {default_email, "admin@example.com"}
+
+    admin_count = count_admin_users()
+
+    try:
+        existing_default = get_user_by_username(default_username)
+        if (
+            admin_count > 0
+            and existing_default
+            and existing_default.get("role") == "admin"
+            and existing_default.get("is_active", 1)
+            and str(existing_default.get("email") or "").strip().lower() in placeholder_emails
+            and not verify_password(default_password, existing_default["password_hash"])
+        ):
+            update_user_password(existing_default["id"], default_password)
+            msg = (
+                f"Synchronized default admin password for '{default_username}' "
+                f"to the current bootstrap default"
+            )
+            if logger:
+                logger.warning("bootstrap_admin %s", msg)
+            return {"action": "sync_password", "username": default_username, "message": msg}
+
+        if admin_count > 0:
+            return {"action": "skip", "reason": f"{admin_count} admin user(s) already exist"}
+
+        # No admin exists - try to upgrade known users first, then create default
+        # Priority 1: upgrade existing user "bruce" to admin
+        bruce = get_user_by_username("bruce")
+        if bruce:
+            update_user_role(bruce["id"], "admin")
+            msg = f"Upgraded existing user 'bruce' to admin role"
+            if logger:
+                logger.warning("bootstrap_admin %s", msg)
+            return {"action": "upgrade", "username": "bruce", "message": msg}
+
+        # Priority 2: if user "admin" exists but not admin role, upgrade it
+        if existing_default:
+            update_user_role(existing_default["id"], "admin")
+            if not verify_password(default_password, existing_default["password_hash"]):
+                update_user_password(existing_default["id"], default_password)
+            msg = f"Upgraded existing user '{default_username}' to admin role"
+            if logger:
+                logger.warning("bootstrap_admin %s", msg)
+            return {"action": "upgrade", "username": default_username, "message": msg}
+
+        # Priority 3: create brand new default admin account
+        create_user(default_username, default_email,
+                    default_password, role="admin")
+        msg = (f"Created default admin account: username='{default_username}' "
+               f"password='{default_password}' - CHANGE THIS PASSWORD IMMEDIATELY")
+        if logger:
+            logger.warning("bootstrap_admin %s", msg)
+        return {"action": "create", "username": default_username, "message": msg}
+
+    except Exception as e:
+        err_msg = f"Failed to ensure default admin: {e}"
+        if logger:
+            logger.error("bootstrap_admin %s", err_msg)
+        return {"action": "error", "message": err_msg}
