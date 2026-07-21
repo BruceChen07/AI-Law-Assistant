@@ -178,22 +178,31 @@ def _build_classic_audit(
     clause_text = "\n\n".join(clause_lines) if clause_lines else str(
         text or "")[:max_clause_chars]
 
+    # Full contract text for cross-clause joint analysis (Classic mode)
+    full_ctx_budget = max(1500, int(cfg.get("memory_full_context_budget_chars") or 6000))
+    full_text_context = str(text or "")[:full_ctx_budget]
+
     if norm_lang == "en":
         system = "You are a senior contract audit lawyer. Output ONLY JSON."
         user = "Use only the contract text and reference evidence below.\n"
         user += "Do not output reasoning process.\n"
+        user += "CROSS-CLAUSE RULE: Before flagging 'missing/unspecified' risks, verify against the full contract text. "
+        user += "If the element is covered elsewhere in the contract, do NOT flag it.\n"
         if reference_evidence_text:
             user += f"{reference_evidence_text}\n\n"
         user += f"Whitelist (citation IDs):\n{whitelist_text}\n\n"
-        user += f"Contract Clauses:\n{clause_text}\n\n"
+        user += f"Full Contract Text (for cross-clause verification):\n{full_text_context}\n\n"
+        user += f"Contract Clauses (structured):\n{clause_text}\n\n"
         user += "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
     else:
         system = "你是资深合同审计律师。只输出JSON。"
         user = "仅根据合同文本与参考法规证据输出结果；不要输出推理过程。\n"
+        user += "【跨条款联合校验】标记'缺失/未约定'风险前，必须核查合同全文。若该要素已在其他条款中约定，不得标记为风险。\n"
         if reference_evidence_text:
             user += f"{reference_evidence_text}\n\n"
         user += f"白名单（引用ID）:\n{whitelist_text}\n\n"
-        user += f"合同条款:\n{clause_text}\n\n"
+        user += f"合同全文(用于跨条款联合校验):\n{full_text_context}\n\n"
+        user += f"合同条款(结构化拆分):\n{clause_text}\n\n"
         user += "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
 
     trace_meta = {
@@ -394,6 +403,33 @@ def audit_contract(
                 lang=lang, audit_id=audit_id, trace_id=trace_id)
     text, meta = extract_text_with_config(cfg, file_path)
     preview_clauses = build_preview_clauses(text)
+
+    # Auto-generate internal markdown file for full-text LLM analysis.
+    # This file is stored in a hidden internal directory (.audit_internal/)
+    # and is NOT exposed to end users. It serves as intermediate material
+    # for the LLM's cross-clause joint analysis and subsequent data processing.
+    _internal_md_path = ""
+    try:
+        from app.services.markdown_export import contract_text_to_markdown
+        internal_dir = os.path.join(
+            cfg.get("data_dir", "data"), ".audit_internal")
+        os.makedirs(internal_dir, exist_ok=True)
+        source_name = os.path.basename(file_path)
+        md_filename = f"{audit_id}_{os.path.splitext(source_name)[0]}.md"
+        _internal_md_path = os.path.join(internal_dir, md_filename)
+        md_content = contract_text_to_markdown(
+            text=text,
+            source_filename=source_name,
+            meta=meta,
+            include_metadata_header=True,
+        )
+        with open(_internal_md_path, "w", encoding="utf-8") as _mf:
+            _mf.write(md_content)
+        logger.info("audit_internal_md_generated",
+                    path=_internal_md_path, length=len(md_content))
+    except Exception as _md_err:
+        logger.warning("audit_internal_md_failed", error=str(_md_err))
+
     logger.info(
         "audit_extract_done",
         file=file_path,

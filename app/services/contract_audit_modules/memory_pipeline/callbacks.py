@@ -113,6 +113,7 @@ def create_memory_callbacks(
     citation_alias_map: Dict[str, str],
     round_runtime: Dict[str, Any],
     write_round: Callable[[str, Dict[str, Any], int], None],
+    full_contract_context: str = "",
 ) -> Tuple[Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]], Callable[[str], Awaitable[str]]]:
     risk_detection_mode = str(retrieval_opts.get(
         "risk_detection_mode", "relaxed"))
@@ -216,6 +217,7 @@ def create_memory_callbacks(
             long_memory_block=long_memory_block,
             clause_title=clause_title,
             clause_text=clause_text,
+            full_contract_context=full_contract_context,
         )
         clause_trace_meta = {
             **base_trace_meta,

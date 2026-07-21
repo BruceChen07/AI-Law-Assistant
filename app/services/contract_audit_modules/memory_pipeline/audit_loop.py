@@ -224,6 +224,15 @@ def execute_memory_audit(
     )
     workflow_memory_block = format_workflow_memories(
         workflow_memories, norm_lang)
+
+    # Build condensed full-contract context for cross-clause joint analysis.
+    # Since user contracts are typically short, we include the full text (with a
+    # configurable budget) so the LLM can verify whether a "missing" element
+    # is actually covered elsewhere in the contract.
+    full_ctx_budget = max(
+        1500, int(cfg.get("memory_full_context_budget_chars") or 6000))
+    full_contract_context = str(text or "")[:full_ctx_budget]
+
     clause_priority_index = build_clause_priority_index(preview_clauses)
     preview_order_map: Dict[str,
                             int] = clause_priority_index["preview_order_map"]
@@ -319,6 +328,7 @@ def execute_memory_audit(
         citation_alias_map=citation_alias_map,
         round_runtime=round_runtime,
         write_round=_write_round,
+        full_contract_context=full_contract_context,
     )
 
     report = run_coro_sync(manager.audit_contract(
