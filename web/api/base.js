@@ -1,4 +1,4 @@
-export let API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000"
+export let API_BASE = import.meta.env.VITE_API_BASE || ""
 const API_REQUEST_TIMEOUT_MS = 8000
 const API_LONG_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
 const API_CONTRACT_AUDIT_TIMEOUT_MS = 60 * 60 * 1000

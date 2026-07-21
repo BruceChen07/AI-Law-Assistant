@@ -11,8 +11,34 @@ from urllib.parse import urlsplit
 
 
 DEFAULT_SERVER_HOST = "http://127.0.0.1:18080"
-DEFAULT_MODEL_NAME = "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
-DEFAULT_MODEL_PATH = Path("../models/llm") / DEFAULT_MODEL_NAME
+
+
+def _scan_gguf_models(model_dir: Path) -> list[Path]:
+    """Scan model_dir for *.gguf files, sorted by name."""
+    if not model_dir.is_dir():
+        return []
+    return sorted(
+        [p for p in model_dir.iterdir() if p.suffix.lower() == ".gguf"],
+        key=lambda p: p.name.lower(),
+    )
+
+
+def _select_model_interactive(candidates: list[Path]) -> Path:
+    """Prompt the user to select a model from the list."""
+    print("Available GGUF models in models/llm/:")
+    for idx, p in enumerate(candidates, start=1):
+        size_mb = p.stat().st_size / (1024 * 1024)
+        print(f"  [{idx}] {p.name}  ({size_mb:.0f} MB)")
+    print()
+    while True:
+        try:
+            choice = input(f"Select model [1-{len(candidates)}]: ").strip()
+            idx = int(choice)
+            if 1 <= idx <= len(candidates):
+                return candidates[idx - 1]
+        except ValueError:
+            pass
+        print(f"Please enter a number between 1 and {len(candidates)}.")
 
 
 def _build_url(base: str, path: str) -> str:
@@ -102,13 +128,18 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--model-path",
-        default=str((repo_root / DEFAULT_MODEL_PATH).resolve()),
-        help="Path to the GGUF model file.",
+        default="",
+        help="Path to the GGUF model file. If not provided, interactively select from models/llm/.",
+    )
+    parser.add_argument(
+        "--model-dir",
+        default=str(repo_root / "models" / "llm"),
+        help="Directory to scan for GGUF models (used when --model-path is empty).",
     )
     parser.add_argument(
         "--alias",
-        default=DEFAULT_MODEL_NAME,
-        help="Model alias returned by /v1/models and used by the app.",
+        default="",
+        help="Model alias returned by /v1/models. Defaults to the GGUF filename.",
     )
     parser.add_argument("--ctx-size", type=int, default=16384,
                         help="Context window size.")
@@ -144,11 +175,28 @@ def main() -> int:
         print(f"[ERROR] {exc}")
         return 1
 
-    model_path = Path(args.model_path).resolve()
+    # Resolve model path: explicit arg, or interactive scan
+    if args.model_path:
+        model_path = Path(args.model_path).resolve()
+    else:
+        model_dir = Path(args.model_dir).resolve()
+        candidates = _scan_gguf_models(model_dir)
+        if not candidates:
+            print(f"[ERROR] No GGUF files found in: {model_dir}")
+            print("Place a GGUF model in models/llm/ or use --model-path.")
+            return 1
+        if len(candidates) == 1:
+            model_path = candidates[0]
+            print(f"Auto-selected single model: {model_path.name}")
+        else:
+            model_path = _select_model_interactive(candidates)
     if not model_path.exists():
         print(f"[ERROR] GGUF model not found: {model_path}")
         print("Place the local model on disk first. No cloud download route is used by this script.")
         return 1
+
+    # Default alias to filename without .gguf extension
+    alias = args.alias.strip() or model_path.stem
 
     server_exe = _find_server_executable(args.server_exe)
     if not server_exe:
@@ -160,7 +208,7 @@ def main() -> int:
         print("=== llama.cpp Startup ===")
         print("llama.cpp API is already reachable.")
         print(f"Host: {args.host_url}")
-        print(f"Model alias: {args.alias}")
+        print(f"Model alias: {alias}")
         return 0
 
     log_dir = repo_root / "logs" / "local-llm"
@@ -174,7 +222,7 @@ def main() -> int:
         "--model",
         str(model_path),
         "--alias",
-        args.alias,
+        alias,
         "--ctx-size",
         str(max(1024, args.ctx_size)),
         "--threads",
@@ -200,7 +248,7 @@ def main() -> int:
     print(f"Executable: {server_exe}")
     print(f"Host: {args.host_url}")
     print(f"Model: {model_path}")
-    print(f"Alias: {args.alias}")
+    print(f"Alias: {alias}")
     print(
         json.dumps(
             {
@@ -235,7 +283,7 @@ def main() -> int:
     print()
     print("=== llama.cpp Ready ===")
     print(f"Endpoint: {args.host_url.rstrip('/')}/v1")
-    print(f"Model alias: {args.alias}")
+    print(f"Model alias: {alias}")
     print(r"Next step: python .\bin\apply-local-llm-config.py --provider llama_cpp")
     print("Then start the app services:")
     print("  Backend:  python -m app.main")
