@@ -159,6 +159,61 @@ def split_articles(text):
     return items
 
 
+def extract_regulation_title(text: str) -> str:
+    """Extract regulation title from document text when title is not provided.
+
+    Tries multiple strategies:
+    1. Header text before the first '第X条' (law title is usually there)
+    2. Reference patterns in article content (e.g., '根据《XXX》')
+    3. First non-empty line of the document
+    """
+    if not text or not text.strip():
+        return ""
+    text = re.sub(r"\r\n", "\n", text)
+
+    # Strategy 1: Header text before first article
+    header_match = re.split(
+        r"(?m)^\s*第[一二三四五六七八九十百千0-9]+条", text, maxsplit=1
+    )
+    header = header_match[0].strip() if header_match else ""
+    if header:
+        # Look for known patterns in the header
+        patterns = [
+            r"中华人民共和国[\u4e00-\u9fff]{2,20}(?:法|法实施条例|条例|管理办法|规定|办法)",
+            r"[\u4e00-\u9fff]{4,20}(?:法|条例|管理办法|规定|办法|规则|制度)",
+        ]
+        for pat in patterns:
+            m = re.search(pat, header)
+            if m:
+                return m.group(0).strip()
+        # If header is a single clean line, use it
+        header_lines = [l.strip() for l in header.split("\n") if l.strip()]
+        if len(header_lines) == 1 and 4 <= len(header_lines[0]) <= 60:
+            return header_lines[0]
+
+    # Strategy 2: Reference patterns in first few articles
+    first_articles = text[:2000]
+    ref_match = re.search(
+        r"《(中华人民共和国[\u4e00-\u9fff]{2,20}(?:法|法实施条例|条例|管理办法))》",
+        first_articles,
+    )
+    if ref_match:
+        return ref_match.group(1)
+
+    # Strategy 3: Look for '制定本办法' / '制定本条例' → extract from context
+    method_match = re.search(
+        r"根据[\u4e00-\u9fff\s]*?(([\u4e00-\u9fff]{4,20}(?:法|条例|管理办法|规定|办法)))",
+        first_articles,
+    )
+    if method_match:
+        title = method_match.group(1)
+        if not title.startswith("中华人民共和国") and re.search(r"(?:法|条例)$", title):
+            title = f"中华人民共和国{title}"
+        return title
+
+    return ""
+
+
 def _init_jieba() -> None:
     global _JIEBA_READY, _JIEBA_HMM_ENABLED
     if _JIEBA_READY:

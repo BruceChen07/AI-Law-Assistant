@@ -1,7 +1,8 @@
 import logging
+import os
 import time
 from datetime import datetime
-from app.core.utils import extract_text_with_config, split_articles
+from app.core.utils import extract_text_with_config, split_articles, extract_regulation_title
 from app.core.logger import get_pipeline_logger
 from app.services.crud import create_regulation, create_version, insert_articles, upsert_job
 from app.services.tax_contract_parser import detect_text_language
@@ -26,6 +27,20 @@ def process_import(cfg, embedder, job_id, file_path, title, doc_no, issuer, reg_
         rag_logger.info(
             "class=%s stage=extract_done job_id=%s chars=%s cost_ms=%s",
             class_name, job_id, len(str(text or "")), int((time.perf_counter() - t_extract) * 1000))
+
+        # Auto-extract title if empty
+        if not title or not title.strip():
+            extracted_title = extract_regulation_title(text)
+            if extracted_title:
+                title = extracted_title
+                logger.info("import_title_auto_extracted job_id=%s title=%s", job_id, title)
+                rag_logger.info(
+                    "class=%s stage=title_auto_extracted job_id=%s title=%s",
+                    class_name, job_id, title)
+            else:
+                # Fallback: use filename without extension
+                title = os.path.splitext(os.path.basename(file_path))[0]
+                logger.warning("import_title_fallback_filename job_id=%s title=%s", job_id, title)
 
         # Auto-detect language to avoid mismatch when UI language differs from doc language
         actual_lang = detect_text_language(text, default=language)
