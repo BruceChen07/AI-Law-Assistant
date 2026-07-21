@@ -110,6 +110,558 @@ def _normalize_rule_selector(selector: Any) -> Dict[str, Any]:
     return normalized
 
 
+def _skill_file(
+    path: str,
+    *,
+    entry_type: str = "file",
+    content_text: str = "",
+    size_bytes: Optional[int] = None,
+    branch_name: str = "main",
+    sort_order: int = 100,
+) -> Dict[str, Any]:
+    encoded_size = len(str(content_text or "").encode("utf-8"))
+    return {
+        "path": path,
+        "entry_type": entry_type,
+        "content_text": content_text,
+        "size_bytes": int(size_bytes if size_bytes is not None else encoded_size),
+        "branch_name": branch_name if entry_type == "file" else "",
+        "sort_order": sort_order,
+    }
+
+
+def _skill_version(
+    version_tag: str,
+    *,
+    published_at: str = "",
+    is_latest: bool = True,
+    download_url: str = "",
+    changelog_items: Optional[List[str]] = None,
+    sort_order: int = 100,
+) -> Dict[str, Any]:
+    items = [str(item).strip()
+             for item in (changelog_items or []) if str(item).strip()]
+    return {
+        "version_tag": version_tag,
+        "release_label": "Latest" if is_latest else "",
+        "published_at": published_at,
+        "is_latest": bool(is_latest),
+        "download_url": download_url,
+        "changelog_text": "\n".join(f"- {item}" for item in items),
+        "changelog_json": items,
+        "sort_order": sort_order,
+    }
+
+
+def _skill_card(
+    *,
+    overview: str,
+    publisher_name: str,
+    publisher_handle: str,
+    version: str,
+    license_name: str,
+    geography: Optional[List[str]] = None,
+    use_type: str = "",
+    use_case: str = "",
+    review_before_use: Optional[List[Dict[str, str]]] = None,
+    ethical_considerations: str = "",
+    output_behavior: Optional[Dict[str, Any]] = None,
+    references: Optional[List[Dict[str, str]]] = None,
+) -> Dict[str, Any]:
+    return {
+        "overview": overview,
+        "publisher_name": publisher_name,
+        "publisher_handle": publisher_handle,
+        "version": version,
+        "license_name": license_name,
+        "geography": geography or [],
+        "use_type": use_type,
+        "use_case": use_case,
+        "review_before_use": review_before_use or [],
+        "ethical_considerations": ethical_considerations,
+        "output_behavior": output_behavior or {},
+        "references": references or [],
+    }
+
+
+def _build_default_skill_md(item: Dict[str, Any]) -> str:
+    display_name = str(item.get("display_name") or item.get("id") or "Skill")
+    description = str(item.get("description") or "").strip()
+    reference_summary = str(item.get("reference_summary") or "").strip()
+    source_url = str(item.get("source_url") or "").strip()
+    tags = _safe_json_loads(item.get("tags_json", "[]"), [])
+    tag_line = ", ".join(tags) if tags else "N/A"
+    lines = [
+        f"# {display_name}",
+        "",
+        "## Overview",
+        description or "暂无补充说明。",
+    ]
+    if reference_summary:
+        lines.extend(["", "## Reference Summary", reference_summary])
+    lines.extend([
+        "",
+        "## Metadata",
+        f"- Skill ID: `{item.get('id', '')}`",
+        f"- Category: `{item.get('category', '')}`",
+        f"- Scene: `{item.get('scene', '')}`",
+        f"- Tags: {tag_line}",
+    ])
+    if source_url:
+        lines.append(f"- Source URL: {source_url}")
+    return "\n".join(lines).strip() + "\n"
+
+
+def _build_default_skill_detail(item: Dict[str, Any]) -> Dict[str, Any]:
+    skill_md_text = _build_default_skill_md(item)
+    display_name = str(item.get("display_name") or item.get("id") or "Skill")
+    source_url = str(item.get("source_url") or "").strip()
+    references = []
+    if source_url:
+        references.append(
+            {"label": "Source URL", "url": source_url, "type": "external"})
+    references.append(
+        {"label": "SKILL.md", "url": "SKILL.md", "type": "internal"})
+    card = _skill_card(
+        overview=str(item.get("description") or "").strip(
+        ) or f"{display_name} 的结构化能力说明。",
+        publisher_name="AI-Law-Assistant",
+        publisher_handle="@system",
+        version="v1.0.0",
+        license_name="Internal Reference",
+        use_type="Internal / project use",
+        use_case=str(item.get("reference_summary") or "").strip(),
+        output_behavior={
+            "types": ["Structured JSON"],
+            "format": "Internal skill execution payload",
+            "parameters": "2D",
+            "side_effects": ["Read-only by default"],
+        },
+        references=references,
+    )
+    return {
+        "publisher_name": "AI-Law-Assistant",
+        "publisher_handle": "@system",
+        "install_command": "",
+        "skill_md_text": skill_md_text,
+        "skill_card": card,
+        "current_version": "v1.0.0",
+        "license_name": "Internal Reference",
+        "security_audit_status": "internal",
+        "downloads_30d": 0,
+        "downloads_all_time": 0,
+        "last_published_at": "",
+        "files": [
+            _skill_file("SKILL.md", content_text=skill_md_text, sort_order=10),
+            _skill_file("skill-card.md",
+                        content_text=_json_text(card), sort_order=20),
+        ],
+        "versions": [
+            _skill_version(
+                "v1.0.0",
+                is_latest=True,
+                changelog_items=[
+                    "Initial internal mirrored version for AI-Law-Assistant."],
+                sort_order=10,
+            )
+        ],
+    }
+
+
+TAX_DIGITAL_LOCALIZATION_SKILL_MD = """---
+name: tax-digital-localization
+description: 用于财税数字化系统程序内文案与相关本地化内容的翻译与轻量润色。适用于将中文页面功能名、表单标签、按钮文案、菜单项、状态词、校验提示、错误提示、成功提示、系统通知，以及发票、税务、申报、合规相关系统文案翻译为目标国家常用语言，尤其适合越南、马来西亚、新加坡、波兰、意大利、德国等市场。用户提到国际化、i18n、多语言、页面翻译、按钮翻译、提示语翻译、系统文案翻译、发票系统翻译、税务系统翻译或给出明显属于程序界面的中文文案时，都应使用此 skill。
+---
+# Tax Digital Localization
+## Overview
+将中文程序内文案翻译为适合目标国家上线使用的最终译文，重点服务财税、发票、申报、合规类系统。
+默认源语言为中文，按目标国家映射固定目标语言，输出默认只返回可直接落入程序的最终译文。
+## Default Mapping
+按目标国家映射固定目标语言：
+- 越南 -> 越南语
+- 马来西亚 -> 马来语
+- 新加坡 -> 英语
+- 波兰 -> 波兰语
+- 意大利 -> 意大利语
+- 德国 -> 德语
+如果用户明确指定了目标语言，则以用户指定为准。
+如果用户没有给出目标国家，也没有指定目标语言，先用一句话追问，不要自行猜测。
+## Scope
+优先处理以下程序内文案：
+- 页面名称
+- 菜单项
+- 按钮
+- 表单标签
+- 状态词
+- 校验提示
+- 错误提示
+- 成功提示
+- Toast、弹窗、确认提示
+- 发票、税务、申报、合规相关 UI 文案
+## Resource Routing
+始终先参考 [ui-patterns.md](./references/ui-patterns.md)。
+涉及发票、税务、申报、税号、合规等高风险语义时，再读取 [tax-terms.md](./references/tax-terms.md)。
+按目标国家读取对应的 locale reference：
+- [vietnam.md](./references/locales/vietnam.md)
+- [malaysia.md](./references/locales/malaysia.md)
+- [singapore.md](./references/locales/singapore.md)
+- [poland.md](./references/locales/poland.md)
+- [italy.md](./references/locales/italy.md)
+- [germany.md](./references/locales/germany.md)
+## Workflow
+1. 识别输入属于哪类程序文案。
+2. 确认目标国家或目标语言。
+3. 判断属于轻量翻译还是高风险术语。
+4. 高风险术语优先结合 tax-terms 与 locale 资料校准。
+5. 输出最终译文。
+## Preservation
+默认保持占位符、ICU 结构、HTML/XML/Markdown、字段名、错误码和换行结构不变。
+"""
+
+
+TAX_DIGITAL_LOCALIZATION_SKILL_CARD = _skill_card(
+    overview="Localizes Chinese UI and system copy for digital tax, invoice, filing, and compliance products into market-appropriate language.",
+    publisher_name="Munich949",
+    publisher_handle="@munich949",
+    version="v1.0.0",
+    license_name="MIT-0",
+    geography=["Vietnam", "Malaysia", "Singapore",
+               "Poland", "Italy", "Germany"],
+    use_type="Commercial / non-commercial",
+    use_case="Developers and product teams translate Chinese program UI strings for tax and e-invoicing systems while preserving placeholders, keys, markup, ordering, and product-ready wording.",
+    review_before_use=[
+        {
+            "risk": "Country-to-language defaults may not match multilingual deployments or local compliance expectations.",
+            "mitigation": "Specify the exact target locale or language for each deployment, especially for Singapore, Malaysia, and other multilingual markets.",
+        },
+        {
+            "risk": "Tax, invoice, filing, and compliance terms can carry legal or business meaning that translation may not fully resolve.",
+            "mitigation": "Have important tax wording reviewed by local subject-matter experts before production use, and verify high-risk terms against authoritative local sources when needed.",
+        },
+    ],
+    ethical_considerations="Users should review generated text before production use and apply their organization's compliance requirements.",
+    output_behavior={
+        "types": ["Text", "Guidance"],
+        "format": "Plain text translation with an optional note line when ambiguity or semantic risk is present.",
+        "parameters": "1D",
+        "side_effects": [
+            "Preserves code keys and placeholders",
+            "Preserves ICU structures and markup",
+            "Preserves line breaks and ordering",
+        ],
+    },
+    references=[
+        {"label": "ClawHub skill page",
+            "url": "https://clawhub.ai/munich949/skills/tax-digital-localization", "type": "external"},
+        {"label": "ui-patterns.md",
+            "url": "references/ui-patterns.md", "type": "internal"},
+        {"label": "tax-terms.md", "url": "references/tax-terms.md", "type": "internal"},
+    ],
+)
+
+
+TAX_DIGITAL_LOCALIZATION_FILES = [
+    _skill_file("SKILL.md", content_text=TAX_DIGITAL_LOCALIZATION_SKILL_MD,
+                size_bytes=5800, sort_order=10),
+    _skill_file("skill-card.md", content_text=_json_text(
+        TAX_DIGITAL_LOCALIZATION_SKILL_CARD), size_bytes=2700, sort_order=20),
+    _skill_file("agents", entry_type="dir", sort_order=30),
+    _skill_file("agents/openai.yaml", content_text="model: openai-compatible\nmode: translation\n",
+                size_bytes=234, sort_order=40),
+    _skill_file("references", entry_type="dir", sort_order=50),
+    _skill_file("references/tax-terms.md",
+                content_text="# Tax Terms\n高风险财税术语表，用于校准开票、申报、抵扣、作废、红冲等专业表达。\n", size_bytes=2900, sort_order=60),
+    _skill_file("references/ui-patterns.md",
+                content_text="# UI Patterns\n本文件用于约束程序内文案的通用翻译风格，优先级高于逐字直译。\n- 优先让用户一眼看懂，而不是保留中文句法。\n- 优先写成真实产品会使用的文案，而不是教科书式翻译。\n- 同一轮任务中，术语必须保持前后一致。\n", size_bytes=1900, sort_order=70),
+    _skill_file("references/locales", entry_type="dir", sort_order=80),
+    _skill_file("references/locales/germany.md",
+                content_text="# Germany Locale\n- 默认输出德语\n- 保留官方名称和缩写：E-Rechnung、XRechnung、ZUGFeRD、Peppol\n- 提交类动作优先使用 einreichen / übermitteln\n", size_bytes=1300, sort_order=81),
+    _skill_file("references/locales/malaysia.md",
+                content_text="# Malaysia Locale\n默认输出马来语，涉及税务和电子发票语义时优先稳妥专业表达。\n", size_bytes=1400, sort_order=82),
+    _skill_file("references/locales/singapore.md",
+                content_text="# Singapore Locale\n默认输出英语，优先适配新加坡电子发票与税务系统语境。\n", size_bytes=1300, sort_order=83),
+    _skill_file("references/locales/vietnam.md",
+                content_text="# Vietnam Locale\n默认输出越南语，发票、税号和申报提示要优先保证专业准确。\n", size_bytes=1500, sort_order=84),
+    _skill_file("references/locales/italy.md",
+                content_text="# Italy Locale\n默认输出意大利语，发票与申报相关术语需贴近本地企业软件表达。\n", size_bytes=1400, sort_order=85),
+    _skill_file("references/locales/poland.md",
+                content_text="# Poland Locale\n默认输出波兰语，优先保持专业术语一致性与界面可用性。\n", size_bytes=1300, sort_order=86),
+]
+
+
+TAX_DIGITAL_LOCALIZATION_VERSIONS = [
+    _skill_version(
+        "v1.0.0",
+        published_at="2026-04-07",
+        is_latest=True,
+        download_url="https://clawhub.ai/munich949/skills/tax-digital-localization#versions",
+        changelog_items=[
+            "Initial release of tax-digital-localization.",
+            "Supports Vietnam, Malaysia, Singapore, Poland, Italy, and Germany.",
+            "Adds locale-aware routing for high-risk tax terminology.",
+            "Preserves placeholders, keys, markup, and line ordering.",
+        ],
+        sort_order=10,
+    )
+]
+
+
+BUILTIN_SKILL_DETAIL_SEEDS: Dict[str, Dict[str, Any]] = {
+    "tax_digital_localization": {
+        "publisher_name": "Munich949",
+        "publisher_handle": "@munich949",
+        "install_command": "openclaw skills install @munich949/tax-digital-localization",
+        "skill_md_text": TAX_DIGITAL_LOCALIZATION_SKILL_MD,
+        "skill_card": TAX_DIGITAL_LOCALIZATION_SKILL_CARD,
+        "current_version": "v1.0.0",
+        "license_name": "MIT-0",
+        "security_audit_status": "pass",
+        "downloads_30d": 116,
+        "downloads_all_time": 116,
+        "last_published_at": "2026-04-07",
+        "files": TAX_DIGITAL_LOCALIZATION_FILES,
+        "versions": TAX_DIGITAL_LOCALIZATION_VERSIONS,
+    },
+    "china_tax_law_knowledge": {
+        "publisher_name": "Richie Dirkson",
+        "publisher_handle": "@codefarmerman",
+        "install_command": "openclaw skills install @codefarmerman/china-tax-law",
+        "skill_md_text": "# 中国财税法律专业知识助手\n\n## 角色定位\n作为中国资深财税律师的专业助手，提供准确、全面的中国税法知识支持，协助完成税务咨询、筹划、合规和争议解决等工作。\n\n## 核心工作原则\n- 法规优先：所有建议必须有明确法律法规依据。\n- 时效意识：税法更新频繁，应提示核实最新规定。\n- 风险提示：税务筹划必须明确说明合规边界。\n- 专业严谨：区分合法避税与违法逃税。\n",
+        "skill_card": _skill_card(
+            overview="中国财税法律知识助手，覆盖增值税、企业所得税、个人所得税、印花税等咨询、筹划和合规审查。",
+            publisher_name="Richie Dirkson",
+            publisher_handle="@codefarmerman",
+            version="v1.0.0",
+            license_name="MIT-0",
+            geography=["China"],
+            use_type="Commercial / non-commercial",
+            use_case="用于税法咨询、税务筹划、税务争议处理以及税收政策解读。",
+            review_before_use=[
+                {"risk": "税法政策变化较快，旧条文可能失效。",
+                    "mitigation": "回答中注明政策版本和时效，并核查国家税务总局最新公告。"},
+                {"risk": "筹划建议可能触发合规边界问题。", "mitigation": "所有筹划建议必须附带风险提示和合法性边界说明。"},
+            ],
+            ethical_considerations="不应输出任何规避税法或违法逃税建议。",
+            output_behavior={
+                "types": ["Text", "Guidance", "Citation"],
+                "format": "法规优先的专业说明，附引用条文。",
+                "parameters": "2D",
+                "side_effects": ["May require external law verification"],
+            },
+            references=[
+                {"label": "ClawHub skill page",
+                    "url": "https://clawhub.ai/codefarmerman/skills/china-tax-law", "type": "external"},
+            ],
+        ),
+        "current_version": "v1.0.0",
+        "license_name": "MIT-0",
+        "security_audit_status": "pass",
+        "downloads_30d": 259,
+        "downloads_all_time": 259,
+        "last_published_at": "2026-04-07",
+        "files": [
+            _skill_file(
+                "SKILL.md", content_text="# 中国财税法律专业知识助手\n\n覆盖税务咨询、税务筹划、税务合规审查、税务争议处理等任务。\n", sort_order=10),
+            _skill_file("skill-card.md",
+                        content_text="法规优先、时效意识、风险提示、专业严谨。", sort_order=20),
+            _skill_file("references", entry_type="dir", sort_order=30),
+            _skill_file("references/tax-rates.md",
+                        content_text="# Tax Rates\n中国主要税种税率与优惠政策速查。\n", sort_order=40),
+        ],
+        "versions": [
+            _skill_version("v1.0.0", published_at="2026-04-07", is_latest=True, download_url="https://clawhub.ai/codefarmerman/skills/china-tax-law",
+                           changelog_items=["Initial mirrored version for China tax law knowledge."], sort_order=10)
+        ],
+    },
+    "receipt_assistant": {
+        "publisher_name": "YY-C8",
+        "publisher_handle": "@yy-c8",
+        "install_command": "openclaw skills install @yy-c8/receipt-assistant",
+        "skill_md_text": "# 报销助手\n\n自动处理报销票据：识别、提取信息、重命名、生成报表。\n\n## 工作流程\n1. 扫描目录\n2. 视觉识别\n3. 提取信息\n4. 重命名文件\n5. 生成报表\n",
+        "skill_card": _skill_card(
+            overview="报销票据处理助手，识别火车票、打车发票、酒店发票等并生成汇总。",
+            publisher_name="YY-C8",
+            publisher_handle="@yy-c8",
+            version="v1.0.0",
+            license_name="MIT-0",
+            geography=["China"],
+            use_type="Commercial / non-commercial",
+            use_case="报销票据识别、字段提取、文件标准化重命名与 Excel 汇总。",
+            review_before_use=[
+                {"risk": "OCR 识别结果可能有误。", "mitigation": "关键字段如金额、日期、发票号应进行人工复核。"},
+            ],
+            output_behavior={
+                "types": ["Structured JSON", "Excel"],
+                "format": "JSON extraction + report export",
+                "parameters": "2D",
+                "side_effects": ["Renames local files", "Generates Excel report"],
+            },
+            references=[
+                {"label": "ClawHub skill page",
+                    "url": "https://clawhub.ai/yy-c8/skills/receipt-assistant", "type": "external"},
+            ],
+        ),
+        "current_version": "v1.0.0",
+        "license_name": "MIT-0",
+        "security_audit_status": "pass",
+        "downloads_30d": 97,
+        "downloads_all_time": 97,
+        "last_published_at": "2026-04-07",
+        "files": [
+            _skill_file(
+                "SKILL.md", content_text="# 报销助手\n\n自动处理报销票据：识别、提取信息、重命名、生成报表。\n", sort_order=10),
+            _skill_file(
+                "skill-card.md", content_text="Receipt Assistant summary card", sort_order=20),
+            _skill_file("references/rename-rules.md",
+                        content_text="# Rename Rules\n火车票、打车发票、酒店发票的标准命名规则。\n", sort_order=30),
+        ],
+        "versions": [
+            _skill_version("v1.0.0", published_at="2026-04-07", is_latest=True, download_url="https://clawhub.ai/yy-c8/skills/receipt-assistant",
+                           changelog_items=["Initial mirrored version for receipt processing skill."], sort_order=10)
+        ],
+    },
+    "aitaxs_assistant": {
+        "publisher_name": "Internal Reference Mirror",
+        "publisher_handle": "@internal-mirror",
+        "install_command": "",
+        "skill_md_text": "# AI TaxS Assistant\n\n## Overview\n面向个体户和小微企业的综合财税助手，覆盖工资个税、经营所得、申报提醒和节税建议。\n\n## Focus Areas\n- 工资与薪资个税计算与提醒\n- 个体户经营所得分析\n- 小微企业常见申报节点提示\n- 合规前提下的节税建议\n\n## Note\n该技能根据用户提供的外部摘要建立为内部参考镜像，原始外部页面当前未完成核验。\n",
+        "skill_card": _skill_card(
+            overview="个体户、小微企业日常财税助手，侧重个税、经营所得、申报提醒与轻量节税建议。",
+            publisher_name="Internal Reference Mirror",
+            publisher_handle="@internal-mirror",
+            version="v0.1.0",
+            license_name="Internal Reference",
+            geography=["China"],
+            use_type="Internal reference",
+            use_case="为小微企业和个体户提供常见税务问答、提醒和合规建议。",
+            review_before_use=[
+                {"risk": "原始外部 skill 页面未核验。",
+                    "mitigation": "当前条目仅作为内部参考镜像使用，正式建议需结合权威法规复核。"},
+                {"risk": "节税建议易触及合规边界。", "mitigation": "输出时必须附加合规边界和风险提示。"},
+            ],
+            ethical_considerations="不得输出规避税法或违法逃税建议。",
+            output_behavior={
+                "types": ["Text", "Checklist"],
+                "format": "Structured advisory text",
+                "parameters": "2D",
+                "side_effects": ["May trigger compliance reminders"],
+            },
+            references=[
+                {"label": "User-provided source URL",
+                    "url": "https://clawhub.ai/xhj2aidevs/skills/aitaxs-assistant", "type": "external"},
+            ],
+        ),
+        "current_version": "v0.1.0",
+        "license_name": "Internal Reference",
+        "security_audit_status": "pending-verification",
+        "downloads_30d": 0,
+        "downloads_all_time": 0,
+        "last_published_at": "2026-07-21",
+        "files": [
+            _skill_file(
+                "SKILL.md", content_text="# AI TaxS Assistant\n面向个体户/小微企业的全能财税助手。\n", sort_order=10),
+            _skill_file(
+                "skill-card.md", content_text="Internal reference mirror for small-business tax assistant.", sort_order=20),
+            _skill_file("references/source-note.md",
+                        content_text="来源于用户提供的 skill 摘要，待外部页面核验。", sort_order=30),
+        ],
+        "versions": [
+            _skill_version("v0.1.0", published_at="2026-07-21", is_latest=True, changelog_items=[
+                           "Create internal reference mirror from user-provided summary."], sort_order=10),
+        ],
+    },
+    "zhang_tax_law": {
+        "publisher_name": "Internal Reference Mirror",
+        "publisher_handle": "@internal-mirror",
+        "install_command": "",
+        "skill_md_text": "# Zhang Tax Law\n\n## Overview\n聚焦企业税务筹划、税务稽查、争议处理，覆盖企税汇算、增值税留抵退税、股权激励等主题。\n\n## Focus Areas\n- 企业税负优化与筹划边界\n- 税务稽查应对\n- 留抵退税与汇算清缴\n- 股权激励相关税务处理\n",
+        "skill_card": _skill_card(
+            overview="企业税务筹划与争议处理内部参考技能。",
+            publisher_name="Internal Reference Mirror",
+            publisher_handle="@internal-mirror",
+            version="v0.1.0",
+            license_name="Internal Reference",
+            geography=["China"],
+            use_type="Internal reference",
+            use_case="辅助企业税务筹划、税务争议处理与稽查应对。",
+            review_before_use=[
+                {"risk": "原始外部 skill 内容未核验。", "mitigation": "正式使用前应结合权威法规和案例再次验证。"},
+            ],
+            output_behavior={
+                "types": ["Analysis", "Risk Notes"],
+                "format": "Structured advisory output",
+                "parameters": "2D",
+                "side_effects": ["May require manual legal review"],
+            },
+            references=[
+                {"label": "User-provided source URL",
+                    "url": "https://clawhub.ai/skills/skills/zhang-tax-law", "type": "external"},
+            ],
+        ),
+        "current_version": "v0.1.0",
+        "license_name": "Internal Reference",
+        "security_audit_status": "pending-verification",
+        "downloads_30d": 0,
+        "downloads_all_time": 0,
+        "last_published_at": "2026-07-21",
+        "files": [
+            _skill_file(
+                "SKILL.md", content_text="# Zhang Tax Law\n企业税务筹划 + 稽查 + 争议处理。\n", sort_order=10),
+            _skill_file(
+                "skill-card.md", content_text="Internal reference mirror for enterprise tax planning and disputes.", sort_order=20),
+        ],
+        "versions": [
+            _skill_version("v0.1.0", published_at="2026-07-21", is_latest=True, changelog_items=[
+                           "Create internal reference mirror from user-provided summary."], sort_order=10),
+        ],
+    },
+    "zhang_intl_tax_law": {
+        "publisher_name": "Internal Reference Mirror",
+        "publisher_handle": "@internal-mirror",
+        "install_command": "",
+        "skill_md_text": "# Zhang International Tax Law\n\n## Overview\n聚焦国际税法、转让定价、CRS 报告及跨境合规，适合出海公司与跨国集团。\n\n## Focus Areas\n- 国际税法规则解读\n- 转让定价与关联交易风险\n- CRS 报告与跨境信息交换\n- 跨国集团合规与申报义务\n",
+        "skill_card": _skill_card(
+            overview="国际税法与跨境税务专项内部参考技能。",
+            publisher_name="Internal Reference Mirror",
+            publisher_handle="@internal-mirror",
+            version="v0.1.0",
+            license_name="Internal Reference",
+            geography=["Cross-border"],
+            use_type="Internal reference",
+            use_case="辅助出海公司和跨国集团处理国际税法、转让定价、CRS 及跨境合规问题。",
+            review_before_use=[
+                {"risk": "原始外部 skill 内容未核验。", "mitigation": "正式使用前需按目标国家法规与双边税收协定复核。"},
+            ],
+            output_behavior={
+                "types": ["Analysis", "Compliance Checklist"],
+                "format": "Structured cross-border advisory output",
+                "parameters": "2D",
+                "side_effects": ["May require jurisdiction-specific follow-up"],
+            },
+            references=[
+                {"label": "User-provided source URL",
+                    "url": "https://clawhub.ai/skills/skills/zhang-intl-tax-law", "type": "external"},
+            ],
+        ),
+        "current_version": "v0.1.0",
+        "license_name": "Internal Reference",
+        "security_audit_status": "pending-verification",
+        "downloads_30d": 0,
+        "downloads_all_time": 0,
+        "last_published_at": "2026-07-21",
+        "files": [
+            _skill_file(
+                "SKILL.md", content_text="# Zhang International Tax Law\n国际税法 + 转让定价 + CRS 报告。\n", sort_order=10),
+            _skill_file(
+                "skill-card.md", content_text="Internal reference mirror for international tax law and transfer pricing.", sort_order=20),
+        ],
+        "versions": [
+            _skill_version("v0.1.0", published_at="2026-07-21", is_latest=True, changelog_items=[
+                           "Create internal reference mirror from user-provided summary."], sort_order=10),
+        ],
+    },
+}
+
 BUILTIN_SKILL_SEEDS: List[Dict[str, Any]] = [
     {
         "id": "china_tax_law_knowledge",
@@ -170,6 +722,66 @@ BUILTIN_SKILL_SEEDS: List[Dict[str, Any]] = [
         ),
         "config_schema_json": _json_text({"type": "object", "properties": {"preserve_placeholders": {"type": "boolean"}}}),
         "sort_order": 30,
+    },
+    {
+        "id": "aitaxs_assistant",
+        "display_name": "个体户与小微企业财税助手",
+        "category": "knowledge",
+        "scene": "tax_small_business_advisory",
+        "description": "面向个体户、小微企业的日常财税咨询与合规辅助，涵盖工资个税、经营所得、申报提醒与节税建议。",
+        "source_url": "https://clawhub.ai/xhj2aidevs/skills/aitaxs-assistant",
+        "reference_summary": "基于用户提供的 skill 介绍录入为内部参考镜像，适合小微企业财税咨询与日常申报提醒场景。",
+        "tags_json": _json_text(["tax", "small-business", "individual", "advisory"]),
+        "input_schema_json": _json_text(
+            {"type": "object", "properties": {"question": {"type": "string"},
+                                              "entity_type": {"type": "string"}, "tax_type": {"type": "string"}}}
+        ),
+        "output_schema_json": _json_text(
+            {"type": "object", "properties": {"answer": {"type": "string"},
+                                              "reminders": {"type": "array"}, "risk_level": {"type": "string"}}}
+        ),
+        "config_schema_json": _json_text({"type": "object", "properties": {"jurisdiction": {"type": "string"}}}),
+        "sort_order": 35,
+    },
+    {
+        "id": "zhang_tax_law",
+        "display_name": "企业税务筹划与争议处理",
+        "category": "knowledge",
+        "scene": "tax_general_advisory",
+        "description": "聚焦企业税务筹划、税务稽查应对、税务争议处理等高复杂度场景，覆盖企税汇算、留抵退税、股权激励等主题。",
+        "source_url": "https://clawhub.ai/skills/skills/zhang-tax-law",
+        "reference_summary": "基于用户提供的 skill 介绍录入为内部参考镜像，用于企业税务筹划和争议处理辅助。",
+        "tags_json": _json_text(["tax", "planning", "dispute", "enterprise"]),
+        "input_schema_json": _json_text(
+            {"type": "object", "properties": {"question": {"type": "string"},
+                                              "topic": {"type": "string"}, "company_stage": {"type": "string"}}}
+        ),
+        "output_schema_json": _json_text(
+            {"type": "object", "properties": {"analysis": {"type": "string"},
+                                              "risk_points": {"type": "array"}, "citations": {"type": "array"}}}
+        ),
+        "config_schema_json": _json_text({"type": "object", "properties": {"citation_required": {"type": "boolean"}}}),
+        "sort_order": 40,
+    },
+    {
+        "id": "zhang_intl_tax_law",
+        "display_name": "国际税法与转让定价",
+        "category": "knowledge",
+        "scene": "tax_cross_border_advisory",
+        "description": "面向出海公司和跨国集团的国际税法、转让定价、CRS 报告与跨境合规咨询。",
+        "source_url": "https://clawhub.ai/skills/skills/zhang-intl-tax-law",
+        "reference_summary": "基于用户提供的 skill 介绍录入为内部参考镜像，适用于国际税法和跨境税务专项场景。",
+        "tags_json": _json_text(["tax", "international", "transfer-pricing", "cross-border"]),
+        "input_schema_json": _json_text(
+            {"type": "object", "properties": {"question": {"type": "string"}, "country_pair": {
+                "type": "string"}, "business_model": {"type": "string"}}}
+        ),
+        "output_schema_json": _json_text(
+            {"type": "object", "properties": {"analysis": {"type": "string"}, "cross_border_risks": {
+                "type": "array"}, "filing_obligations": {"type": "array"}}}
+        ),
+        "config_schema_json": _json_text({"type": "object", "properties": {"transfer_pricing_mode": {"type": "string"}}}),
+        "sort_order": 45,
     },
     {
         "id": "entity_extract_skill",
@@ -314,43 +926,165 @@ BUILTIN_TEMPLATE_SEEDS: List[Dict[str, Any]] = [
 ]
 
 
+def _get_skill_seed_detail(item: Dict[str, Any]) -> Dict[str, Any]:
+    detail = BUILTIN_SKILL_DETAIL_SEEDS.get(str(item.get("id") or "").strip())
+    if detail:
+        return detail
+    return _build_default_skill_detail(item)
+
+
+def _save_skill_detail(
+    cur,
+    skill_id: str,
+    detail: Dict[str, Any],
+    now: str,
+) -> None:
+    cur.execute(
+        """
+        UPDATE audit_skill
+        SET publisher_name = ?, publisher_handle = ?, install_command = ?, skill_md_text = ?,
+            skill_card_json = ?, current_version = ?, license_name = ?, security_audit_status = ?,
+            downloads_30d = ?, downloads_all_time = ?, last_published_at = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            detail.get("publisher_name", ""),
+            detail.get("publisher_handle", ""),
+            detail.get("install_command", ""),
+            detail.get("skill_md_text", ""),
+            _json_text(detail.get("skill_card", {})),
+            detail.get("current_version", ""),
+            detail.get("license_name", ""),
+            detail.get("security_audit_status", ""),
+            int(detail.get("downloads_30d", 0) or 0),
+            int(detail.get("downloads_all_time", 0) or 0),
+            detail.get("last_published_at", ""),
+            now,
+            skill_id,
+        ),
+    )
+    cur.execute("DELETE FROM audit_skill_file WHERE skill_id = ?", (skill_id,))
+    for index, file_item in enumerate(detail.get("files", []), start=1):
+        file_path = str(file_item.get("path") or "").strip()
+        if not file_path:
+            continue
+        cur.execute(
+            """
+            INSERT INTO audit_skill_file(
+                id, skill_id, path, entry_type, size_bytes, branch_name,
+                content_text, sort_order, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                f"{skill_id}::file::{index}",
+                skill_id,
+                file_path,
+                str(file_item.get("entry_type") or "file"),
+                int(file_item.get("size_bytes", 0) or 0),
+                str(file_item.get("branch_name") or ""),
+                str(file_item.get("content_text") or ""),
+                int(file_item.get("sort_order", index) or index),
+                now,
+                now,
+            ),
+        )
+    cur.execute(
+        "DELETE FROM audit_skill_version WHERE skill_id = ?", (skill_id,))
+    for index, version_item in enumerate(detail.get("versions", []), start=1):
+        version_tag = str(version_item.get("version_tag") or "").strip()
+        if not version_tag:
+            continue
+        cur.execute(
+            """
+            INSERT INTO audit_skill_version(
+                id, skill_id, version_tag, release_label, published_at, is_latest,
+                download_url, changelog_text, changelog_json, sort_order, created_at, updated_at
+            )
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                f"{skill_id}::version::{index}",
+                skill_id,
+                version_tag,
+                str(version_item.get("release_label") or ""),
+                str(version_item.get("published_at") or ""),
+                1 if version_item.get("is_latest") else 0,
+                str(version_item.get("download_url") or ""),
+                str(version_item.get("changelog_text") or ""),
+                _json_text(version_item.get("changelog_json", [])),
+                int(version_item.get("sort_order", index) or index),
+                now,
+                now,
+            ),
+        )
+
+
 def ensure_audit_capabilities_seeded(cfg: Dict[str, Any]) -> None:
     now = _utc_now_iso()
     conn = get_conn(cfg)
     cur = conn.cursor()
     try:
         for item in BUILTIN_SKILL_SEEDS:
-            cur.execute(
-                """
-                INSERT OR IGNORE INTO audit_skill(
-                    id, display_name, category, scene, description, owner_type, owner_id,
-                    visibility, status, source_url, reference_summary,
-                    input_schema_json, output_schema_json, config_schema_json, tags_json,
-                    sort_order, created_at, updated_at
+            cur.execute("SELECT * FROM audit_skill WHERE id = ?",
+                        (item["id"],))
+            existing_row = cur.fetchone()
+            should_insert = existing_row is None
+            if should_insert:
+                cur.execute(
+                    """
+                    INSERT INTO audit_skill(
+                        id, display_name, category, scene, description, owner_type, owner_id,
+                        visibility, status, source_url, reference_summary,
+                        input_schema_json, output_schema_json, config_schema_json, tags_json,
+                        sort_order, created_at, updated_at
+                    )
+                    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    """,
+                    (
+                        item["id"],
+                        item["display_name"],
+                        item["category"],
+                        item["scene"],
+                        item.get("description", ""),
+                        "system",
+                        None,
+                        "public",
+                        "active",
+                        item.get("source_url", ""),
+                        item.get("reference_summary", ""),
+                        item.get("input_schema_json", ""),
+                        item.get("output_schema_json", ""),
+                        item.get("config_schema_json", ""),
+                        item.get("tags_json", "[]"),
+                        int(item.get("sort_order", 100)),
+                        now,
+                        now,
+                    ),
                 )
-                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-                """,
-                (
-                    item["id"],
-                    item["display_name"],
-                    item["category"],
-                    item["scene"],
-                    item.get("description", ""),
-                    "system",
-                    None,
-                    "public",
-                    "active",
-                    item.get("source_url", ""),
-                    item.get("reference_summary", ""),
-                    item.get("input_schema_json", ""),
-                    item.get("output_schema_json", ""),
-                    item.get("config_schema_json", ""),
-                    item.get("tags_json", "[]"),
-                    int(item.get("sort_order", 100)),
-                    now,
-                    now,
-                ),
+                cur.execute(
+                    "SELECT * FROM audit_skill WHERE id = ?", (item["id"],))
+                existing_row = cur.fetchone()
+            existing_item = _row_to_skill(dict(existing_row))
+            detail = _get_skill_seed_detail(item)
+            cur.execute(
+                "SELECT COUNT(1) FROM audit_skill_file WHERE skill_id = ?", (
+                    item["id"],)
             )
+            file_count = int((cur.fetchone() or [0])[0] or 0)
+            cur.execute(
+                "SELECT COUNT(1) FROM audit_skill_version WHERE skill_id = ?", (
+                    item["id"],)
+            )
+            version_count = int((cur.fetchone() or [0])[0] or 0)
+            needs_detail_seed = should_insert or (
+                not str(existing_item.get("publisher_name") or "").strip()
+                and not str(existing_item.get("skill_md_text") or "").strip()
+                and file_count == 0
+                and version_count == 0
+            )
+            if needs_detail_seed:
+                _save_skill_detail(cur, item["id"], detail, now)
 
         for item in BUILTIN_RULE_PACK_SEEDS:
             cur.execute(
@@ -421,6 +1155,26 @@ def _row_to_skill(row: Dict[str, Any]) -> Dict[str, Any]:
         item.pop("output_schema_json", "{}"), {})
     item["config_schema"] = _safe_json_loads(
         item.pop("config_schema_json", "{}"), {})
+    item["skill_card"] = _safe_json_loads(
+        item.pop("skill_card_json", "{}"), {})
+    item["downloads_30d"] = int(item.get("downloads_30d") or 0)
+    item["downloads_all_time"] = int(item.get("downloads_all_time") or 0)
+    return item
+
+
+def _row_to_skill_file(row: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(row)
+    item["size_bytes"] = int(item.get("size_bytes") or 0)
+    item["sort_order"] = int(item.get("sort_order") or 0)
+    return item
+
+
+def _row_to_skill_version(row: Dict[str, Any]) -> Dict[str, Any]:
+    item = dict(row)
+    item["is_latest"] = bool(item.get("is_latest"))
+    item["sort_order"] = int(item.get("sort_order") or 0)
+    item["changelog_items"] = _safe_json_loads(
+        item.pop("changelog_json", "[]"), [])
     return item
 
 
@@ -486,6 +1240,33 @@ def list_visible_skills(
     return [_row_to_skill(dict(row)) for row in rows]
 
 
+def _attach_skill_detail_meta(cur, item: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(item)
+    skill_id = str(item.get("id") or "")
+    cur.execute(
+        """
+        SELECT *
+        FROM audit_skill_file
+        WHERE skill_id = ?
+        ORDER BY sort_order ASC, path ASC
+        """,
+        (skill_id,),
+    )
+    out["files"] = [_row_to_skill_file(dict(row)) for row in cur.fetchall()]
+    cur.execute(
+        """
+        SELECT *
+        FROM audit_skill_version
+        WHERE skill_id = ?
+        ORDER BY sort_order ASC, published_at DESC, version_tag DESC
+        """,
+        (skill_id,),
+    )
+    out["versions"] = [_row_to_skill_version(
+        dict(row)) for row in cur.fetchall()]
+    return out
+
+
 def get_skill_detail(cfg: Dict[str, Any], skill_id: str, user_id: str = "") -> Optional[Dict[str, Any]]:
     ensure_audit_capabilities_seeded(cfg)
     conn = get_conn(cfg)
@@ -499,8 +1280,12 @@ def get_skill_detail(cfg: Dict[str, Any], skill_id: str, user_id: str = "") -> O
         (skill_id, user_id),
     )
     row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    item = _attach_skill_detail_meta(cur, _row_to_skill(dict(row)))
     conn.close()
-    return _row_to_skill(dict(row)) if row else None
+    return item
 
 
 _SKILL_STATUS_VALUES = {"active", "disabled", "deleted"}
@@ -533,6 +1318,274 @@ def _normalize_json_schema(value: Any, field_name: str) -> Dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{field_name} must be an object")
     return value
+
+
+def _normalize_optional_int(value: Any, field_name: str, default: int = 0) -> int:
+    if value in (None, ""):
+        return int(default)
+    try:
+        return int(value)
+    except Exception as exc:
+        raise ValueError(f"{field_name} must be an integer") from exc
+
+
+def _normalize_skill_files(
+    value: Any,
+    default: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    raw_items = default if value is None else value
+    if raw_items in (None, ""):
+        raw_items = []
+    if not isinstance(raw_items, list):
+        raise ValueError("files must be a list")
+    items: List[Dict[str, Any]] = []
+    seen_paths = set()
+    for index, raw_item in enumerate(raw_items, start=1):
+        if not isinstance(raw_item, dict):
+            raise ValueError("files contains invalid item")
+        path = str(raw_item.get("path") or "").strip()
+        if not path:
+            raise ValueError("files.path is required")
+        if path in seen_paths:
+            raise ValueError(f"duplicate file path: {path}")
+        seen_paths.add(path)
+        entry_type = str(raw_item.get("entry_type") or "file").strip().lower()
+        if entry_type not in {"file", "dir"}:
+            raise ValueError("files.entry_type must be file or dir")
+        content_text = "" if entry_type == "dir" else str(
+            raw_item.get("content_text") or "")
+        size_value = raw_item.get("size_bytes")
+        size_bytes = len(content_text.encode("utf-8")) if size_value in (None, "") else _normalize_optional_int(
+            size_value, "files.size_bytes", 0
+        )
+        items.append(
+            {
+                "path": path,
+                "entry_type": entry_type,
+                "content_text": content_text,
+                "size_bytes": max(size_bytes, 0),
+                "branch_name": str(raw_item.get("branch_name") or ""),
+                "sort_order": _normalize_optional_int(
+                    raw_item.get("sort_order"), "files.sort_order", index
+                ),
+            }
+        )
+    return items
+
+
+def _normalize_changelog_items(raw_item: Dict[str, Any]) -> List[str]:
+    changelog_items = raw_item.get("changelog_items")
+    if changelog_items is None:
+        text = str(raw_item.get("changelog_text") or "")
+        lines = []
+        for line in text.splitlines():
+            cleaned = line.strip()
+            if not cleaned:
+                continue
+            if cleaned.startswith("- "):
+                cleaned = cleaned[2:].strip()
+            lines.append(cleaned)
+        return lines
+    if not isinstance(changelog_items, list):
+        raise ValueError("versions.changelog_items must be a list")
+    items: List[str] = []
+    for value in changelog_items:
+        text = str(value or "").strip()
+        if text:
+            items.append(text)
+    return items
+
+
+def _normalize_skill_versions(
+    value: Any,
+    default: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    raw_items = default if value is None else value
+    if raw_items in (None, ""):
+        raw_items = []
+    if not isinstance(raw_items, list):
+        raise ValueError("versions must be a list")
+    items: List[Dict[str, Any]] = []
+    seen_tags = set()
+    latest_found = False
+    for index, raw_item in enumerate(raw_items, start=1):
+        if not isinstance(raw_item, dict):
+            raise ValueError("versions contains invalid item")
+        version_tag = str(raw_item.get("version_tag") or "").strip()
+        if not version_tag:
+            raise ValueError("versions.version_tag is required")
+        if version_tag in seen_tags:
+            raise ValueError(f"duplicate version tag: {version_tag}")
+        seen_tags.add(version_tag)
+        changelog_items = _normalize_changelog_items(raw_item)
+        is_latest = bool(raw_item.get("is_latest"))
+        latest_found = latest_found or is_latest
+        items.append(
+            {
+                "version_tag": version_tag,
+                "release_label": str(raw_item.get("release_label") or "").strip(),
+                "published_at": str(raw_item.get("published_at") or "").strip(),
+                "is_latest": is_latest,
+                "download_url": str(raw_item.get("download_url") or "").strip(),
+                "changelog_items": changelog_items,
+                "changelog_text": "\n".join(f"- {item}" for item in changelog_items),
+                "changelog_json": changelog_items,
+                "sort_order": _normalize_optional_int(
+                    raw_item.get("sort_order"), "versions.sort_order", index
+                ),
+            }
+        )
+    if items and not latest_found:
+        items[0]["is_latest"] = True
+        if not items[0]["release_label"]:
+            items[0]["release_label"] = "Latest"
+    return items
+
+
+def _upsert_detail_file(
+    files: List[Dict[str, Any]],
+    *,
+    path: str,
+    content_text: str,
+    sort_order: int,
+) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    matched = False
+    encoded_size = len(content_text.encode("utf-8"))
+    for item in files:
+        if str(item.get("path") or "") == path:
+            next_item = dict(item)
+            next_item["entry_type"] = "file"
+            next_item["content_text"] = content_text
+            next_item["size_bytes"] = encoded_size
+            next_item["sort_order"] = int(item.get("sort_order") or sort_order)
+            out.append(next_item)
+            matched = True
+        else:
+            out.append(dict(item))
+    if not matched:
+        out.append(
+            {
+                "path": path,
+                "entry_type": "file",
+                "content_text": content_text,
+                "size_bytes": encoded_size,
+                "branch_name": "main",
+                "sort_order": sort_order,
+            }
+        )
+    return sorted(
+        out,
+        key=lambda item: (
+            int(item.get("sort_order") or 0),
+            str(item.get("path") or ""),
+        ),
+    )
+
+
+def _normalize_skill_detail_payload(
+    payload: Dict[str, Any],
+    normalized_skill: Dict[str, Any],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    current = existing or {}
+    skill_card = _normalize_json_schema(
+        payload.get("skill_card", current.get("skill_card", {})),
+        "skill_card",
+    )
+    detail = {
+        "publisher_name": str(
+            payload.get("publisher_name", current.get(
+                "publisher_name", "")) or ""
+        ).strip(),
+        "publisher_handle": str(
+            payload.get("publisher_handle", current.get(
+                "publisher_handle", "")) or ""
+        ).strip(),
+        "install_command": str(
+            payload.get("install_command", current.get(
+                "install_command", "")) or ""
+        ).strip(),
+        "skill_md_text": str(
+            payload.get("skill_md_text", current.get(
+                "skill_md_text", "")) or ""
+        ),
+        "skill_card": skill_card,
+        "current_version": str(
+            payload.get("current_version", current.get(
+                "current_version", "")) or ""
+        ).strip(),
+        "license_name": str(
+            payload.get("license_name", current.get("license_name", "")) or ""
+        ).strip(),
+        "security_audit_status": str(
+            payload.get(
+                "security_audit_status",
+                current.get("security_audit_status", ""),
+            ) or ""
+        ).strip(),
+        "downloads_30d": _normalize_optional_int(
+            payload.get("downloads_30d", current.get("downloads_30d", 0)),
+            "downloads_30d",
+            0,
+        ),
+        "downloads_all_time": _normalize_optional_int(
+            payload.get("downloads_all_time", current.get(
+                "downloads_all_time", 0)),
+            "downloads_all_time",
+            0,
+        ),
+        "last_published_at": str(
+            payload.get("last_published_at", current.get(
+                "last_published_at", "")) or ""
+        ).strip(),
+    }
+    detail["files"] = _normalize_skill_files(
+        payload.get("files"),
+        default=current.get("files", []),
+    )
+    detail["versions"] = _normalize_skill_versions(
+        payload.get("versions"),
+        default=current.get("versions", []),
+    )
+    if not detail["current_version"] and detail["versions"]:
+        latest = next(
+            (item for item in detail["versions"] if item.get("is_latest")),
+            detail["versions"][0],
+        )
+        detail["current_version"] = str(latest.get("version_tag") or "")
+    if not detail["publisher_name"]:
+        detail["publisher_name"] = "AI-Law-Assistant"
+    if not detail["publisher_handle"]:
+        detail["publisher_handle"] = "@system"
+    if not detail["license_name"]:
+        detail["license_name"] = "Internal Reference"
+    if not detail["skill_md_text"]:
+        detail["skill_md_text"] = _build_default_skill_md(
+            {
+                "id": normalized_skill["id"],
+                "display_name": normalized_skill["display_name"],
+                "category": normalized_skill["category"],
+                "scene": normalized_skill["scene"],
+                "description": normalized_skill["description"],
+                "source_url": normalized_skill["source_url"],
+                "reference_summary": normalized_skill["reference_summary"],
+                "tags_json": _json_text(normalized_skill["tags"]),
+            }
+        )
+    detail["files"] = _upsert_detail_file(
+        detail["files"],
+        path="SKILL.md",
+        content_text=detail["skill_md_text"],
+        sort_order=10,
+    )
+    detail["files"] = _upsert_detail_file(
+        detail["files"],
+        path="skill-card.md",
+        content_text=_json_text(detail["skill_card"]),
+        sort_order=20,
+    )
+    return detail
 
 
 def _normalize_skill_payload(
@@ -604,6 +1657,7 @@ def _normalize_skill_payload(
         raise ValueError("sort_order must be between 0 and 100000")
 
     return {
+        "id": str(current.get("id") or payload.get("id") or "").strip(),
         "display_name": display_name,
         "category": category,
         "scene": scene,
@@ -718,6 +1772,7 @@ def get_admin_skill_detail(cfg: Dict[str, Any], skill_id: str) -> Optional[Dict[
         conn.close()
         return None
     item = _attach_skill_reference_meta(cur, _row_to_skill(dict(row)))
+    item = _attach_skill_detail_meta(cur, item)
     conn.close()
     return item
 
@@ -769,10 +1824,32 @@ def create_skill(
             now,
         ),
     )
+    detail_seed_item = {
+        "id": skill_id,
+        "display_name": normalized["display_name"],
+        "category": normalized["category"],
+        "scene": normalized["scene"],
+        "description": normalized["description"],
+        "source_url": normalized["source_url"],
+        "reference_summary": normalized["reference_summary"],
+        "tags_json": _json_text(normalized["tags"]),
+    }
+    detail_payload = _normalize_skill_detail_payload(
+        payload,
+        normalized,
+        existing=_build_default_skill_detail(detail_seed_item),
+    )
+    _save_skill_detail(
+        cur,
+        skill_id,
+        detail_payload,
+        now,
+    )
     conn.commit()
     cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
     row = cur.fetchone()
     item = _attach_skill_reference_meta(cur, _row_to_skill(dict(row)))
+    item = _attach_skill_detail_meta(cur, item)
     conn.close()
     return item
 
@@ -825,10 +1902,21 @@ def update_skill(
             skill_id,
         ),
     )
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    saved_row = _row_to_skill(dict(cur.fetchone()))
+    existing_detail = _attach_skill_detail_meta(cur, dict(saved_row))
+    _save_skill_detail(
+        cur,
+        skill_id,
+        _normalize_skill_detail_payload(
+            payload, normalized, existing=existing_detail),
+        now,
+    )
     conn.commit()
     cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
     saved = _attach_skill_reference_meta(
         cur, _row_to_skill(dict(cur.fetchone())))
+    saved = _attach_skill_detail_meta(cur, saved)
     conn.close()
     return saved
 
