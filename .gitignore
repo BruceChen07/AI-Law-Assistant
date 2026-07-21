@@ -43,11 +43,11 @@ web/storybook-static/
 *.swp
 *.swo
 *~
+~$*
 
 # Data & Logs
 data/files/
 data/chroma_db/
-data/contracts/
 data/uploads/
 data/logs/
 data/memory/
