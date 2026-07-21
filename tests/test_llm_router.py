@@ -63,15 +63,16 @@ class LLMRouterTests(unittest.TestCase):
         self.assertEqual(meta["selected_role"], "main")
         self.assertEqual(meta["reason"], "small_missing_main_fallback")
 
-    def test_explicit_base_role_overrides_local(self):
+    def test_explicit_base_role_is_rejected_and_kept_local(self):
         cfg, meta = resolve_llm_route(
             self.cfg,
             task_profile="tax_match_small",
             model_role="base",
         )
-        self.assertEqual(cfg["model"], "qwen3-14b-instruct-awq")
-        self.assertEqual(meta["selected_role"], "base")
-        self.assertEqual(meta["reason"], "preferred_role")
+        self.assertEqual(cfg["model"], "qwen3-4b-instruct-awq")
+        self.assertEqual(meta["selected_role"], "small")
+        self.assertEqual(meta["selected_source"], "small_model")
+        self.assertEqual(meta["reason"], "base_role_rejected")
 
 
 if __name__ == "__main__":

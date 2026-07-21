@@ -65,12 +65,20 @@ def _is_model_target_ready(cfg: Dict[str, Any]) -> bool:
 
 def _resolve_task_role(local_cfg: Dict[str, Any], task_profile: str, preferred_role: str) -> Tuple[str, str]:
     normalized_preferred = _normalize_role(preferred_role)
-    if normalized_preferred in {"main", "small", "base"}:
+    # 安全约束：不允许 preferred_role 直接指定 "base"（云端），
+    # 仅接受 "main" / "small" 两个本地角色
+    if normalized_preferred in {"main", "small"}:
         return normalized_preferred, "preferred_role"
+    if normalized_preferred == "base":
+        # 忽略云端请求，降级到默认本地角色
+        default_role = _normalize_role(DEFAULT_TASK_ROLE_MAP.get(
+            task_profile) or DEFAULT_TASK_ROLE_MAP["default"])
+        return default_role, "base_role_rejected"
     routing_cfg = _clean_dict(local_cfg.get("routing"))
     profile_map = _clean_dict(routing_cfg.get("task_profiles"))
     mapped_role = _normalize_role(profile_map.get(task_profile))
-    if mapped_role in {"main", "small", "base"}:
+    # 安全约束：task_profiles 映射也不允许 "base"
+    if mapped_role in {"main", "small"}:
         return mapped_role, "task_profile_map"
     default_role = _normalize_role(DEFAULT_TASK_ROLE_MAP.get(
         task_profile) or DEFAULT_TASK_ROLE_MAP["default"])
@@ -114,7 +122,26 @@ def resolve_llm_route(
         "base": "",
     }.get(resolved_role, "main_model")
 
+    # allow_cloud_fallback: 显式开启才允许回退到 llm_config（云端）
+    # 默认 False = 纯本地部署，禁止任何云端逃逸
+    allow_cloud_fallback = _is_enabled(local_cfg.get("allow_cloud_fallback"), False)
+
     if resolved_role == "base":
+        if not allow_cloud_fallback:
+            # 拒绝云端路由，强制降级到本地 main_model
+            main_cfg = _clean_dict(local_cfg.get("main_model"))
+            if _is_model_target_ready(main_cfg):
+                merged_cfg = _normalize_model_cfg(base_cfg, main_cfg, local_cfg)
+                return merged_cfg, {
+                    "task_profile": task_profile,
+                    "requested_role": preferred_role or "auto",
+                    "selected_role": "main",
+                    "selected_source": "main_model",
+                    "reason": "base_role_rejected_no_cloud",
+                    "local_enabled": True,
+                    "allow_cloud_fallback": False,
+                }
+            # main_model 也不可用，返回 base 但在 meta 中标记
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
@@ -122,7 +149,7 @@ def resolve_llm_route(
             "selected_source": "llm_config",
             "reason": reason,
             "local_enabled": True,
-            "allow_small_to_main_fallback": allow_small_to_main_fallback,
+            "allow_cloud_fallback": allow_cloud_fallback,
         }
 
     local_target_cfg = _clean_dict(local_cfg.get(target_key))
@@ -152,24 +179,28 @@ def resolve_llm_route(
             "allow_small_to_main_fallback": True,
         }
 
-    if _is_model_target_ready(base_cfg):
+    # 安全约束：本地模型配置缺失时，默认拒绝静默回退到云端
+    if _is_model_target_ready(base_cfg) and allow_cloud_fallback:
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
             "selected_role": "base",
             "selected_source": "llm_config",
-            "reason": f"{resolved_role}_missing_base_route",
+            "reason": f"{resolved_role}_missing_cloud_fallback",
             "local_enabled": True,
+            "allow_cloud_fallback": True,
             "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
+    # 本地模型不可用且禁止云端回退 → 返回不完整的本地配置 + 告警 meta
     merged_cfg = _normalize_model_cfg(base_cfg, local_target_cfg, local_cfg)
     return merged_cfg, {
         "task_profile": task_profile,
         "requested_role": preferred_role or "auto",
         "selected_role": resolved_role,
-        "selected_source": target_key,
-        "reason": f"{resolved_role}_missing_no_route",
+        "selected_source": target_key or "main_model",
+        "reason": f"{resolved_role}_missing_no_cloud_fallback",
         "local_enabled": True,
+        "allow_cloud_fallback": False,
         "allow_small_to_main_fallback": allow_small_to_main_fallback,
     }

@@ -90,6 +90,9 @@ def run_contract_pipeline_bundle(
         "audit": audit,
         "meta": meta,
         "risk_summary": summarize_contract_risks(audit),
+        "final_report": audit.get("final_report") if isinstance(audit.get("final_report"), dict) else {},
+        "pipeline_summary": audit.get("pipeline_summary") if isinstance(audit.get("pipeline_summary"), dict) else {},
+        "reliability_summary": audit.get("reliability_summary") if isinstance(audit.get("reliability_summary"), dict) else {},
     }
 
 

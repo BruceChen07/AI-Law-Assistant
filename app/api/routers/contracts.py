@@ -510,6 +510,8 @@ def build_router(cfg):
             audit = {}
         if not isinstance(audit, dict):
             audit = {}
+        final_report = audit.get("final_report") if isinstance(
+            audit.get("final_report"), dict) else {}
         fmt = str((payload or {}).get("export_format") or "json").lower()
         if fmt not in {"json", "docx"}:
             raise HTTPException(
@@ -518,77 +520,87 @@ def build_router(cfg):
             "template_version") or "v1.0")
         locale = str((payload or {}).get("locale") or "zh-CN")
         brand = str((payload or {}).get("brand") or "")
-        risks = audit.get("risks") if isinstance(
-            audit.get("risks"), list) else []
-        citations = audit.get("citations") if isinstance(
-            audit.get("citations"), list) else []
-        citation_map = {str(c.get("citation_id") or "")                        : c for c in citations if isinstance(c, dict)}
-        risk_summary = {"high": 0, "medium": 0, "low": 0}
-        risk_items = []
-        evidence_items = []
-        for idx, r in enumerate(risks, start=1):
-            if not isinstance(r, dict):
-                continue
-            level = str(r.get("level") or "medium").lower()
-            level = level if level in {"high", "medium", "low"} else "medium"
-            risk_summary[level] += 1
-            location = r.get("location") if isinstance(
-                r.get("location"), dict) else {}
-            issue_id = f"r{idx}"
-            citation_id = str(r.get("citation_id") or "")
-            citation = citation_map.get(citation_id, {})
-            issue_text = str(r.get("issue") or "")
-            suggestion = str(r.get("suggestion") or "")
-            evidence_text = str(r.get("evidence") or "")
-            risk_items.append({
-                "issue_id": issue_id,
-                "risk_level": level,
-                "issue_text": issue_text,
-                "suggestion": suggestion,
-                "reviewer_status": "pending",
-                "reviewer_note": "",
-                "clause": {
-                    "clause_id": str(location.get("clause_id") or ""),
-                    "clause_path": str(location.get("clause_path") or ""),
-                    "clause_text": str(location.get("quote") or ""),
-                    "page_no": int(location.get("page_no") or 0),
-                    "paragraph_no": str(location.get("paragraph_no") or ""),
-                },
-                "rule": {
-                    "rule_id": citation_id,
-                    "law_title": str(citation.get("law_title") or r.get("law_title") or ""),
-                    "article_no": str(citation.get("article_no") or r.get("article_no") or ""),
-                    "source_text": str(citation.get("content") or citation.get("excerpt") or ""),
-                },
-            })
-            if evidence_text:
-                evidence_items.append({
+        if final_report:
+            report = dict(final_report)
+            overview = report.get("overview") if isinstance(
+                report.get("overview"), dict) else {}
+            if not str(overview.get("contract_filename") or "").strip():
+                overview["contract_filename"] = doc.get(
+                    "original_filename") or doc.get("filename") or ""
+            report["overview"] = overview
+            report["contract_id"] = str(report.get("contract_id") or document_id)
+        else:
+            risks = audit.get("risks") if isinstance(
+                audit.get("risks"), list) else []
+            citations = audit.get("citations") if isinstance(
+                audit.get("citations"), list) else []
+            citation_map = {str(c.get("citation_id") or ""): c for c in citations if isinstance(c, dict)}
+            risk_summary = {"high": 0, "medium": 0, "low": 0}
+            risk_items = []
+            evidence_items = []
+            for idx, r in enumerate(risks, start=1):
+                if not isinstance(r, dict):
+                    continue
+                level = str(r.get("level") or "medium").lower()
+                level = level if level in {"high", "medium", "low"} else "medium"
+                risk_summary[level] += 1
+                location = r.get("location") if isinstance(
+                    r.get("location"), dict) else {}
+                issue_id = f"r{idx}"
+                citation_id = str(r.get("citation_id") or "")
+                citation = citation_map.get(citation_id, {})
+                issue_text = str(r.get("issue") or "")
+                suggestion = str(r.get("suggestion") or "")
+                evidence_text = str(r.get("evidence") or "")
+                risk_items.append({
                     "issue_id": issue_id,
-                    "law_title": str(citation.get("law_title") or r.get("law_title") or ""),
-                    "article_no": str(citation.get("article_no") or r.get("article_no") or ""),
-                    "source_text": evidence_text,
-                    "source_page": int(location.get("page_no") or 0),
-                    "source_paragraph": str(location.get("paragraph_no") or ""),
-                    "clause_id": str(location.get("clause_id") or ""),
-                    "clause_path": str(location.get("clause_path") or ""),
+                    "risk_level": level,
+                    "issue_text": issue_text,
+                    "suggestion": suggestion,
+                    "reviewer_status": "pending",
+                    "reviewer_note": "",
+                    "clause": {
+                        "clause_id": str(location.get("clause_id") or ""),
+                        "clause_path": str(location.get("clause_path") or ""),
+                        "clause_text": str(location.get("quote") or ""),
+                        "page_no": int(location.get("page_no") or 0),
+                        "paragraph_no": str(location.get("paragraph_no") or ""),
+                    },
+                    "rule": {
+                        "rule_id": citation_id,
+                        "law_title": str(citation.get("law_title") or r.get("law_title") or ""),
+                        "article_no": str(citation.get("article_no") or r.get("article_no") or ""),
+                        "source_text": str(citation.get("content") or citation.get("excerpt") or ""),
+                    },
                 })
-        report = {
-            "contract_id": document_id,
-            "generated_at": datetime.utcnow().isoformat(),
-            "overview": {
-                "contract_filename": doc.get("original_filename") or doc.get("filename") or "",
-                "contract_parse_status": "done",
-                "clause_count": 0,
-                "issue_count": len(risk_items),
-                "trace_count": 0,
-            },
-            "risk_summary": risk_summary,
-            "review_summary": {"pending": len(risk_items), "confirmed": 0, "exception": 0},
-            "risk_items": risk_items,
-            "evidence_items": evidence_items,
-            "review_conclusions": [],
-            "exception_items": [],
-        }
+                if evidence_text:
+                    evidence_items.append({
+                        "issue_id": issue_id,
+                        "law_title": str(citation.get("law_title") or r.get("law_title") or ""),
+                        "article_no": str(citation.get("article_no") or r.get("article_no") or ""),
+                        "source_text": evidence_text,
+                        "source_page": int(location.get("page_no") or 0),
+                        "source_paragraph": str(location.get("paragraph_no") or ""),
+                        "clause_id": str(location.get("clause_id") or ""),
+                        "clause_path": str(location.get("clause_path") or ""),
+                    })
+            report = {
+                "contract_id": document_id,
+                "generated_at": datetime.utcnow().isoformat(),
+                "overview": {
+                    "contract_filename": doc.get("original_filename") or doc.get("filename") or "",
+                    "contract_parse_status": "done",
+                    "clause_count": 0,
+                    "issue_count": len(risk_items),
+                    "trace_count": 0,
+                },
+                "risk_summary": risk_summary,
+                "review_summary": {"pending": len(risk_items), "confirmed": 0, "exception": 0},
+                "risk_items": risk_items,
+                "evidence_items": evidence_items,
+                "review_conclusions": [],
+                "exception_items": [],
+            }
         report_dir = os.path.join(cfg["files_dir"], "contract_reports")
         os.makedirs(report_dir, exist_ok=True)
         ext = "json" if fmt == "json" else "docx"

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.core.token_utils import estimate_messages_tokens
 from app.core.llm_router import resolve_llm_route
 from app.core.llm_trace import LlmTraceCollector, get_trace_collector
 from app.core.secure_store import get_llm_api_key
@@ -223,30 +224,7 @@ class LLMService:
         return f"{s[:4]}***{s[-4:]}(len={len(s)})"
 
     def _estimate_input_tokens(self, messages: List[Dict[str, Any]]) -> int:
-        parts: List[str] = []
-        for m in messages or []:
-            if not isinstance(m, dict):
-                parts.append(str(m or ""))
-                continue
-            content = m.get("content", "")
-            if isinstance(content, str):
-                parts.append(content)
-                continue
-            if isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        text = str(item.get("text")
-                                   or item.get("content") or "")
-                        if text:
-                            parts.append(text)
-                    else:
-                        parts.append(str(item or ""))
-                continue
-            parts.append(str(content or ""))
-        joined = "\n".join([x for x in parts if x])
-        cjk = len(re.findall(r"[\u4e00-\u9fff]", joined))
-        non_cjk = max(0, len(joined) - cjk)
-        return max(1, int(cjk * 1.1 + non_cjk / 3.8)) if joined else 0
+        return estimate_messages_tokens(messages)
 
     def _trace_options(self) -> Dict[str, Any]:
         enabled = bool(self.cfg.get("llm_trace_enabled", False))
@@ -307,7 +285,12 @@ class LLMService:
         }
         extra_body: Dict[str, Any] = {}
         if "enable_thinking" in cfg:
-            extra_body["enable_thinking"] = bool(cfg.get("enable_thinking"))
+            enable_thinking = bool(cfg.get("enable_thinking"))
+            extra_body["enable_thinking"] = enable_thinking
+            if not enable_thinking:
+                # Qwen3 / llama.cpp: 同时通过 chat_template_kwargs 抑制思考模式
+                # 仅传 enable_thinking 顶层参数时，llama.cpp 可能忽略（非标准参数）
+                extra_body["chat_template_kwargs"] = {"enable_thinking": False}
         thinking_budget = cfg.get("thinking_budget_tokens")
         if thinking_budget is not None:
             try:
@@ -630,16 +613,45 @@ class LLMService:
         provider_name = self._clean_text(
             cfg.get("provider", "openai_compatible")).lower()
         used_reasoning_fallback = False
+        thinking_leaked = False
+        # 检查调用方是否显式禁用了思考模式
+        thinking_disabled = "enable_thinking" in cfg and not bool(cfg.get("enable_thinking"))
         if provider_name == "llama_cpp" and not str(content or "").strip() and str(reasoning_content or "").strip():
-            # Some llama.cpp + reasoning-capable templates return the full model output in
-            # `reasoning_content` while leaving `content` empty. Fallback here so the
-            # application does not treat a successful inference as a blank response.
-            content = reasoning_content
-            used_reasoning_fallback = True
+            if thinking_disabled:
+                # enable_thinking=False 但模型仍输出了 reasoning_content → 思考模式泄漏
+                # 此时 reasoning_content 是思维链草稿，不是有效响应，不能作为 content
+                thinking_leaked = True
+                logger.warning(
+                    "llama_cpp_thinking_leaked_rejected model=%s api_base=%s reasoning_chars=%s",
+                    model,
+                    api_base,
+                    len(reasoning_content),
+                )
+            else:
+                # Some llama.cpp + reasoning-capable templates return the full model output in
+                # `reasoning_content` while leaving `content` empty. Fallback here so the
+                # application does not treat a successful inference as a blank response.
+                content = reasoning_content
+                used_reasoning_fallback = True
+                logger.warning(
+                    "llama_cpp_reasoning_content_fallback model=%s api_base=%s",
+                    model,
+                    api_base,
+                )
+        # 检测思维链泄漏到 content 字段（即使不是通过 reasoning_content 回退）
+        _THINKING_PREFIX_PATTERNS = (
+            "here's a thinking", "here is a thinking", "let me think",
+            "thinking process", "my thought process", "i'll think through",
+            "step 1:", "**analysis**", "<think>", "let me analyze",
+        )
+        content_stripped = str(content or "").strip().lower()
+        if content_stripped and any(content_stripped.startswith(p) for p in _THINKING_PREFIX_PATTERNS):
+            thinking_leaked = True
             logger.warning(
-                "llama_cpp_reasoning_content_fallback model=%s api_base=%s",
+                "llm_thinking_chain_in_content model=%s api_base=%s content_head=%s",
                 model,
                 api_base,
+                content_stripped[:120],
             )
         parsed = dict(raw)
         if not isinstance(parsed.get("usage"), dict):

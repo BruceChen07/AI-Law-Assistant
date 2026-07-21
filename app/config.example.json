@@ -185,6 +185,37 @@
             }
         }
     },
+    "audit_token_policy": {
+        "enabled": true,
+        "context_window_tokens": 16384,
+        "input_soft_limit_tokens": 9728,
+        "input_hard_limit_tokens": 11264,
+        "reserve_output_tokens": 4096,
+        "safety_margin_tokens": 1024,
+        "force_multi_pass_when_exceed": true,
+        "force_multi_pass_when_prompt_truncated": true,
+        "clause_group_target_tokens": 4200,
+        "max_clauses_per_group": 8,
+        "chunk_output_tokens": 1536,
+        "max_evidence_items_per_round": 12,
+        "max_rounds": 12
+    },
+    "audit_risk_rule_engine": {
+        "dedupe_similarity_threshold": 0.9,
+        "dedupe_require_same_clause": true,
+        "keep_higher_confidence": true,
+        "require_citation_for_high_risk": true
+    },
+    "audit_reliability_policy": {
+        "enabled": true,
+        "retry_enabled": true,
+        "retry_on_parse_failed": true,
+        "retry_on_truncated": true,
+        "retry_on_high_risk_missing_citation": true,
+        "retry_on_conflict": true,
+        "max_retry_per_chunk": 1,
+        "max_retry_chunks": 6
+    },
     "secret_store": {
         "enabled": true,
         "backend": "keyring",
