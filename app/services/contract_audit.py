@@ -183,9 +183,15 @@ def _build_classic_audit(
     full_text_context = str(text or "")[:full_ctx_budget]
 
     if norm_lang == "en":
-        system = "You are a senior contract audit lawyer. Output ONLY JSON."
+        system = "You are a senior tax contract audit lawyer. Output ONLY JSON."
         user = "Use only the contract text and reference evidence below.\n"
-        user += "Do not output reasoning process.\n"
+        user += "Do not output reasoning process.\n\n"
+        user += "TAX RISK ONLY: Only output tax-related risks (tax rate, invoicing, tax obligations, withholding tax, tax compliance). "
+        user += "Do NOT output contract clause descriptions, breach of contract, or payment obligation issues that are not tax risks.\n"
+        user += "CITATION REQUIRED: Every risk MUST include a citation_id from the whitelist and the corresponding law_title. "
+        user += "If you cannot match a risk to a regulation in the whitelist, do NOT output that risk.\n"
+        user += "RISK DESCRIPTION: The 'issue' field must describe the specific tax compliance risk and why it violates or conflicts with the cited regulation. "
+        user += "Do NOT simply copy contract clause text as the issue.\n"
         user += "CROSS-CLAUSE RULE: Before flagging 'missing/unspecified' risks, verify against the full contract text. "
         user += "If the element is covered elsewhere in the contract, do NOT flag it.\n"
         if reference_evidence_text:
@@ -195,8 +201,13 @@ def _build_classic_audit(
         user += f"Contract Clauses (structured):\n{clause_text}\n\n"
         user += "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
     else:
-        system = "你是资深合同审计律师。只输出JSON。"
-        user = "仅根据合同文本与参考法规证据输出结果；不要输出推理过程。\n"
+        system = "你是资深财税合同审计律师。只输出JSON。"
+        user = "仅根据合同文本与参考法规证据输出结果；不要输出推理过程。\n\n"
+        user += "【仅限涉税风险】只输出涉税风险（税率、开票、纳税义务、代扣代缴、税务合规等）。"
+        user += "不要输出合同条款描述、违约责任、支付义务等非涉税内容。\n"
+        user += "【强制引用】每个风险项必须包含 citation_id（从白名单中选择）和对应的 law_title。"
+        user += "无法从白名单中匹配到法规条款的风险，不得输出。\n"
+        user += "【风险描述】issue 字段必须描述具体的税务合规风险及其违反或冲突的法规依据，不得仅复制合同条款原文。\n"
         user += "【跨条款联合校验】标记'缺失/未约定'风险前，必须核查合同全文。若该要素已在其他条款中约定，不得标记为风险。\n"
         if reference_evidence_text:
             user += f"{reference_evidence_text}\n\n"
@@ -244,6 +255,10 @@ def _build_classic_audit(
         evidence_text = str(r.get("evidence") or "").strip()
         # Skip risks with completely empty content (LLM returned a skeleton without substance)
         if len(issue_text) < 6 and len(evidence_text) < 6:
+            continue
+        # Skip risks without any legal reference (no citation_id AND no law_title)
+        # These are likely the model echoing contract text rather than doing tax risk analysis
+        if not mapped_cid and not law_title.strip():
             continue
         normalized_risks.append(
             {
