@@ -18,6 +18,9 @@ logger = logging.getLogger("law_assistant")
 
 
 class LLMService:
+    # Cache for auto-detected model names, keyed by api_base
+    _model_cache: Dict[str, str] = {}
+
     def __init__(self, cfg: Dict[str, Any]):
         self.cfg = cfg or {}
 
@@ -90,6 +93,60 @@ class LLMService:
         if not p.scheme or not p.netloc:
             raise RuntimeError("llm_config api_base invalid")
         return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
+
+    def _resolve_model_name(self, api_base: str, provider: str, configured_model: str) -> str:
+        """Resolve model name. If configured as 'auto', detect from server.
+
+        For local providers (llama_cpp, ollama), the model field in the
+        request is ignored by the server – it uses whatever model is loaded.
+        We query /v1/models to get the actual model name for display/trace.
+        """
+        if configured_model.lower() != "auto":
+            return configured_model
+        # Check cache first
+        cached = LLMService._model_cache.get(api_base)
+        if cached:
+            return cached
+        # Try to detect from server
+        detected = self._detect_model_from_server(api_base, provider)
+        if detected:
+            LLMService._model_cache[api_base] = detected
+            logger.info("model_auto_detected api_base=%s model=%s", api_base, detected)
+            return detected
+        # Detection failed – use "auto" as placeholder; will be
+        # updated from response after first successful call
+        logger.warning("model_auto_detect_failed api_base=%s using placeholder", api_base)
+        return configured_model
+
+    def _detect_model_from_server(self, api_base: str, provider: str) -> str:
+        """Query the LLM server's /v1/models endpoint to get the actual model name."""
+        try:
+            base_url = self._build_base_url(api_base)
+            # For ollama, use /api/tags; for openai_compatible/llama_cpp, use /v1/models
+            if provider == "ollama":
+                ollama_base = self._build_ollama_base_url(api_base)
+                url = f"{ollama_base}/api/tags"
+            else:
+                url = f"{base_url}/models"
+            self._enforce_network_policy(url)
+            resp = httpx.get(url, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            if provider == "ollama":
+                models = data.get("models") or []
+                if models:
+                    name = str(models[0].get("name") or models[0].get("model") or "").strip()
+                    if name:
+                        return name
+            else:
+                models = data.get("data") or data.get("models") or []
+                if models and isinstance(models, list):
+                    name = str(models[0].get("id") or models[0].get("model") or "").strip()
+                    if name:
+                        return name
+        except Exception as e:
+            logger.debug("model_detect_error api_base=%s err=%s", api_base, str(e))
+        return ""
 
     def _build_ollama_base_url(self, base: str) -> str:
         s = self._build_base_url(base)
@@ -621,8 +678,12 @@ class LLMService:
         max_tokens = int(cfg.get("max_tokens", 2048))
         extra_headers = cfg.get("headers") if isinstance(
             cfg.get("headers"), dict) else None
-        if not api_base or not model:
-            raise RuntimeError("llm_config api_base or model missing")
+        if not api_base:
+            raise RuntimeError("llm_config api_base missing")
+        if not model:
+            raise RuntimeError("llm_config model missing")
+        # Resolve "auto" model name from server
+        model = self._resolve_model_name(api_base, provider, model)
 
         base_url = api_base
         self._enforce_network_policy(base_url)
@@ -751,6 +812,12 @@ class LLMService:
         total_tokens = int(usage.get("total_tokens") or (
             prompt_tokens + completion_tokens))
         latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Update model name from response if available (more accurate than config)
+        response_model = self._clean_text(parsed.get("model", ""))
+        if response_model and response_model != model:
+            LLMService._model_cache[api_base] = response_model
+            model = response_model
 
         # ---- Trace: 记录成功 ----
         if trace_span and trace_collector.enabled:
