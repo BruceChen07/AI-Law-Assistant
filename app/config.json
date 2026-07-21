@@ -215,10 +215,10 @@
         "http://127.0.0.1:5174"
     ],
     "memory_runtime_config": {
-        "memory_module_enabled": true,
+        "memory_module_enabled": false,
         "memory_mode_when_disabled": "classic",
         "memory_disable_fallback_on_error": true,
-        "memory_token_guard_enabled": true,
+        "memory_token_guard_enabled": false,
         "memory_max_llm_calls_per_audit": 12,
         "memory_max_prompt_chars_per_clause": 2400
     },
