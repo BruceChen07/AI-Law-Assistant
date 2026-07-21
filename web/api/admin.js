@@ -34,6 +34,51 @@ export async function adminDeleteUser(userId) {
   })
 }
 
+export async function adminListSkills(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/skills${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetSkill(skillId) {
+  return requestJson(`${API_BASE}/api/admin/skills/${encodeURIComponent(skillId)}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminCreateSkill(payload) {
+  return requestJson(`${API_BASE}/api/admin/skills`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload || {})
+  })
+}
+
+export async function adminUpdateSkill(skillId, payload) {
+  return requestJson(`${API_BASE}/api/admin/skills/${encodeURIComponent(skillId)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload || {})
+  })
+}
+
+export async function adminSetSkillStatus(skillId, status) {
+  return requestJson(`${API_BASE}/api/admin/skills/${encodeURIComponent(skillId)}/status`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ status })
+  })
+}
+
+export async function adminDeleteSkill(skillId) {
+  return requestJson(`${API_BASE}/api/admin/skills/${encodeURIComponent(skillId)}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function adminGetStats() {
   return requestJson(`${API_BASE}/api/admin/stats`, {
     headers: { ...getAuthHeaders() }

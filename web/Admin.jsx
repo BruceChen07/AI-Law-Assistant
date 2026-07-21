@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo, useRef } from "react"
 import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminGetOllamaModels, adminGetLlamaCppModels, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import LlmTraceViewer from "./LlmTraceViewer"
+import SkillManager from "./SkillManager"
 import { adminI18n } from "./i18n/adminI18n"
 
 const OLLAMA_MODEL_STORAGE_KEY = "admin.selectedOllamaModel"
 const LLAMACPP_MODEL_STORAGE_KEY = "admin.selectedLlamaCppModel"
-const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor", "llm-traces"])
+const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 export default function Admin({ onBack, lang, tab: externalTab = "documents", onTabChange }) {
   const normalizedInitialTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
@@ -104,6 +105,76 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
   const showLegacyOllamaTools = false
+  const skillLabels = {
+    title: t.skillTitle,
+    subtitle: t.skillSubtitle,
+    create: t.skillCreate,
+    createTitle: t.skillCreateTitle,
+    editTitle: t.skillEditTitle,
+    close: t.skillClose,
+    refresh: t.skillRefresh,
+    refreshing: t.skillRefreshing,
+    search: t.skillSearch,
+    searchPlaceholder: t.skillSearchPlaceholder,
+    searchButton: t.skillSearchButton,
+    reset: t.skillReset,
+    allCategories: t.skillAllCategories,
+    allStatuses: t.skillAllStatuses,
+    scene: t.skillScene,
+    scenePlaceholder: t.skillScenePlaceholder,
+    id: t.skillId,
+    displayName: t.skillDisplayName,
+    category: t.colCategory,
+    visibility: t.skillVisibility,
+    visibilityPublic: t.skillVisibilityPublic,
+    visibilityPrivate: t.skillVisibilityPrivate,
+    status: t.skillStatus,
+    statusActive: t.skillStatusActive,
+    statusDisabled: t.skillStatusDisabled,
+    statusDeleted: t.skillStatusDeleted,
+    sortOrder: t.skillSortOrder,
+    tags: t.skillTags,
+    tagsPlaceholder: t.skillTagsPlaceholder,
+    description: t.skillDescription,
+    sourceUrl: t.skillSourceUrl,
+    referenceSummary: t.skillReferenceSummary,
+    inputSchema: t.skillInputSchema,
+    outputSchema: t.skillOutputSchema,
+    configSchema: t.skillConfigSchema,
+    references: t.skillReferences,
+    updatedAt: t.skillUpdatedAt,
+    empty: t.skillEmpty,
+    edit: t.skillEdit,
+    enable: t.skillEnable,
+    disable: t.skillDisable,
+    saveCreate: t.skillSaveCreate,
+    saveUpdate: t.skillSaveUpdate,
+    saving: t.skillSaving,
+    createSuccess: t.skillCreateSuccess,
+    updateSuccess: t.skillUpdateSuccess,
+    deleteSuccess: t.skillDeleteSuccess,
+    enableSuccess: t.skillEnableSuccess,
+    disableSuccess: t.skillDisableSuccess,
+    loadFailed: t.skillLoadFailed,
+    loadDetailFailed: t.skillLoadDetailFailed,
+    saveFailed: t.skillSaveFailed,
+    deleteFailed: t.skillDeleteFailed,
+    statusFailed: t.skillStatusFailed,
+    loadingDetail: t.skillLoadingDetail,
+    idRequired: t.skillIdRequired,
+    idFormat: t.skillIdFormat,
+    displayNameRequired: t.skillDisplayNameRequired,
+    categoryRequired: t.skillCategoryRequired,
+    sceneRequired: t.skillSceneRequired,
+    pageInfo: t.skillPageInfo,
+    colName: t.skillDisplayName,
+    colActions: t.colActions,
+    previous: t.previous,
+    next: t.next,
+    loading: t.loading,
+    confirm: t.confirm,
+    cancel: t.cancel
+  }
   
   useEffect(() => {
     const nextTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
@@ -739,6 +810,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
         <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>{t.tabDocs}</button>
         <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>{t.tabUsers}</button>
         <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>{t.tabModel}</button>
+        <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>{t.tabSkills}</button>
         <button className={tab === "regulations" ? "active" : ""} onClick={() => setTab("regulations")}>{t.tabRegulations}</button>
         <button className={tab === "token-monitor" ? "active" : ""} onClick={() => setTab("token-monitor")}>{t.tabTokenMonitor}</button>
         <button className={tab === "llm-traces" ? "active" : ""} onClick={() => setTab("llm-traces")}>LLM Trace</button>
@@ -1239,6 +1311,10 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
             </div>
           )}
         </div>
+      )}
+
+      {tab === "skills" && (
+        <SkillManager lang={lang} labels={skillLabels} />
       )}
       
       {tab === "users" && (

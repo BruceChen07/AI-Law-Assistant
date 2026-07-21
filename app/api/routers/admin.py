@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Literal, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import httpx
 from app.core.auth import get_all_users, update_user_role, log_audit
 from app.api.dependencies import require_admin, get_app_llm
@@ -22,6 +22,14 @@ from app.services.memory_promotion import (
     list_pending_rule_memories,
     promote_episode_to_rule,
     review_rule_memory,
+)
+from app.services.audit_capabilities import (
+    create_skill,
+    delete_skill,
+    get_admin_skill_detail,
+    list_admin_skills,
+    set_skill_status,
+    update_skill,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -71,6 +79,76 @@ class DocumentListResponse(BaseModel):
 class DeleteResponse(BaseModel):
     message: str
     deleted_id: str
+
+
+# ============ Skill Management Models ============
+class SkillResponse(BaseModel):
+    id: str
+    display_name: str
+    category: str
+    scene: str
+    description: str = ""
+    owner_type: str
+    owner_id: Optional[str] = None
+    visibility: str
+    status: str
+    source_url: str = ""
+    reference_summary: str = ""
+    input_schema: Dict[str, Any] = {}
+    output_schema: Dict[str, Any] = {}
+    config_schema: Dict[str, Any] = {}
+    tags: List[str] = []
+    sort_order: int
+    template_ref_count: int = 0
+    agent_ref_count: int = 0
+    in_use: bool = False
+    created_at: str
+    updated_at: Optional[str] = None
+
+
+class SkillListResponse(BaseModel):
+    items: List[SkillResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class SkillCreateRequest(BaseModel):
+    id: Optional[str] = Field(default=None, max_length=64)
+    display_name: str = Field(..., min_length=1, max_length=120)
+    category: str = Field(..., min_length=1, max_length=60)
+    scene: str = Field(..., min_length=1, max_length=80)
+    description: str = ""
+    visibility: str = "public"
+    status: str = "active"
+    source_url: str = ""
+    reference_summary: str = ""
+    input_schema: Dict[str, Any] = Field(default_factory=dict)
+    output_schema: Dict[str, Any] = Field(default_factory=dict)
+    config_schema: Dict[str, Any] = Field(default_factory=dict)
+    tags: List[str] = Field(default_factory=list)
+    sort_order: int = 100
+
+
+class SkillUpdateRequest(BaseModel):
+    display_name: Optional[str] = Field(
+        default=None, min_length=1, max_length=120)
+    category: Optional[str] = Field(default=None, min_length=1, max_length=60)
+    scene: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    description: Optional[str] = None
+    visibility: Optional[str] = None
+    status: Optional[str] = None
+    source_url: Optional[str] = None
+    reference_summary: Optional[str] = None
+    input_schema: Optional[Dict[str, Any]] = None
+    output_schema: Optional[Dict[str, Any]] = None
+    config_schema: Optional[Dict[str, Any]] = None
+    tags: Optional[List[str]] = None
+    sort_order: Optional[int] = None
+
+
+class SkillStatusUpdateRequest(BaseModel):
+    status: Literal["active", "disabled"]
 
 
 # ============ Stats Models ============
@@ -845,6 +923,164 @@ def delete_user(
     )
 
     return DeleteResponse(message="User deleted successfully", deleted_id=user_id)
+
+
+# ============ Skill Management ============
+@router.get("/skills", response_model=SkillListResponse)
+def admin_get_skills(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    search: str = Query(""),
+    category: str = Query(""),
+    scene: str = Query(""),
+    status: str = Query(""),
+    current_user: dict = Depends(require_admin),
+):
+    try:
+        result = list_admin_skills(
+            get_config(),
+            page=page,
+            page_size=page_size,
+            search=search,
+            category=category,
+            scene=scene,
+            status=status,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SkillListResponse(
+        items=[SkillResponse(**item) for item in result["items"]],
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+
+
+@router.get("/skills/{skill_id}", response_model=SkillResponse)
+def admin_get_skill_detail(
+    skill_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    item = get_admin_skill_detail(get_config(), skill_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Skill not found")
+    return SkillResponse(**item)
+
+
+@router.post("/skills", response_model=SkillResponse)
+def admin_create_skill(
+    payload: SkillCreateRequest,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    try:
+        item = create_skill(get_config(), str(
+            current_user.get("id") or ""), payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"],
+        "create",
+        "skill",
+        item["id"],
+        ip_address,
+        user_agent,
+        f"Created skill: {item['display_name']}",
+    )
+    return SkillResponse(**item)
+
+
+@router.put("/skills/{skill_id}", response_model=SkillResponse)
+def admin_update_skill(
+    skill_id: str,
+    payload: SkillUpdateRequest,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    try:
+        item = update_skill(get_config(), skill_id,
+                            payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        message = str(exc)
+        if message == "skill not found":
+            raise HTTPException(
+                status_code=404, detail="Skill not found") from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"],
+        "update",
+        "skill",
+        item["id"],
+        ip_address,
+        user_agent,
+        f"Updated skill: {item['display_name']}",
+    )
+    return SkillResponse(**item)
+
+
+@router.post("/skills/{skill_id}/status", response_model=SkillResponse)
+def admin_set_skill_status(
+    skill_id: str,
+    payload: SkillStatusUpdateRequest,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    try:
+        item = set_skill_status(get_config(), skill_id, payload.status)
+    except ValueError as exc:
+        message = str(exc)
+        if message == "skill not found":
+            raise HTTPException(
+                status_code=404, detail="Skill not found") from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"],
+        "update_status",
+        "skill",
+        item["id"],
+        ip_address,
+        user_agent,
+        f"Set skill status to {item['status']}",
+    )
+    return SkillResponse(**item)
+
+
+@router.delete("/skills/{skill_id}", response_model=DeleteResponse)
+def admin_delete_skill(
+    skill_id: str,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    try:
+        item = delete_skill(get_config(), skill_id)
+    except ValueError as exc:
+        message = str(exc)
+        if message == "skill not found":
+            raise HTTPException(
+                status_code=404, detail="Skill not found") from exc
+        raise HTTPException(status_code=400, detail=message) from exc
+
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"],
+        "delete",
+        "skill",
+        skill_id,
+        ip_address,
+        user_agent,
+        f"Deleted skill: {item['display_name']}",
+    )
+    return DeleteResponse(message="Skill deleted successfully", deleted_id=skill_id)
 
 
 class VectorStoreConfigUpdate(BaseModel):

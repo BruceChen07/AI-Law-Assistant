@@ -190,3 +190,136 @@
 .wide {
   grid-column: 1 / -1;
 }
+
+.skill-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.skill-toolbar-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.skill-filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.skill-filters label,
+.skill-form-grid label {
+  display: grid;
+  gap: 6px;
+}
+
+.skill-filter-actions {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.skill-editor-card {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 16px;
+  background: var(--admin-panel-bg);
+  margin-bottom: 18px;
+}
+
+.skill-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.skill-form-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.skill-table-wrap {
+  overflow-x: auto;
+}
+
+.skill-action-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.skill-row-subtext {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  max-width: 420px;
+}
+
+.skill-tag-list {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+}
+
+.skill-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.skill-status-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.skill-status-disabled {
+  color: #b54708;
+  background: rgba(245, 158, 11, 0.12);
+}
+
+.skill-status-deleted {
+  color: var(--danger);
+  background: rgba(244, 67, 54, 0.12);
+}
+
+.form-error {
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+@media (max-width: 1024px) {
+  .skill-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .skill-filters,
+  .skill-form-grid,
+  .stats-grid,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .skill-toolbar,
+  .skill-filter-actions,
+  .skill-form-actions,
+  .skill-action-group,
+  .row {
+    align-items: stretch;
+  }
+}

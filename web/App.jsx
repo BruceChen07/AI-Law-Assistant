@@ -6,7 +6,7 @@ import { appI18n } from "./i18n/appI18n"
 
 const THEME_STORAGE_KEY = "ui_theme"
 const APP_LANG_STORAGE_KEY = "ui_lang"
-const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "regulations", "token-monitor", "llm-traces"])
+const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")

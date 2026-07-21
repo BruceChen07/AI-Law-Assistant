@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -500,6 +501,374 @@ def get_skill_detail(cfg: Dict[str, Any], skill_id: str, user_id: str = "") -> O
     row = cur.fetchone()
     conn.close()
     return _row_to_skill(dict(row)) if row else None
+
+
+_SKILL_STATUS_VALUES = {"active", "disabled", "deleted"}
+_SKILL_VISIBILITY_VALUES = {"public", "private"}
+_SKILL_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
+
+
+def _slugify_skill_id(value: str) -> str:
+    text = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip().lower())
+    text = re.sub(r"-{2,}", "-", text).strip("-_")
+    return text[:64]
+
+
+def _normalize_skill_id(raw_id: str, display_name: str) -> str:
+    candidate = str(raw_id or "").strip().lower()
+    if not candidate:
+        candidate = _slugify_skill_id(display_name)
+    if not candidate:
+        raise ValueError("skill id is required")
+    if not _SKILL_ID_PATTERN.match(candidate):
+        raise ValueError(
+            "skill id must be 3-64 chars and contain only lowercase letters, numbers, underscores, or hyphens"
+        )
+    return candidate
+
+
+def _normalize_json_schema(value: Any, field_name: str) -> Dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"{field_name} must be an object")
+    return value
+
+
+def _normalize_skill_payload(
+    payload: Dict[str, Any],
+    existing: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    current = existing or {}
+    display_name = str(
+        payload.get("display_name", current.get("display_name", "")) or ""
+    ).strip()
+    category = str(payload.get(
+        "category", current.get("category", "")) or "").strip()
+    scene = str(payload.get("scene", current.get("scene", "")) or "").strip()
+    description = str(
+        payload.get("description", current.get("description", "")) or ""
+    ).strip()
+    source_url = str(payload.get(
+        "source_url", current.get("source_url", "")) or "").strip()
+    reference_summary = str(
+        payload.get("reference_summary", current.get(
+            "reference_summary", "")) or ""
+    ).strip()
+    visibility = str(
+        payload.get("visibility", current.get(
+            "visibility", "public")) or "public"
+    ).strip().lower()
+    status = str(payload.get("status", current.get(
+        "status", "active")) or "active").strip().lower()
+    sort_order_raw = payload.get("sort_order", current.get("sort_order", 100))
+    tags = _normalize_string_list(
+        payload.get("tags", current.get("tags", [])),
+        "tags",
+    ) or []
+    input_schema = _normalize_json_schema(
+        payload.get("input_schema", current.get("input_schema", {})),
+        "input_schema",
+    )
+    output_schema = _normalize_json_schema(
+        payload.get("output_schema", current.get("output_schema", {})),
+        "output_schema",
+    )
+    config_schema = _normalize_json_schema(
+        payload.get("config_schema", current.get("config_schema", {})),
+        "config_schema",
+    )
+
+    if not display_name:
+        raise ValueError("display_name is required")
+    if len(display_name) > 120:
+        raise ValueError("display_name must be <= 120 chars")
+    if not category:
+        raise ValueError("category is required")
+    if len(category) > 60:
+        raise ValueError("category must be <= 60 chars")
+    if not scene:
+        raise ValueError("scene is required")
+    if len(scene) > 80:
+        raise ValueError("scene must be <= 80 chars")
+    if visibility not in _SKILL_VISIBILITY_VALUES:
+        raise ValueError("visibility must be public or private")
+    if status not in _SKILL_STATUS_VALUES:
+        raise ValueError("status must be active, disabled, or deleted")
+
+    try:
+        sort_order = int(sort_order_raw)
+    except Exception as exc:
+        raise ValueError("sort_order must be an integer") from exc
+    if sort_order < 0 or sort_order > 100000:
+        raise ValueError("sort_order must be between 0 and 100000")
+
+    return {
+        "display_name": display_name,
+        "category": category,
+        "scene": scene,
+        "description": description,
+        "source_url": source_url,
+        "reference_summary": reference_summary,
+        "visibility": visibility,
+        "status": status,
+        "sort_order": sort_order,
+        "tags": tags,
+        "input_schema": input_schema,
+        "output_schema": output_schema,
+        "config_schema": config_schema,
+    }
+
+
+def _get_skill_reference_counts(cur, skill_id: str) -> Dict[str, int]:
+    token = f'"{skill_id}"'
+    cur.execute(
+        """
+        SELECT COUNT(1)
+        FROM audit_template
+        WHERE status <> 'deleted' AND skill_ids_json LIKE ?
+        """,
+        (f"%{token}%",),
+    )
+    template_ref_count = int((cur.fetchone() or [0])[0] or 0)
+    cur.execute(
+        """
+        SELECT COUNT(1)
+        FROM agent_profile
+        WHERE status <> 'deleted' AND enabled_skill_ids_json LIKE ?
+        """,
+        (f"%{token}%",),
+    )
+    agent_ref_count = int((cur.fetchone() or [0])[0] or 0)
+    return {
+        "template_ref_count": template_ref_count,
+        "agent_ref_count": agent_ref_count,
+        "in_use": template_ref_count > 0 or agent_ref_count > 0,
+    }
+
+
+def _attach_skill_reference_meta(cur, item: Dict[str, Any]) -> Dict[str, Any]:
+    refs = _get_skill_reference_counts(cur, str(item.get("id") or ""))
+    out = dict(item)
+    out.update(refs)
+    return out
+
+
+def list_admin_skills(
+    cfg: Dict[str, Any],
+    page: int = 1,
+    page_size: int = 10,
+    search: str = "",
+    category: str = "",
+    scene: str = "",
+    status: str = "",
+) -> Dict[str, Any]:
+    ensure_audit_capabilities_seeded(cfg)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    clauses = ["1=1"]
+    params: List[Any] = []
+    search_text = str(search or "").strip()
+    if search_text:
+        clauses.append(
+            "(id LIKE ? OR display_name LIKE ? OR description LIKE ? OR reference_summary LIKE ?)"
+        )
+        token = f"%{search_text}%"
+        params.extend([token, token, token, token])
+    if category:
+        clauses.append("category = ?")
+        params.append(str(category).strip())
+    if scene:
+        clauses.append("scene = ?")
+        params.append(str(scene).strip())
+    if status:
+        clauses.append("status = ?")
+        params.append(str(status).strip().lower())
+
+    where_sql = " AND ".join(clauses)
+    cur.execute(f"SELECT COUNT(1) FROM audit_skill WHERE {where_sql}", params)
+    total = int((cur.fetchone() or [0])[0] or 0)
+    offset = max(page - 1, 0) * page_size
+    cur.execute(
+        f"""
+        SELECT *
+        FROM audit_skill
+        WHERE {where_sql}
+        ORDER BY sort_order ASC, updated_at DESC, created_at DESC, display_name ASC
+        LIMIT ? OFFSET ?
+        """,
+        params + [page_size, offset],
+    )
+    rows = cur.fetchall()
+    items = [
+        _attach_skill_reference_meta(cur, _row_to_skill(dict(row)))
+        for row in rows
+    ]
+    conn.close()
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+def get_admin_skill_detail(cfg: Dict[str, Any], skill_id: str) -> Optional[Dict[str, Any]]:
+    ensure_audit_capabilities_seeded(cfg)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        return None
+    item = _attach_skill_reference_meta(cur, _row_to_skill(dict(row)))
+    conn.close()
+    return item
+
+
+def create_skill(
+    cfg: Dict[str, Any],
+    owner_id: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    ensure_audit_capabilities_seeded(cfg)
+    now = _utc_now_iso()
+    normalized = _normalize_skill_payload(payload)
+    skill_id = _normalize_skill_id(
+        payload.get("id"), normalized["display_name"])
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM audit_skill WHERE id = ?", (skill_id,))
+    if cur.fetchone():
+        conn.close()
+        raise ValueError("skill id already exists")
+    cur.execute(
+        """
+        INSERT INTO audit_skill(
+            id, display_name, category, scene, description, owner_type, owner_id,
+            visibility, status, source_url, reference_summary,
+            input_schema_json, output_schema_json, config_schema_json, tags_json,
+            sort_order, created_at, updated_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            skill_id,
+            normalized["display_name"],
+            normalized["category"],
+            normalized["scene"],
+            normalized["description"],
+            "admin",
+            owner_id,
+            normalized["visibility"],
+            normalized["status"],
+            normalized["source_url"],
+            normalized["reference_summary"],
+            _json_text(normalized["input_schema"]),
+            _json_text(normalized["output_schema"]),
+            _json_text(normalized["config_schema"]),
+            _json_text(normalized["tags"]),
+            normalized["sort_order"],
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    row = cur.fetchone()
+    item = _attach_skill_reference_meta(cur, _row_to_skill(dict(row)))
+    conn.close()
+    return item
+
+
+def update_skill(
+    cfg: Dict[str, Any],
+    skill_id: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    ensure_audit_capabilities_seeded(cfg)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("skill not found")
+    existing = _row_to_skill(dict(row))
+    normalized = _normalize_skill_payload(payload, existing=existing)
+    refs = _get_skill_reference_counts(cur, skill_id)
+    if normalized["status"] == "disabled" and refs["in_use"]:
+        conn.close()
+        raise ValueError(
+            "cannot disable a skill that is referenced by templates or agents")
+    now = _utc_now_iso()
+    cur.execute(
+        """
+        UPDATE audit_skill
+        SET display_name = ?, category = ?, scene = ?, description = ?, visibility = ?,
+            status = ?, source_url = ?, reference_summary = ?, input_schema_json = ?,
+            output_schema_json = ?, config_schema_json = ?, tags_json = ?, sort_order = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            normalized["display_name"],
+            normalized["category"],
+            normalized["scene"],
+            normalized["description"],
+            normalized["visibility"],
+            normalized["status"],
+            normalized["source_url"],
+            normalized["reference_summary"],
+            _json_text(normalized["input_schema"]),
+            _json_text(normalized["output_schema"]),
+            _json_text(normalized["config_schema"]),
+            _json_text(normalized["tags"]),
+            normalized["sort_order"],
+            now,
+            skill_id,
+        ),
+    )
+    conn.commit()
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    saved = _attach_skill_reference_meta(
+        cur, _row_to_skill(dict(cur.fetchone())))
+    conn.close()
+    return saved
+
+
+def set_skill_status(
+    cfg: Dict[str, Any],
+    skill_id: str,
+    status: str,
+) -> Dict[str, Any]:
+    status_value = str(status or "").strip().lower()
+    if status_value not in {"active", "disabled"}:
+        raise ValueError("status must be active or disabled")
+    return update_skill(cfg, skill_id, {"status": status_value})
+
+
+def delete_skill(cfg: Dict[str, Any], skill_id: str) -> Dict[str, Any]:
+    ensure_audit_capabilities_seeded(cfg)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    row = cur.fetchone()
+    if not row:
+        conn.close()
+        raise ValueError("skill not found")
+    refs = _get_skill_reference_counts(cur, skill_id)
+    if refs["in_use"]:
+        conn.close()
+        raise ValueError(
+            "cannot delete a skill that is referenced by templates or agents")
+    now = _utc_now_iso()
+    cur.execute(
+        "UPDATE audit_skill SET status = 'deleted', updated_at = ? WHERE id = ?",
+        (now, skill_id),
+    )
+    conn.commit()
+    cur.execute("SELECT * FROM audit_skill WHERE id = ?", (skill_id,))
+    item = _attach_skill_reference_meta(
+        cur, _row_to_skill(dict(cur.fetchone())))
+    conn.close()
+    return item
 
 
 def list_rule_packs(cfg: Dict[str, Any], user_id: str = "", scene: str = "") -> List[Dict[str, Any]]:
