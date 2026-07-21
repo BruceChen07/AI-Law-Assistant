@@ -98,6 +98,19 @@ class SkillResponse(BaseModel):
     output_schema: Dict[str, Any] = {}
     config_schema: Dict[str, Any] = {}
     tags: List[str] = []
+    publisher_name: str = ""
+    publisher_handle: str = ""
+    install_command: str = ""
+    skill_md_text: str = ""
+    skill_card: Dict[str, Any] = {}
+    current_version: str = ""
+    license_name: str = ""
+    security_audit_status: str = ""
+    downloads_30d: int = 0
+    downloads_all_time: int = 0
+    last_published_at: Optional[str] = None
+    files: List[Dict[str, Any]] = []
+    versions: List[Dict[str, Any]] = []
     sort_order: int
     template_ref_count: int = 0
     agent_ref_count: int = 0
@@ -128,6 +141,19 @@ class SkillCreateRequest(BaseModel):
     config_schema: Dict[str, Any] = Field(default_factory=dict)
     tags: List[str] = Field(default_factory=list)
     sort_order: int = 100
+    publisher_name: str = ""
+    publisher_handle: str = ""
+    install_command: str = ""
+    skill_md_text: str = ""
+    skill_card: Dict[str, Any] = Field(default_factory=dict)
+    current_version: str = ""
+    license_name: str = ""
+    security_audit_status: str = ""
+    downloads_30d: int = 0
+    downloads_all_time: int = 0
+    last_published_at: str = ""
+    files: List[Dict[str, Any]] = Field(default_factory=list)
+    versions: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class SkillUpdateRequest(BaseModel):
@@ -145,6 +171,19 @@ class SkillUpdateRequest(BaseModel):
     config_schema: Optional[Dict[str, Any]] = None
     tags: Optional[List[str]] = None
     sort_order: Optional[int] = None
+    publisher_name: Optional[str] = None
+    publisher_handle: Optional[str] = None
+    install_command: Optional[str] = None
+    skill_md_text: Optional[str] = None
+    skill_card: Optional[Dict[str, Any]] = None
+    current_version: Optional[str] = None
+    license_name: Optional[str] = None
+    security_audit_status: Optional[str] = None
+    downloads_30d: Optional[int] = None
+    downloads_all_time: Optional[int] = None
+    last_published_at: Optional[str] = None
+    files: Optional[List[Dict[str, Any]]] = None
+    versions: Optional[List[Dict[str, Any]]] = None
 
 
 class SkillStatusUpdateRequest(BaseModel):
