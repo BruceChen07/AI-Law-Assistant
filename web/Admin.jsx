@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react"
 import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
+import SkillManager from "./SkillManager"
 import { adminI18n } from "./i18n/adminI18n"
 
 const createEmptyPromptForm = () => ({
@@ -134,6 +135,76 @@ export default function Admin({ onBack, lang }) {
     const key = String(prompt?.prompt_key || prompt?.id || "").trim()
     const localized = BUILTIN_PROMPT_LABELS[key]
     return localized?.[lang || "zh"] || String(prompt?.name || "").trim() || "-"
+  }
+  const skillLabels = {
+    title: t.skillTitle,
+    subtitle: t.skillSubtitle,
+    create: t.skillCreate,
+    createTitle: t.skillCreateTitle,
+    editTitle: t.skillEditTitle,
+    close: t.skillClose,
+    refresh: t.skillRefresh,
+    refreshing: t.skillRefreshing,
+    search: t.skillSearch,
+    searchPlaceholder: t.skillSearchPlaceholder,
+    searchButton: t.skillSearchButton,
+    reset: t.skillReset,
+    allCategories: t.skillAllCategories,
+    allStatuses: t.skillAllStatuses,
+    scene: t.skillScene,
+    scenePlaceholder: t.skillScenePlaceholder,
+    id: t.skillId,
+    displayName: t.skillDisplayName,
+    category: t.colCategory,
+    visibility: t.skillVisibility,
+    visibilityPublic: t.skillVisibilityPublic,
+    visibilityPrivate: t.skillVisibilityPrivate,
+    status: t.skillStatus,
+    statusActive: t.skillStatusActive,
+    statusDisabled: t.skillStatusDisabled,
+    statusDeleted: t.skillStatusDeleted,
+    sortOrder: t.skillSortOrder,
+    tags: t.skillTags,
+    tagsPlaceholder: t.skillTagsPlaceholder,
+    description: t.skillDescription,
+    sourceUrl: t.skillSourceUrl,
+    referenceSummary: t.skillReferenceSummary,
+    inputSchema: t.skillInputSchema,
+    outputSchema: t.skillOutputSchema,
+    configSchema: t.skillConfigSchema,
+    references: t.skillReferences,
+    updatedAt: t.skillUpdatedAt,
+    empty: t.skillEmpty,
+    edit: t.skillEdit,
+    enable: t.skillEnable,
+    disable: t.skillDisable,
+    saveCreate: t.skillSaveCreate,
+    saveUpdate: t.skillSaveUpdate,
+    saving: t.skillSaving,
+    createSuccess: t.skillCreateSuccess,
+    updateSuccess: t.skillUpdateSuccess,
+    deleteSuccess: t.skillDeleteSuccess,
+    enableSuccess: t.skillEnableSuccess,
+    disableSuccess: t.skillDisableSuccess,
+    loadFailed: t.skillLoadFailed,
+    loadDetailFailed: t.skillLoadDetailFailed,
+    saveFailed: t.skillSaveFailed,
+    deleteFailed: t.skillDeleteFailed,
+    statusFailed: t.skillStatusFailed,
+    loadingDetail: t.skillLoadingDetail,
+    idRequired: t.skillIdRequired,
+    idFormat: t.skillIdFormat,
+    displayNameRequired: t.skillDisplayNameRequired,
+    categoryRequired: t.skillCategoryRequired,
+    sceneRequired: t.skillSceneRequired,
+    pageInfo: t.skillPageInfo,
+    colName: t.skillDisplayName,
+    colActions: t.colActions,
+    previous: t.previous,
+    next: t.next,
+    loading: t.loading,
+    confirm: t.confirm,
+    cancel: t.cancel
   }
   
   useEffect(() => {
@@ -753,6 +824,7 @@ export default function Admin({ onBack, lang }) {
         <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>{t.tabUsers}</button>
         <button className={tab === "prompts" ? "active" : ""} onClick={() => setTab("prompts")}>{t.tabPrompts}</button>
         <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>{t.tabModel}</button>
+        <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>{t.tabSkills}</button>
         <button className={tab === "regulations" ? "active" : ""} onClick={() => setTab("regulations")}>{t.tabRegulations}</button>
         <button className={tab === "token-monitor" ? "active" : ""} onClick={() => setTab("token-monitor")}>{t.tabTokenMonitor}</button>
       </div>
@@ -1316,6 +1388,10 @@ export default function Admin({ onBack, lang }) {
             </div>
           )}
         </div>
+      )}
+
+      {tab === "skills" && (
+        <SkillManager lang={lang} labels={skillLabels} />
       )}
       
       {tab === "users" && (
