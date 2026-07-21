@@ -621,4 +621,57 @@ def build_router(cfg):
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         return FileResponse(output_path, media_type=media_type, filename=filename)
 
+    @router.post("/contracts/{document_id}/markdown/export")
+    def export_contract_markdown(
+        document_id: str,
+        payload: Dict[str, Any] = Body(default={}),
+        current_user: dict = Depends(get_current_user),
+    ):
+        """
+        Export contract text as a structured Markdown file.
+        Supports PDF, DOCX, TXT source formats.
+        Preserves document structure: headings, clauses, paragraphs.
+        """
+        from app.services.markdown_export import export_contract_to_markdown
+
+        doc = get_document_by_id_for_user(cfg, document_id, current_user["id"])
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+
+        file_path = str(doc.get("file_path") or "")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=404, detail="contract source file not found on disk")
+
+        # Optional: custom output directory
+        output_dir = str((payload or {}).get("output_dir") or "")
+        if not output_dir:
+            output_dir = os.path.join(cfg["files_dir"], "contract_markdown")
+        os.makedirs(output_dir, exist_ok=True)
+
+        source_name = doc.get("original_filename") or doc.get("filename") or "contract"
+        base_name = os.path.splitext(source_name)[0]
+        output_path = os.path.join(output_dir, f"{base_name}_{document_id[:8]}.md")
+
+        include_header = bool((payload or {}).get("include_metadata", True))
+
+        result = export_contract_to_markdown(
+            file_path=file_path,
+            output_path=output_path,
+            cfg=cfg,
+            include_metadata_header=include_header,
+        )
+
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Markdown export failed: {result.get('error', 'unknown error')}",
+            )
+
+        return FileResponse(
+            result["output_path"],
+            media_type="text/markdown; charset=utf-8",
+            filename=os.path.basename(result["output_path"]),
+        )
+
     return router
