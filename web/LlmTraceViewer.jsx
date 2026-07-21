@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { adminListLLMTraces, adminGetLLMTraceDetail, adminGetLLMTraceStats, adminCleanupLLMTraces } from "./api"
 
-const STATUS_LABELS = { success: "成功", failed: "失败", pending: "进行中", thinking: "推理中" }
 const STATUS_COLORS = { success: "#22c55e", failed: "#ef4444", pending: "#f59e0b", thinking: "#3b82f6" }
 const STORAGE_KEY_FILTER = "llm_trace_filter"
 
@@ -12,11 +11,11 @@ function formatMs(ms) {
   return `${(ms / 60000).toFixed(1)}min`
 }
 
-function formatDate(iso) {
+function formatDate(iso, lang = "zh") {
   if (!iso) return "-"
   try {
     const d = new Date(iso)
-    return d.toLocaleString("zh-CN", {
+    return d.toLocaleString(lang === "en" ? "en-US" : "zh-CN", {
       month: "2-digit", day: "2-digit",
       hour: "2-digit", minute: "2-digit", second: "2-digit"
     })
@@ -58,6 +57,22 @@ export default function LlmTraceViewer({ lang }) {
     retry: "Retry",
     yes: "Yes",
     no: "No",
+    statusAll: "All",
+    status_success: "Success",
+    status_failed: "Failed",
+    status_pending: "In Progress",
+    status_thinking: "Thinking",
+    thTime: "Time",
+    thTokens: "Tokens",
+    thLatency: "Latency",
+    thAvgTokens: "Avg Tokens",
+    thDate: "Date",
+    thTotal: "Total",
+    detail: "Detail",
+    prevPage: "Prev",
+    nextPage: "Next",
+    pageInfo: (page, pages, total) => `Page ${page} / ${pages} (${total} records)`,
+    cleanupConfirm: (date) => `Confirm deleting all logs before ${date}?`,
   } : {
     title: "LLM 全链路日志",
     modelLabel: "模型",
@@ -88,6 +103,29 @@ export default function LlmTraceViewer({ lang }) {
     retry: "重试",
     yes: "是",
     no: "否",
+    statusAll: "全部",
+    status_success: "成功",
+    status_failed: "失败",
+    status_pending: "进行中",
+    status_thinking: "推理中",
+    thTime: "时间",
+    thTokens: "Token数",
+    thLatency: "耗时",
+    thAvgTokens: "平均Token",
+    thDate: "日期",
+    thTotal: "总数",
+    detail: "详情",
+    prevPage: "上一页",
+    nextPage: "下一页",
+    pageInfo: (page, pages, total) => `第 ${page} / ${pages} 页（共 ${total} 条）`,
+    cleanupConfirm: (date) => `确认删除 ${date} 之前的所有日志？`,
+  }
+
+  const STATUS_LABELS = {
+    success: t.status_success,
+    failed: t.status_failed,
+    pending: t.status_pending,
+    thinking: t.status_thinking,
   }
 
   const [traces, setTraces] = useState([])
@@ -183,10 +221,10 @@ export default function LlmTraceViewer({ lang }) {
           </label>
           <label>{t.statusLabel}: <select value={filters.status}
             onChange={e => setFilters(f => ({ ...f, status: e.target.value }))}>
-            <option value="">全部</option>
-            <option value="success">成功</option>
-            <option value="failed">失败</option>
-            <option value="pending">进行中</option>
+            <option value="">{t.statusAll}</option>
+            <option value="success">{t.status_success}</option>
+            <option value="failed">{t.status_failed}</option>
+            <option value="pending">{t.status_pending}</option>
           </select>
           </label>
           <label>{t.stageLabel}: <input value={filters.stage}
@@ -232,8 +270,8 @@ export default function LlmTraceViewer({ lang }) {
               <table>
                 <thead>
                   <tr>
-                    <th>{t.modelLabel}</th><th>{t.totalRecords}</th><th>成功</th><th>失败</th>
-                    <th>{t.avgLatency}</th><th>Avg Tokens</th><th>Ollama Load</th><th>Ollama Eval</th>
+                    <th>{t.modelLabel}</th><th>{t.totalRecords}</th><th>{t.status_success}</th><th>{t.status_failed}</th>
+                    <th>{t.avgLatency}</th><th>{t.thAvgTokens}</th><th>Ollama Load</th><th>Ollama Eval</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -257,7 +295,7 @@ export default function LlmTraceViewer({ lang }) {
             <div className="trace-daily-stats">
               <h4>{t.dailyStats}</h4>
               <table>
-                <thead><tr><th>日期</th><th>总数</th><th>成功</th><th>失败</th></tr></thead>
+                <thead><tr><th>{t.thDate}</th><th>{t.thTotal}</th><th>{t.status_success}</th><th>{t.status_failed}</th></tr></thead>
                 <tbody>
                   {stats.daily.map(d => (
                     <tr key={d.day}><td>{d.day}</td><td>{d.cnt}</td>
@@ -279,8 +317,8 @@ export default function LlmTraceViewer({ lang }) {
           <table className="trace-table">
             <thead>
               <tr>
-                <th>Time</th><th>{t.modelLabel}</th><th>{t.stageLabel}</th>
-                <th>{t.statusLabel}</th><th>Tokens</th><th>Latency</th>
+                <th>{t.thTime}</th><th>{t.modelLabel}</th><th>{t.stageLabel}</th>
+                <th>{t.statusLabel}</th><th>{t.thTokens}</th><th>{t.thLatency}</th>
                 <th>Ollama Load</th><th>Ollama Eval</th><th>{t.retry}</th>
                 <th>{t.auditLabel}</th><th></th>
               </tr>
@@ -288,7 +326,7 @@ export default function LlmTraceViewer({ lang }) {
             <tbody>
               {traces.map(row => (
                 <tr key={row.span_id} className={`trace-row trace-row-${row.status}`}>
-                  <td className="trace-time">{formatDate(row.created_at)}</td>
+                  <td className="trace-time">{formatDate(row.created_at, lang)}</td>
                   <td><code className="trace-model">{row.model_name}</code></td>
                   <td><span className="trace-tag">{row.stage}</span></td>
                   <td>
@@ -306,7 +344,7 @@ export default function LlmTraceViewer({ lang }) {
                   </td>
                   <td>
                     <button className="btn-small" onClick={() => openDetail(row.span_id)}>
-                      Detail
+                      {t.detail}
                     </button>
                   </td>
                 </tr>
@@ -316,9 +354,9 @@ export default function LlmTraceViewer({ lang }) {
         )}
         {total > PAGE_SIZE && (
           <div className="trace-pagination">
-            <button disabled={page <= 1} onClick={() => loadTraces(page - 1)}>上一页</button>
-            <span>第 {page} / {Math.ceil(total / PAGE_SIZE)} 页（共 {total} 条）</span>
-            <button disabled={page * PAGE_SIZE >= total} onClick={() => loadTraces(page + 1)}>下一页</button>
+            <button disabled={page <= 1} onClick={() => loadTraces(page - 1)}>{t.prevPage}</button>
+            <span>{t.pageInfo(page, Math.ceil(total / PAGE_SIZE), total)}</span>
+            <button disabled={page * PAGE_SIZE >= total} onClick={() => loadTraces(page + 1)}>{t.nextPage}</button>
           </div>
         )}
       </div>
@@ -400,7 +438,7 @@ export default function LlmTraceViewer({ lang }) {
                       <div key={i} className="trace-event-item">
                         <span className="trace-event-badge">{i + 1}</span>
                         <span className="trace-event-type">{evt.event}</span>
-                        <span className="trace-event-time">{evt.created_at ? formatDate(evt.created_at) : "-"}</span>
+                        <span className="trace-event-time">{evt.created_at ? formatDate(evt.created_at, lang) : "-"}</span>
                       </div>
                     ))}
                   </div>
@@ -417,7 +455,7 @@ export default function LlmTraceViewer({ lang }) {
           onChange={e => setCleanupDate(e.target.value)} /></label>
         <button className="btn-danger-small" disabled={!cleanupDate}
           onClick={async () => {
-            if (!cleanupDate || !confirm(`确认删除 ${cleanupDate} 之前的所有日志？`)) return
+            if (!cleanupDate || !confirm(t.cleanupConfirm(cleanupDate))) return
             try {
               await adminCleanupLLMTraces(cleanupDate)
               loadTraces(1)
