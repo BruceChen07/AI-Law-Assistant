@@ -439,7 +439,8 @@ export default function SkillManager({ labels }) {
   const [scene, setScene] = useState("")
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingId, setEditingId] = useState("")
-  const [detailTab, setDetailTab] = useState("overview")
+  const [editorTab, setEditorTab] = useState("basic")
+  const [guideExpanded, setGuideExpanded] = useState(false)
   const [selectedFilePath, setSelectedFilePath] = useState("")
   const [confirmDeleteId, setConfirmDeleteId] = useState("")
   const [form, setForm] = useState(createBlankForm())
@@ -501,7 +502,8 @@ export default function SkillManager({ labels }) {
 
   const openCreate = () => {
     setEditingId("")
-    setDetailTab("overview")
+    setEditorTab("basic")
+    setGuideExpanded(false)
     setSelectedFilePath("")
     setForm(createBlankForm())
     setFormErrors({})
@@ -512,7 +514,8 @@ export default function SkillManager({ labels }) {
 
   const openCreateWithTemplate = () => {
     setEditingId("")
-    setDetailTab("overview")
+    setEditorTab("basic")
+    setGuideExpanded(false)
     setSelectedFilePath("SKILL.md")
     setForm(createTemplateForm())
     setFormErrors({})
@@ -529,7 +532,8 @@ export default function SkillManager({ labels }) {
     try {
       const detail = await adminGetSkill(skillId)
       setEditingId(skillId)
-      setDetailTab("overview")
+      setEditorTab("basic")
+      setGuideExpanded(false)
       setSelectedFilePath("")
       setForm(normalizeSkillForm(detail))
       setEditorOpen(true)
@@ -708,14 +712,6 @@ export default function SkillManager({ labels }) {
     tagsText: Array.isArray(item.tags) ? item.tags.join(", ") : ""
   })), [items])
 
-  const activeSkillCard = useMemo(() => {
-    try {
-      return parseJsonObject(form.skill_card_text, labels.tab_skill_card)
-    } catch {
-      return {}
-    }
-  }, [form.skill_card_text, labels.tab_skill_card])
-
   const selectedFile = useMemo(() => {
     if (!Array.isArray(form.files)) return null
     return form.files.find(file => file.path === selectedFilePath) || null
@@ -823,17 +819,44 @@ export default function SkillManager({ labels }) {
           </div>
           {!detailLoading && (
             <>
-              <div className="skill-template-guide">
-                <div className="title">{labels.templateGuide}</div>
-                <div className="skill-row-subtext">{labels.templateGuideIntro}</div>
-                <div className="meta">{labels.templateDocPath}: `docs/AI_SKILL_TEMPLATE.md`</div>
-              </div>
+              <form onSubmit={onSubmit}>
+                <div className="skill-editor-summary">
+                  <div className="summary-item"><span className="meta">{labels.id}:</span> {form.id || "-"}</div>
+                  <div className="summary-item"><span className="meta">{labels.category}:</span> {form.category || "-"}</div>
+                  <div className="summary-item"><span className="meta">{labels.status}:</span> {form.status || "-"}</div>
+                  <div className="summary-item"><span className="meta">{labels.currentVersion}:</span> {form.current_version || "-"}</div>
+                </div>
 
-              <form onSubmit={onSubmit} className="skill-form-grid">
-                <div className="skill-section-title wide">{labels.basicSection}</div>
+                <div className={`skill-template-guide ${guideExpanded ? "" : "collapsed"}`}>
+                  <div className="skill-guide-toggle" onClick={() => setGuideExpanded(prev => !prev)}>
+                    <div className="title">{labels.templateGuide}</div>
+                    <button type="button">{guideExpanded ? labels.guideCollapse : labels.guideExpand}</button>
+                  </div>
+                  <div className="skill-guide-body">
+                    <div className="skill-row-subtext">{labels.templateGuideIntro}</div>
+                    <div className="meta">{labels.templateDocPath}: `docs/AI_SKILL_TEMPLATE.md`</div>
+                  </div>
+                </div>
 
-                <label>
-                  <span>{labels.id}</span>
+                <div className="skill-detail-tabs">
+                  {["basic", "publishing", "schema", "skill_md", "skill_card", "files", "versions"].map(tabKey => (
+                    <button
+                      key={tabKey}
+                      type="button"
+                      className={editorTab === tabKey ? "active" : ""}
+                      onClick={() => setEditorTab(tabKey)}
+                    >
+                      {labels[`tab_${tabKey}`]}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="skill-detail-panel">
+                  {editorTab === "basic" && (
+                    <div className="skill-detail-block">
+                      <div className="skill-form-grid">
+                        <label>
+                          <span>{labels.id}</span>
                   <input
                     value={form.id}
                     disabled={!!editingId}
@@ -954,213 +977,139 @@ export default function SkillManager({ labels }) {
                   />
                 </label>
 
-                <div className="skill-section-title wide">{labels.detailSection}</div>
-
-                <label>
-                  <span>{labels.publisher}</span>
-                  <input
-                    value={form.publisher_name}
-                    placeholder="AI-Law-Assistant"
-                    onChange={e => updateFormField("publisher_name", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.publisherHandle}</span>
-                  <input
-                    value={form.publisher_handle}
-                    placeholder="@your-team"
-                    onChange={e => updateFormField("publisher_handle", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.currentVersion}</span>
-                  <input
-                    value={form.current_version}
-                    placeholder="v0.1.0"
-                    onChange={e => updateFormField("current_version", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.license}</span>
-                  <input
-                    value={form.license_name}
-                    placeholder="Internal Reference"
-                    onChange={e => updateFormField("license_name", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.securityAuditStatus}</span>
-                  <input
-                    value={form.security_audit_status}
-                    placeholder="draft / internal / pass / pending-verification"
-                    onChange={e => updateFormField("security_audit_status", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.lastPublishedAt}</span>
-                  <input
-                    value={form.last_published_at}
-                    placeholder="2026-07-21"
-                    onChange={e => updateFormField("last_published_at", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.downloads30d}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.downloads_30d}
-                    onChange={e => updateFormField("downloads_30d", e.target.value)}
-                  />
-                </label>
-
-                <label>
-                  <span>{labels.downloads}</span>
-                  <input
-                    type="number"
-                    min="0"
-                    value={form.downloads_all_time}
-                    onChange={e => updateFormField("downloads_all_time", e.target.value)}
-                  />
-                </label>
-
-                <label className="wide">
-                  <span>{labels.installCommand}</span>
-                  <input
-                    value={form.install_command}
-                    placeholder="openclaw skills install @your-team/withholding-tax-checker"
-                    onChange={e => updateFormField("install_command", e.target.value)}
-                  />
-                  <span className="meta">{labels.hintInstallCommand}</span>
-                </label>
-
-                <label className="wide">
-                  <span>{labels.inputSchema}</span>
-                  <textarea
-                    rows="6"
-                    value={form.input_schema_text}
-                    onChange={e => updateFormField("input_schema_text", e.target.value)}
-                  />
-                  <span className="meta">{labels.hintSchema}</span>
-                  {formErrors.input_schema_text && <span className="form-error">{formErrors.input_schema_text}</span>}
-                </label>
-
-                <label className="wide">
-                  <span>{labels.outputSchema}</span>
-                  <textarea
-                    rows="6"
-                    value={form.output_schema_text}
-                    onChange={e => updateFormField("output_schema_text", e.target.value)}
-                  />
-                  {formErrors.output_schema_text && <span className="form-error">{formErrors.output_schema_text}</span>}
-                </label>
-
-                <label className="wide">
-                  <span>{labels.configSchema}</span>
-                  <textarea
-                    rows="6"
-                    value={form.config_schema_text}
-                    onChange={e => updateFormField("config_schema_text", e.target.value)}
-                  />
-                  {formErrors.config_schema_text && <span className="form-error">{formErrors.config_schema_text}</span>}
-                </label>
-
-                <div className="skill-form-actions wide">
-                  <button type="submit" disabled={saving}>
-                    {saving ? labels.saving : editingId ? labels.saveUpdate : labels.saveCreate}
-                  </button>
-                  <button type="button" onClick={openCreateWithTemplate} disabled={saving}>
-                    {labels.loadTemplate}
-                  </button>
-                  <button type="button" onClick={() => { setEditorOpen(false) }} disabled={saving}>
-                    {labels.cancel}
-                  </button>
-                </div>
-              </form>
-
-              <div className="skill-detail-view">
-                <div className="skill-overview-grid">
-                  <div className="skill-overview-card">
-                    <div className="meta">{labels.publisher}</div>
-                    <div className="title">{form.publisher_name || "-"}</div>
-                    <div className="skill-row-subtext">{form.publisher_handle || "-"}</div>
-                  </div>
-                  <div className="skill-overview-card">
-                    <div className="meta">{labels.currentVersion}</div>
-                    <div className="title">{form.current_version || "-"}</div>
-                    <div className="skill-row-subtext">{form.last_published_at || "-"}</div>
-                  </div>
-                  <div className="skill-overview-card">
-                    <div className="meta">{labels.license}</div>
-                    <div className="title">{form.license_name || "-"}</div>
-                    <div className="skill-row-subtext">{form.security_audit_status || "-"}</div>
-                  </div>
-                  <div className="skill-overview-card">
-                    <div className="meta">{labels.downloads}</div>
-                    <div className="title">{form.downloads_all_time || 0}</div>
-                    <div className="skill-row-subtext">{labels.downloads30d}: {form.downloads_30d || 0}</div>
-                  </div>
-                </div>
-
-                <div className="skill-detail-tabs">
-                  {["overview", "skill_md", "skill_card", "files", "versions"].map(tabKey => (
-                    <button
-                      key={tabKey}
-                      type="button"
-                      className={detailTab === tabKey ? "active" : ""}
-                      onClick={() => setDetailTab(tabKey)}
-                    >
-                      {labels[`tab_${tabKey}`]}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="skill-detail-panel">
-                  {detailTab === "overview" && (
-                    <div className="skill-detail-block">
-                      <div className="title">{form.display_name || labels.empty}</div>
-                      <p className="skill-row-subtext">{activeSkillCard?.overview || form.description || "-"}</p>
-                      {form.install_command ? <div className="skill-detail-code">{form.install_command}</div> : null}
-                      {Array.isArray(activeSkillCard?.geography) && activeSkillCard.geography.length > 0 ? (
-                        <div className="skill-chip-row">
-                          {activeSkillCard.geography.map(item => (
-                            <span key={item} className="skill-chip">{item}</span>
-                          ))}
-                        </div>
-                      ) : null}
-                      {Array.isArray(activeSkillCard?.review_before_use) && activeSkillCard.review_before_use.length > 0 ? (
-                        <div className="skill-list-block">
-                          <div className="meta">{labels.reviewBeforeUse}</div>
-                          {activeSkillCard.review_before_use.map((item, index) => (
-                            <div key={`${item.risk}-${index}`} className="skill-list-row">
-                              <div><strong>{labels.risk}</strong> {item.risk || "-"}</div>
-                              <div><strong>{labels.mitigation}</strong> {item.mitigation || "-"}</div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : null}
-                      {activeSkillCard?.use_type ? (
-                        <div className="skill-list-block">
-                          <div className="meta">{labels.useType}</div>
-                          <div className="skill-list-row">{activeSkillCard.use_type}</div>
-                        </div>
-                      ) : null}
-                      {activeSkillCard?.use_case ? (
-                        <div className="skill-list-block">
-                          <div className="meta">{labels.useCase}</div>
-                          <div className="skill-list-row">{activeSkillCard.use_case}</div>
-                        </div>
-                      ) : null}
+                      </div>
                     </div>
                   )}
 
-                  {detailTab === "skill_md" && (
+                  {editorTab === "publishing" && (
+                    <div className="skill-detail-block">
+                      <div className="skill-form-grid">
+                        <label>
+                          <span>{labels.publisher}</span>
+                          <input
+                            value={form.publisher_name}
+                            placeholder="AI-Law-Assistant"
+                            onChange={e => updateFormField("publisher_name", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.publisherHandle}</span>
+                          <input
+                            value={form.publisher_handle}
+                            placeholder="@your-team"
+                            onChange={e => updateFormField("publisher_handle", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.currentVersion}</span>
+                          <input
+                            value={form.current_version}
+                            placeholder="v0.1.0"
+                            onChange={e => updateFormField("current_version", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.license}</span>
+                          <input
+                            value={form.license_name}
+                            placeholder="Internal Reference"
+                            onChange={e => updateFormField("license_name", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.securityAuditStatus}</span>
+                          <input
+                            value={form.security_audit_status}
+                            placeholder="draft / internal / pass / pending-verification"
+                            onChange={e => updateFormField("security_audit_status", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.lastPublishedAt}</span>
+                          <input
+                            value={form.last_published_at}
+                            placeholder="2026-07-21"
+                            onChange={e => updateFormField("last_published_at", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.downloads30d}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={form.downloads_30d}
+                            onChange={e => updateFormField("downloads_30d", e.target.value)}
+                          />
+                        </label>
+
+                        <label>
+                          <span>{labels.downloads}</span>
+                          <input
+                            type="number"
+                            min="0"
+                            value={form.downloads_all_time}
+                            onChange={e => updateFormField("downloads_all_time", e.target.value)}
+                          />
+                        </label>
+
+                        <label className="wide">
+                          <span>{labels.installCommand}</span>
+                          <input
+                            value={form.install_command}
+                            placeholder="openclaw skills install @your-team/withholding-tax-checker"
+                            onChange={e => updateFormField("install_command", e.target.value)}
+                          />
+                          <span className="meta">{labels.hintInstallCommand}</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
+                  {editorTab === "schema" && (
+                    <div className="skill-detail-block">
+                      <label className="wide">
+                        <span>{labels.inputSchema}</span>
+                        <textarea
+                          className="skill-code-editor"
+                          rows="8"
+                          value={form.input_schema_text}
+                          onChange={e => updateFormField("input_schema_text", e.target.value)}
+                        />
+                        <span className="meta">{labels.hintSchema}</span>
+                        {formErrors.input_schema_text && <span className="form-error">{formErrors.input_schema_text}</span>}
+                      </label>
+
+                      <label className="wide">
+                        <span>{labels.outputSchema}</span>
+                        <textarea
+                          className="skill-code-editor"
+                          rows="8"
+                          value={form.output_schema_text}
+                          onChange={e => updateFormField("output_schema_text", e.target.value)}
+                        />
+                        {formErrors.output_schema_text && <span className="form-error">{formErrors.output_schema_text}</span>}
+                      </label>
+
+                      <label className="wide">
+                        <span>{labels.configSchema}</span>
+                        <textarea
+                          className="skill-code-editor"
+                          rows="8"
+                          value={form.config_schema_text}
+                          onChange={e => updateFormField("config_schema_text", e.target.value)}
+                        />
+                        {formErrors.config_schema_text && <span className="form-error">{formErrors.config_schema_text}</span>}
+                      </label>
+                    </div>
+                  )}
+
+                  {editorTab === "skill_md" && (
                     <div className="skill-detail-block">
                       <div className="meta">{labels.hintSkillMd}</div>
                       <textarea
@@ -1172,7 +1121,7 @@ export default function SkillManager({ labels }) {
                     </div>
                   )}
 
-                  {detailTab === "skill_card" && (
+                  {editorTab === "skill_card" && (
                     <div className="skill-detail-block">
                       <div className="meta">{labels.hintSkillCard}</div>
                       <textarea
@@ -1185,7 +1134,7 @@ export default function SkillManager({ labels }) {
                     </div>
                   )}
 
-                  {detailTab === "files" && (
+                  {editorTab === "files" && (
                     <div className="skill-detail-block">
                       <div className="skill-detail-inline-actions">
                         <div className="meta">{labels.hintFiles}</div>
@@ -1290,7 +1239,7 @@ export default function SkillManager({ labels }) {
                     </div>
                   )}
 
-                  {detailTab === "versions" && (
+                  {editorTab === "versions" && (
                     <div className="skill-detail-block">
                       <div className="skill-detail-inline-actions">
                         <div className="meta">{labels.hintVersions}</div>
@@ -1371,7 +1320,19 @@ export default function SkillManager({ labels }) {
                     </div>
                   )}
                 </div>
-              </div>
+
+                <div className="skill-editor-footer">
+                  <button type="submit" disabled={saving}>
+                    {saving ? labels.saving : editingId ? labels.saveUpdate : labels.saveCreate}
+                  </button>
+                  <button type="button" onClick={openCreateWithTemplate} disabled={saving}>
+                    {labels.loadTemplate}
+                  </button>
+                  <button type="button" onClick={() => { setEditorOpen(false) }} disabled={saving}>
+                    {labels.cancel}
+                  </button>
+                </div>
+              </form>
             </>
           )}
         </div>

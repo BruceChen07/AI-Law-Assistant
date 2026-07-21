@@ -484,6 +484,52 @@
   background: rgba(244, 67, 54, 0.12);
 }
 
+/* 编辑器底部 sticky 操作栏 */
+.skill-editor-footer {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 14px;
+  position: sticky;
+  bottom: 0;
+  background: var(--admin-panel-bg);
+  z-index: 2;
+}
+
+/* 编辑器顶部摘要条 */
+.skill-editor-summary {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--stat-card-bg);
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+
+.skill-editor-summary .summary-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 模板说明折叠 */
+.skill-template-guide .skill-guide-toggle {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.skill-template-guide.collapsed .skill-guide-body {
+  display: none;
+}
+
 .form-error {
   color: var(--danger);
   font-size: 12px;
