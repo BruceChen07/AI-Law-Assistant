@@ -12,10 +12,17 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
         bypass(req) {
-          // Only proxy /api/... routes, not /api.js /api.css etc.
-          if (req.url && !req.url.startsWith("/api/")) {
-            return req.url;
+          // Do NOT proxy static assets (JS modules, CSS, images, etc.)
+          // These are Vite-served files, not backend API routes.
+          // Backend API routes have no file extension.
+          const url = req.url || "";
+          const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|map)$/i.test(url);
+          // Backend API routes: /api/auth/login, /api/contracts/audit, etc. (no extension)
+          const isApiRoute = url.startsWith("/api/") && !isStaticAsset;
+          if (!isApiRoute) {
+            return url; // bypass proxy, let Vite serve it locally
           }
+          return undefined; // go through proxy to backend
         },
       },
     },
