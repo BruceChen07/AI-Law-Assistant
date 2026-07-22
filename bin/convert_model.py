@@ -80,7 +80,8 @@ def main():
             output_names=output_names,
             dynamic_axes=dynamic_axes,
             opset_version=14,
-            do_constant_folding=True
+            do_constant_folding=True,
+            dynamo=False,
         )
         print("ONNX export complete.")
     except Exception as e:
