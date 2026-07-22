@@ -3,6 +3,7 @@ import uuid
 import json
 import logging
 import threading
+import zipfile
 from datetime import datetime
 from typing import Optional, Dict, Any
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query, Body
@@ -522,6 +523,7 @@ def build_router(cfg):
         brand = str((payload or {}).get("brand") or "")
         if final_report:
             report = dict(final_report)
+            risk_items = list(report.get("risk_items") or [])
             overview = report.get("overview") if isinstance(
                 report.get("overview"), dict) else {}
             if not str(overview.get("contract_filename") or "").strip():
@@ -616,13 +618,40 @@ def build_router(cfg):
             if export_mode == "comments":
                 # Export original contract with comments (M2)
                 from app.services.docx_modifier import insert_risk_comments
-                import shutil
                 original_file = str(doc.get("file_path") or "")
                 if not original_file or not os.path.exists(original_file):
                     raise HTTPException(
                         status_code=404, detail="original contract file not found")
-                # Insert comments into the original file
-                insert_risk_comments(original_file, output_path, risk_items)
+                if not str(original_file).lower().endswith(".docx"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="commented original export only supports docx source files",
+                    )
+                try:
+                    insert_risk_comments(original_file, output_path, risk_items)
+                except zipfile.BadZipFile as exc:
+                    logger.warning(
+                        "export_commented_original_invalid_docx document_id=%s file=%s err=%s",
+                        document_id,
+                        original_file,
+                        str(exc),
+                    )
+                    raise HTTPException(
+                        status_code=400,
+                        detail="original contract file is not a valid docx",
+                    ) from exc
+                except HTTPException:
+                    raise
+                except Exception as exc:
+                    logger.exception(
+                        "export_commented_original_failed document_id=%s file=%s",
+                        document_id,
+                        original_file,
+                    )
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"failed to generate commented original: {exc}",
+                    ) from exc
                 filename = f"contract_with_comments_{document_id}.docx"
             else:
                 # Export the standard audit report
