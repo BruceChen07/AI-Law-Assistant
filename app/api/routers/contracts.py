@@ -18,6 +18,7 @@ from app.services.crud import insert_document, insert_contract_audit, get_docume
 from app.services.audit_orchestrator import AuditServices, run_contract_pipeline_bundle
 from app.services.contract_preview_assets import build_contract_preview_manifest, find_preview_page
 from app.services.docx_renderer import render_tax_audit_docx
+from app.services.export_filenames import build_export_filename
 from app.services.audit_utils import _normalize_lang
 from app.core.utils import extract_text_with_config
 from app.core.config import get_config
@@ -97,6 +98,13 @@ def _build_retrieval_options(payload: Dict[str, Any]) -> Dict[str, Any]:
         "contract_chunk_max": payload.get("contract_chunk_max", "5"),
         "per_chunk_top_k": payload.get("per_chunk_top_k", "5"),
     }
+
+
+def _extract_report_risk_items(report: Dict[str, Any]) -> list[Dict[str, Any]]:
+    items = report.get("risk_items") if isinstance(report, dict) else []
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
 
 
 def build_router(cfg):
@@ -603,8 +611,18 @@ def build_router(cfg):
             }
         report_dir = os.path.join(cfg["files_dir"], "contract_reports")
         os.makedirs(report_dir, exist_ok=True)
+        risk_items = _extract_report_risk_items(report)
         ext = "json" if fmt == "json" else "docx"
-        filename = f"contract_audit_report_{document_id}.{ext}"
+        source_filename = str(doc.get("original_filename") or doc.get("filename") or "")
+        generated_at = str(report.get("generated_at") or datetime.utcnow().isoformat())
+        suffix = "contract_audit_report"
+        filename = build_export_filename(
+            source_filename=source_filename,
+            generated_at=generated_at,
+            suffix=suffix,
+            ext=ext,
+            fallback_stem="contract",
+        )
         output_path = os.path.join(report_dir, filename)
         if fmt == "json":
             with open(output_path, "w", encoding="utf-8") as f:
@@ -616,19 +634,24 @@ def build_router(cfg):
             if export_mode == "comments":
                 # Export original contract with comments (M2)
                 from app.services.docx_modifier import insert_risk_comments
-                import shutil
                 original_file = str(doc.get("file_path") or "")
                 if not original_file or not os.path.exists(original_file):
                     raise HTTPException(
                         status_code=404, detail="original contract file not found")
-                # Insert comments into the original file
+                filename = build_export_filename(
+                    source_filename=source_filename,
+                    generated_at=generated_at,
+                    suffix="contract_with_comments",
+                    ext="docx",
+                    fallback_stem="contract",
+                )
+                output_path = os.path.join(report_dir, filename)
                 insert_risk_comments(original_file, output_path, risk_items)
-                filename = f"contract_with_comments_{document_id}.docx"
             else:
                 # Export the standard audit report
+                output_path = os.path.join(report_dir, filename)
                 render_tax_audit_docx(
                     report, output_path, template_version=template_version, locale=locale, brand=brand)
-                filename = f"contract_audit_report_{document_id}.docx"
 
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         return FileResponse(output_path, media_type=media_type, filename=filename)

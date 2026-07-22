@@ -128,9 +128,29 @@ export async function requestJson(url, options) {
 }
 
 export async function requestBlob(url, options) {
-  const res = await requestWithFallback(url, options)
+  const { returnResponseMeta, ...requestOptions } = options || {}
+  const res = await requestWithFallback(url, requestOptions)
   await ensureOk(res)
-  return res.blob()
+  const blob = await res.blob()
+  if (!returnResponseMeta) return blob
+  const contentDisposition = String(res.headers.get("content-disposition") || "")
+  const encodedMatch = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  const plainMatch = contentDisposition.match(/filename\s*=\s*("?)([^";]+)\1/i)
+  let filename = ""
+  if (encodedMatch?.[1]) {
+    try {
+      filename = decodeURIComponent(encodedMatch[1])
+    } catch {
+      filename = encodedMatch[1]
+    }
+  } else if (plainMatch?.[2]) {
+    filename = plainMatch[2]
+  }
+  return {
+    blob,
+    filename,
+    contentType: String(res.headers.get("content-type") || "")
+  }
 }
 
 export function getLongRequestTimeoutMs(timeoutSec) {

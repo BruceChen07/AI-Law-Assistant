@@ -3,6 +3,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from app.services.docx_renderer import render_tax_audit_docx
+from app.services.export_filenames import build_export_filename
 from app.services.crud import (
     get_tax_contract_document,
     list_tax_audit_issues_by_contract,
@@ -168,7 +169,13 @@ def export_tax_audit_report(
     report_dir = os.path.join(cfg["files_dir"], "tax_audit_reports")
     os.makedirs(report_dir, exist_ok=True)
     ext = "json" if fmt == "json" else "docx"
-    filename = f"tax_audit_report_{contract_id}.{ext}"
+    filename = build_export_filename(
+        source_filename=str(report.get("contract_filename") or ""),
+        generated_at=report.get("generated_at"),
+        suffix="tax_audit_report",
+        ext=ext,
+        fallback_stem="contract",
+    )
     file_path = os.path.join(report_dir, filename)
     if fmt == "json":
         with open(file_path, "w", encoding="utf-8") as f:

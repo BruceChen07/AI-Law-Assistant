@@ -180,6 +180,26 @@ export default function App() {
     if (!name) return ""
     return name.replace(/\.[^.]+$/, "")
   }
+  const buildExportFallbackName = (format, mode = "report") => {
+    const ext = String(format || "json").toLowerCase() === "docx" ? "docx" : "json"
+    const sourceName = String(
+      contractResult?.overview?.contract_filename || contractFile?.name || contract?.title || "contract"
+    ).trim()
+    const baseName = toContractTitle(sourceName) || "contract"
+    const now = new Date()
+    const pad = (value) => String(value).padStart(2, "0")
+    const timestamp = [
+      now.getFullYear(),
+      pad(now.getMonth() + 1),
+      pad(now.getDate())
+    ].join("") + "_" + [
+      pad(now.getHours()),
+      pad(now.getMinutes()),
+      pad(now.getSeconds())
+    ].join("")
+    const suffix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
+    return `${baseName}_${timestamp}_${suffix}.${ext}`
+  }
   const riskList = useMemo(() => (
     Array.isArray(contractResult?.risks) ? contractResult.risks : []
   ), [contractResult])
@@ -829,18 +849,17 @@ export default function App() {
     setExportError("")
     setExportingFormat(`${fmt}_${mode}`)
     try {
-      const blob = await exportContractReport(documentId, {
+      const result = await exportContractReport(documentId, {
         export_format: fmt,
         export_mode: mode,
         locale: uiLang === "zh" ? "zh-CN" : "en-US",
         template_version: "v1.0",
         include_appendix: true,
       })
+      const blob = result?.blob || result
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement("a")
-      const ext = fmt === "docx" ? "docx" : "json"
-      const prefix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
-      const fileName = `${prefix}_${documentId}.${ext}`
+      const fileName = String(result?.filename || "").trim() || buildExportFallbackName(fmt, mode)
       a.href = url
       a.download = fileName
       document.body.appendChild(a)
