@@ -59,16 +59,29 @@ def _build_audit_error_detail(err: Exception, language: str) -> str:
     return "Contract audit failed. Check LLM settings in Admin -> Model Config and retry."
 
 
-def _set_audit_progress(audit_id: str, status: str, progress: int, stage: str, message: str = "") -> None:
-    payload = {
-        "audit_id": audit_id,
-        "status": status,
-        "progress": int(progress),
-        "stage": stage,
-        "message": message,
-        "updated_at": datetime.utcnow().isoformat(),
-    }
+def _set_audit_progress(
+    audit_id: str,
+    status: str,
+    progress: int,
+    stage: str,
+    message: str = "",
+    detail: Optional[Dict[str, Any]] = None,
+) -> None:
     with _audit_progress_lock:
+        previous = _audit_progress.get(audit_id) or {}
+        next_detail = previous.get("detail") if isinstance(
+            previous.get("detail"), dict) else {}
+        if isinstance(detail, dict):
+            next_detail = {**next_detail, **detail}
+        payload = {
+            "audit_id": audit_id,
+            "status": status,
+            "progress": int(progress),
+            "stage": stage,
+            "message": message,
+            "updated_at": datetime.utcnow().isoformat(),
+            "detail": next_detail,
+        }
         _audit_progress[audit_id] = payload
 
 
@@ -218,8 +231,9 @@ def build_router(cfg):
             "per_chunk_top_k": per_chunk_top_k,
         })
 
-        def _progress_cb(stage: str, percent: int, message: str = "") -> None:
-            _set_audit_progress(audit_id, "running", percent, stage, message)
+        def _progress_cb(stage: str, percent: int, message: str = "", detail: Optional[Dict[str, Any]] = None) -> None:
+            _set_audit_progress(audit_id, "running", percent,
+                                stage, message, detail=detail)
 
         try:
             services = AuditServices(
@@ -315,8 +329,9 @@ def build_router(cfg):
         model_cfg = cfg.get("llm_config") or {}
         retrieval_options = _build_retrieval_options(payload or {})
 
-        def _progress_cb(stage: str, percent: int, message: str = "") -> None:
-            _set_audit_progress(audit_id, "running", percent, stage, message)
+        def _progress_cb(stage: str, percent: int, message: str = "", detail: Optional[Dict[str, Any]] = None) -> None:
+            _set_audit_progress(audit_id, "running", percent,
+                                stage, message, detail=detail)
 
         try:
             services = AuditServices(
@@ -536,13 +551,15 @@ def build_router(cfg):
                 overview["contract_filename"] = doc.get(
                     "original_filename") or doc.get("filename") or ""
             report["overview"] = overview
-            report["contract_id"] = str(report.get("contract_id") or document_id)
+            report["contract_id"] = str(
+                report.get("contract_id") or document_id)
         else:
             risks = audit.get("risks") if isinstance(
                 audit.get("risks"), list) else []
             citations = audit.get("citations") if isinstance(
                 audit.get("citations"), list) else []
-            citation_map = {str(c.get("citation_id") or ""): c for c in citations if isinstance(c, dict)}
+            citation_map = {str(c.get("citation_id") or "")
+                                : c for c in citations if isinstance(c, dict)}
             risk_summary = {"high": 0, "medium": 0, "low": 0}
             risk_items = []
             evidence_items = []
@@ -550,7 +567,8 @@ def build_router(cfg):
                 if not isinstance(r, dict):
                     continue
                 level = str(r.get("level") or "medium").lower()
-                level = level if level in {"high", "medium", "low"} else "medium"
+                level = level if level in {
+                    "high", "medium", "low"} else "medium"
                 risk_summary[level] += 1
                 location = r.get("location") if isinstance(
                     r.get("location"), dict) else {}
@@ -613,8 +631,10 @@ def build_router(cfg):
         os.makedirs(report_dir, exist_ok=True)
         risk_items = _extract_report_risk_items(report)
         ext = "json" if fmt == "json" else "docx"
-        source_filename = str(doc.get("original_filename") or doc.get("filename") or "")
-        generated_at = str(report.get("generated_at") or datetime.utcnow().isoformat())
+        source_filename = str(doc.get("original_filename")
+                              or doc.get("filename") or "")
+        generated_at = str(report.get("generated_at")
+                           or datetime.utcnow().isoformat())
         suffix = "contract_audit_report"
         filename = build_export_filename(
             source_filename=source_filename,
@@ -684,9 +704,11 @@ def build_router(cfg):
             output_dir = os.path.join(cfg["files_dir"], "contract_markdown")
         os.makedirs(output_dir, exist_ok=True)
 
-        source_name = doc.get("original_filename") or doc.get("filename") or "contract"
+        source_name = doc.get("original_filename") or doc.get(
+            "filename") or "contract"
         base_name = os.path.splitext(source_name)[0]
-        output_path = os.path.join(output_dir, f"{base_name}_{document_id[:8]}.md")
+        output_path = os.path.join(
+            output_dir, f"{base_name}_{document_id[:8]}.md")
 
         include_header = bool((payload or {}).get("include_metadata", True))
 
