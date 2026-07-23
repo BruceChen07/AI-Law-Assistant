@@ -141,6 +141,12 @@
   color: var(--progress-note);
 }
 
+.audit-progress-subnote {
+  font-size: 12px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+}
+
 .contract-result {
   height: clamp(500px, 75vh, 920px);
   display: flex;

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, exportContractReport, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { auditContract, exportContractReport, getAuditProgress, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import { appI18n } from "./i18n/appI18n"
@@ -112,6 +112,8 @@ export default function App() {
   const [expandedEvidence, setExpandedEvidence] = useState({})
   const [contractProgress, setContractProgress] = useState(0)
   const [contractProgressStage, setContractProgressStage] = useState("working")
+  const [contractProgressMessage, setContractProgressMessage] = useState("")
+  const [contractProgressDetail, setContractProgressDetail] = useState(null)
   const [exportingFormat, setExportingFormat] = useState("")
   const [exportError, setExportError] = useState("")
   const previewScrollRef = useRef(null)
@@ -125,6 +127,7 @@ export default function App() {
   const previewLastBlockByPageRef = useRef({})
   const previewFailedPagesRef = useRef({})
   const previewLoadingPagesRef = useRef({})
+  const auditProgressTimerRef = useRef(null)
 
   const t = appI18n[uiLang] || appI18n.zh
   const fileInputRef = useRef(null)
@@ -227,6 +230,28 @@ export default function App() {
     failed: t.progressFailed,
     working: t.progressWorking
   }[contractProgressStage] || t.progressWorking
+  const llmProgressText = useMemo(() => {
+    const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
+    if (!detail) return ""
+    const current = Number(detail.llm_request_current_index || 0)
+    const planned = Number(detail.llm_request_total_planned || 0)
+    const upperBound = Number(detail.llm_request_total_upper_bound || 0)
+    const total = planned > 0 ? planned : upperBound
+    if (current <= 0 && total <= 0) return ""
+    const totalLabel = total > 0 ? String(total) : t.llmProgressDynamicTotal
+    const currentLabel = String(detail.llm_request_current_label || "").trim()
+    const executionPath = String(detail.execution_path || "").trim()
+    const executionLabel = executionPath === "classic"
+      ? t.executionPathClassic
+      : executionPath === "memory"
+        ? t.executionPathMemory
+        : executionPath
+    const chunks = [`${t.llmProgressMeta}: ${Math.max(0, current)} / ${totalLabel}`]
+    if (currentLabel) chunks.push(currentLabel)
+    if (executionLabel) chunks.push(executionLabel)
+    return chunks.join(" · ")
+  }, [contractProgressDetail, t])
+  const showAuditProgress = contractLoading || contractProgressStage === "failed"
   const previewSource = String(previewMeta?.source || "").toLowerCase()
   const previewCoordProvider = String(previewMeta?.coord_provider || "").toLowerCase()
   const previewConversion = previewMeta?.docx_pdf_conversion && typeof previewMeta.docx_pdf_conversion === "object"
@@ -259,6 +284,37 @@ export default function App() {
     const next = Math.max(0, Math.min(100, Number(percent) || 0))
     setContractProgress((p) => Math.max(p, next))
     if (stage) setContractProgressStage(stage)
+  }
+
+  const clearAuditProgressPolling = () => {
+    if (auditProgressTimerRef.current) {
+      clearInterval(auditProgressTimerRef.current)
+      auditProgressTimerRef.current = null
+    }
+  }
+
+  const applyServerAuditProgress = (payload) => {
+    if (!payload || typeof payload !== "object") return
+    const nextProgress = Math.max(0, Math.min(100, Number(payload.progress) || 0))
+    setContractProgress(nextProgress)
+    setContractProgressStage(String(payload.stage || "working"))
+    setContractProgressMessage(String(payload.message || ""))
+    setContractProgressDetail(payload.detail && typeof payload.detail === "object" ? payload.detail : null)
+  }
+
+  const startAuditProgressPolling = (auditId) => {
+    clearAuditProgressPolling()
+    if (!auditId) return
+    const pollOnce = async () => {
+      try {
+        const payload = await getAuditProgress(auditId)
+        applyServerAuditProgress(payload)
+      } catch {
+        // Ignore transient polling errors while the main audit request is still running.
+      }
+    }
+    pollOnce()
+    auditProgressTimerRef.current = setInterval(pollOnce, 1000)
   }
 
   useEffect(() => {
@@ -362,32 +418,7 @@ export default function App() {
     })
   }, [])
 
-  useEffect(() => {
-    if (!contractLoading) {
-      setContractProgress(0)
-      setContractProgressStage("working")
-      return
-    }
-    bumpProgress(12, "uploading")
-    const timers = [
-      setTimeout(() => {
-        bumpProgress(32, "extracting")
-      }, 700),
-      setTimeout(() => {
-        bumpProgress(58, "retrieval")
-      }, 1800),
-      setTimeout(() => {
-        bumpProgress(75, "auditing")
-      }, 3200)
-    ]
-    const ticker = setInterval(() => {
-      setContractProgress((p) => Math.min(p + 1, 75))
-    }, 900)
-    return () => {
-      timers.forEach(clearTimeout)
-      clearInterval(ticker)
-    }
-  }, [contractLoading])
+  useEffect(() => () => clearAuditProgressPolling(), [])
 
   useEffect(() => {
     const stored = getStoredTheme()
@@ -800,9 +831,15 @@ export default function App() {
     setContractLoading(true)
     setRiskFilter("all")
     setActiveRiskIndex(-1)
-    bumpProgress(16, "uploading")
+    setContractProgress(5)
+    setContractProgressStage("uploading")
+    setContractProgressMessage("")
+    setContractProgressDetail(null)
     try {
       const form = new FormData()
+      const nextAuditId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `audit-${Date.now()}`
       const customTitle = String(contract.title || "").trim()
       form.append("title", customTitle || toContractTitle(contractFile.name))
       form.append("language", contract.language)
@@ -811,8 +848,15 @@ export default function App() {
       form.append("date", contract.date)
       form.append("industry", contract.industry)
       form.append("tax_focus", String(contract.taxFocus))
+      form.append("audit_id", nextAuditId)
       form.append("file", contractFile)
+      startAuditProgressPolling(nextAuditId)
       const res = await auditContract(form)
+      clearAuditProgressPolling()
+      try {
+        const finalProgress = await getAuditProgress(nextAuditId)
+        applyServerAuditProgress(finalProgress)
+      } catch {}
       bumpProgress(100, "done")
       const nextDocumentId = String(res.document_id || "")
       const detectedLang = normalizeAppLang(res?.meta?.language || contract.language)
@@ -824,6 +868,7 @@ export default function App() {
       setDocumentId(nextDocumentId)
       await loadContractPreview(nextDocumentId)
     } catch (err) {
+      clearAuditProgressPolling()
       bumpProgress(100, "failed")
       setContractError(String(err?.message || err || "Audit failed"))
       setContractResult(null)
@@ -839,6 +884,7 @@ export default function App() {
       setPreviewMeta(null)
       setPreviewError("")
     } finally {
+      clearAuditProgressPolling()
       setContractLoading(false)
     }
   }
@@ -1013,7 +1059,7 @@ export default function App() {
           <button className="primary" onClick={onContractUpload} disabled={contractLoading}>
             {contractLoading ? t.uploading : t.uploadBtn}
           </button>
-          {contractLoading && (
+          {showAuditProgress && (
             <div className="audit-progress">
               <div className="audit-progress-head">
                 <span>{t.progressTitle}</span>
@@ -1022,7 +1068,8 @@ export default function App() {
               <div className="audit-progress-bar">
                 <div className="audit-progress-fill" style={{ width: `${contractProgress}%` }} />
               </div>
-              <div className="audit-progress-note">{progressStageText}</div>
+              <div className="audit-progress-note">{contractProgressMessage || progressStageText}</div>
+              {llmProgressText && <div className="audit-progress-subnote">{llmProgressText}</div>}
             </div>
           )}
         </div>
