@@ -1,6 +1,6 @@
 """Callback builders for memory pipeline clause and flush rounds."""
 
-from typing import Dict, Any, List, Callable, Awaitable, Tuple
+from typing import Dict, Any, List, Callable, Awaitable, Tuple, Optional
 import re
 import structlog
 
@@ -114,6 +114,8 @@ def create_memory_callbacks(
     round_runtime: Dict[str, Any],
     write_round: Callable[[str, Dict[str, Any], int], None],
     full_contract_context: str = "",
+    progress_event_cb: Optional[Callable[..., Dict[str, Any]]] = None,
+    progress_state: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Callable[[Dict[str, Any]], Awaitable[Dict[str, Any]]], Callable[[str], Awaitable[str]]]:
     risk_detection_mode = str(retrieval_opts.get(
         "risk_detection_mode", "relaxed"))
@@ -283,6 +285,8 @@ def create_memory_callbacks(
             clause_text,
             str(clause.get("clause_path") or ""),
         )
+        current_label = str(clause.get(
+            "clause_path") or clause_title or current_clause_id or f"round-{int(payload.get('round') or 0)}")
         is_high_priority_clause = bool(
             current_clause_id in preview_priority_clause_ids or current_priority_score > 0)
         remaining_calls = int(llm_budget.get("limit") or 0) - \
@@ -350,6 +354,30 @@ def create_memory_callbacks(
             )
             return {"summary": "", "risks": []}
         llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
+        if isinstance(progress_state, dict):
+            progress_state["started"] = int(
+                progress_state.get("started") or 0) + 1
+        current_progress_index = int(
+            (progress_state or {}).get("started") or int(llm_budget.get("calls") or 0))
+        logger.info(
+            "audit_llm_request_start",
+            audit_id=str(base_trace_meta.get("audit_id") or ""),
+            execution_path="memory",
+            llm_request_current_index=current_progress_index,
+            llm_request_total_upper_bound=int(llm_budget.get("limit") or 0),
+            request_kind="memory_clause",
+            clause_id=current_clause_id,
+            round_index=int(payload.get("round") or 0),
+        )
+        if callable(progress_event_cb):
+            progress_event_cb(
+                request_status="running",
+                current_index=current_progress_index,
+                current_label=current_label,
+                request_kind="memory_clause",
+                round_index=int(payload.get("round") or 0),
+                clause_id=current_clause_id,
+            )
         if is_high_priority_clause:
             llm_budget["called_high_priority_clauses"] = int(
                 llm_budget.get("called_high_priority_clauses") or 0) + 1
@@ -393,6 +421,32 @@ def create_memory_callbacks(
                 "round"), clause_id=str(clause.get("clause_id") or ""), error=str(e))
             write_round("clause_llm_error", {"clause_id": str(
                 clause.get("clause_id") or ""), "error": str(e)})
+            if isinstance(progress_state, dict):
+                progress_state["completed"] = int(
+                    progress_state.get("completed") or 0) + 1
+                progress_state["last_completed_label"] = current_label
+            logger.warning(
+                "audit_llm_request_failed",
+                audit_id=str(base_trace_meta.get("audit_id") or ""),
+                execution_path="memory",
+                llm_request_current_index=current_progress_index,
+                llm_request_total_upper_bound=int(
+                    llm_budget.get("limit") or 0),
+                request_kind="memory_clause",
+                clause_id=current_clause_id,
+                round_index=int(payload.get("round") or 0),
+                error=str(e),
+            )
+            if callable(progress_event_cb):
+                progress_event_cb(
+                    request_status="failed",
+                    current_index=current_progress_index,
+                    current_label=current_label,
+                    request_kind="memory_clause",
+                    round_index=int(payload.get("round") or 0),
+                    clause_id=current_clause_id,
+                    last_error=str(e),
+                )
             return {"summary": "", "risks": []}
         usage = llm_raw.get("usage") if isinstance(
             llm_raw.get("usage"), dict) else {}
@@ -465,6 +519,32 @@ def create_memory_callbacks(
                         "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                     },
                 )
+                if isinstance(progress_state, dict):
+                    progress_state["completed"] = int(
+                        progress_state.get("completed") or 0) + 1
+                    progress_state["last_completed_label"] = current_label
+                logger.info(
+                    "audit_llm_request_done",
+                    audit_id=str(base_trace_meta.get("audit_id") or ""),
+                    execution_path="memory",
+                    llm_request_current_index=current_progress_index,
+                    llm_request_total_upper_bound=int(
+                        llm_budget.get("limit") or 0),
+                    request_kind="memory_clause",
+                    clause_id=current_clause_id,
+                    round_index=int(payload.get("round") or 0),
+                    parse_failed_flag=True,
+                    risk_count=0,
+                )
+                if callable(progress_event_cb):
+                    progress_event_cb(
+                        request_status="done",
+                        current_index=current_progress_index,
+                        current_label=current_label,
+                        request_kind="memory_clause",
+                        round_index=int(payload.get("round") or 0),
+                        clause_id=current_clause_id,
+                    )
                 return {"summary": "", "risks": []}
             risks_out = parsed.get("risks") if isinstance(
                 parsed.get("risks"), list) else []
@@ -504,6 +584,32 @@ def create_memory_callbacks(
                     "llm_response": str(result_text or ""),
                 },
             )
+            if isinstance(progress_state, dict):
+                progress_state["completed"] = int(
+                    progress_state.get("completed") or 0) + 1
+                progress_state["last_completed_label"] = current_label
+            logger.info(
+                "audit_llm_request_done",
+                audit_id=str(base_trace_meta.get("audit_id") or ""),
+                execution_path="memory",
+                llm_request_current_index=current_progress_index,
+                llm_request_total_upper_bound=int(
+                    llm_budget.get("limit") or 0),
+                request_kind="memory_clause",
+                clause_id=current_clause_id,
+                round_index=int(payload.get("round") or 0),
+                parse_failed_flag=False,
+                risk_count=len(risks_out),
+            )
+            if callable(progress_event_cb):
+                progress_event_cb(
+                    request_status="done",
+                    current_index=current_progress_index,
+                    current_label=current_label,
+                    request_kind="memory_clause",
+                    round_index=int(payload.get("round") or 0),
+                    clause_id=current_clause_id,
+                )
             return parsed
         except Exception as e:
             clause_parse_state["count"] += 1
@@ -545,6 +651,32 @@ def create_memory_callbacks(
                     "token_usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens, "total_tokens": total_tokens},
                 },
             )
+            if isinstance(progress_state, dict):
+                progress_state["completed"] = int(
+                    progress_state.get("completed") or 0) + 1
+                progress_state["last_completed_label"] = current_label
+            logger.info(
+                "audit_llm_request_done",
+                audit_id=str(base_trace_meta.get("audit_id") or ""),
+                execution_path="memory",
+                llm_request_current_index=current_progress_index,
+                llm_request_total_upper_bound=int(
+                    llm_budget.get("limit") or 0),
+                request_kind="memory_clause",
+                clause_id=current_clause_id,
+                round_index=int(payload.get("round") or 0),
+                parse_failed_flag=True,
+                risk_count=0,
+            )
+            if callable(progress_event_cb):
+                progress_event_cb(
+                    request_status="done",
+                    current_index=current_progress_index,
+                    current_label=current_label,
+                    request_kind="memory_clause",
+                    round_index=int(payload.get("round") or 0),
+                    clause_id=current_clause_id,
+                )
             return {"summary": "", "risks": []}
 
     async def _flush_cb(prompt: str) -> str:
@@ -594,6 +726,32 @@ def create_memory_callbacks(
                 round_runtime.get("clause_id") or ""), "result": out}, flush_round)
             return out
         llm_budget["calls"] = int(llm_budget.get("calls") or 0) + 1
+        if isinstance(progress_state, dict):
+            progress_state["started"] = int(
+                progress_state.get("started") or 0) + 1
+        flush_label = str(round_runtime.get("clause_id")
+                          or f"flush-{flush_round}")
+        current_progress_index = int(
+            (progress_state or {}).get("started") or int(llm_budget.get("calls") or 0))
+        logger.info(
+            "audit_llm_request_start",
+            audit_id=str(base_trace_meta.get("audit_id") or ""),
+            execution_path="memory",
+            llm_request_current_index=current_progress_index,
+            llm_request_total_upper_bound=int(llm_budget.get("limit") or 0),
+            request_kind="memory_flush",
+            clause_id=str(round_runtime.get("clause_id") or ""),
+            round_index=flush_round,
+        )
+        if callable(progress_event_cb):
+            progress_event_cb(
+                request_status="running",
+                current_index=current_progress_index,
+                current_label=flush_label,
+                request_kind="memory_flush",
+                round_index=flush_round,
+                clause_id=str(round_runtime.get("clause_id") or ""),
+            )
         force_main = get_execution_flag(
             cfg, "memory_flush_force_main", False)
         try:
@@ -631,6 +789,32 @@ def create_memory_callbacks(
             )
             write_round("flush_llm_error", {"clause_id": str(
                 round_runtime.get("clause_id") or ""), "error": str(e), "result": out}, flush_round)
+            if isinstance(progress_state, dict):
+                progress_state["completed"] = int(
+                    progress_state.get("completed") or 0) + 1
+                progress_state["last_completed_label"] = flush_label
+            logger.warning(
+                "audit_llm_request_failed",
+                audit_id=str(base_trace_meta.get("audit_id") or ""),
+                execution_path="memory",
+                llm_request_current_index=current_progress_index,
+                llm_request_total_upper_bound=int(
+                    llm_budget.get("limit") or 0),
+                request_kind="memory_flush",
+                clause_id=str(round_runtime.get("clause_id") or ""),
+                round_index=flush_round,
+                error=str(e),
+            )
+            if callable(progress_event_cb):
+                progress_event_cb(
+                    request_status="failed",
+                    current_index=current_progress_index,
+                    current_label=flush_label,
+                    request_kind="memory_flush",
+                    round_index=flush_round,
+                    clause_id=str(round_runtime.get("clause_id") or ""),
+                    last_error=str(e),
+                )
             return out
         write_audit_trace(
             cfg,
@@ -645,6 +829,29 @@ def create_memory_callbacks(
         )
         write_round("flush_result", {"clause_id": str(
             round_runtime.get("clause_id") or ""), "result": out, "fallback_used": bool(fallback_meta.get("fallback_used", False)), "fallback_reason": str(fallback_meta.get("fallback_reason", ""))}, flush_round)
+        if isinstance(progress_state, dict):
+            progress_state["completed"] = int(
+                progress_state.get("completed") or 0) + 1
+            progress_state["last_completed_label"] = flush_label
+        logger.info(
+            "audit_llm_request_done",
+            audit_id=str(base_trace_meta.get("audit_id") or ""),
+            execution_path="memory",
+            llm_request_current_index=current_progress_index,
+            llm_request_total_upper_bound=int(llm_budget.get("limit") or 0),
+            request_kind="memory_flush",
+            clause_id=str(round_runtime.get("clause_id") or ""),
+            round_index=flush_round,
+        )
+        if callable(progress_event_cb):
+            progress_event_cb(
+                request_status="done",
+                current_index=current_progress_index,
+                current_label=flush_label,
+                request_kind="memory_flush",
+                round_index=flush_round,
+                clause_id=str(round_runtime.get("clause_id") or ""),
+            )
         return out
 
     return _clause_cb, _flush_cb
