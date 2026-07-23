@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import re
 from datetime import datetime, timezone
 from app.core.database import init_db, get_conn
 from app.services.crud import (
@@ -38,8 +39,8 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
     create_tax_contract_document(
         cfg=cfg,
         document_id=contract_id,
-        original_filename="contract.docx",
-        file_path=str(tmp_path / "contract.docx"),
+        original_filename="采购合同.docx",
+        file_path=str(tmp_path / "采购合同.docx"),
         file_type="docx",
         file_size=200,
         uploaded_by="u1",
@@ -123,3 +124,7 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
     assert exported["export_format"] == "json"
     assert os.path.exists(exported["file_path"])
     assert exported["size"] > 0
+    assert re.match(
+        r"^采购合同_\d{8}_\d{6}_tax_audit_report\.json$",
+        exported["file_name"],
+    )

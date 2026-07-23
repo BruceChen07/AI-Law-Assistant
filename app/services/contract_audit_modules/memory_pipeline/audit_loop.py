@@ -26,13 +26,19 @@ from app.services.contract_audit_modules.memory_pipeline.clause_iterator import 
 from app.services.contract_audit_modules.memory_pipeline.callbacks import (
     create_memory_callbacks,
 )
+from app.services.llm_progress import (
+    build_llm_progress_detail,
+    build_llm_progress_message,
+    compute_llm_progress_percent,
+    report_progress,
+)
 from app.memory_system.manager import MemoryLifecycleManager, MemoryManagerConfig
 from app.memory_system.search import HybridSearcher, HybridSearchConfig
 from app.memory_system.indexer import IndexerConfig, MemoryIndexer, SentenceTransformerEmbedder
 from app.memory_system.rerank import rerank_memory_candidates, apply_context_budget
 from app.services.audit_utils import _enrich_citations, _normalize_lang
 from app.memory_system.experience_repo import recall_workflow_memories
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Callable
 import os
 import structlog
 from datetime import datetime
@@ -116,6 +122,7 @@ def execute_memory_audit(
     evidence_items: List[Dict[str, Any]],
     retrieval_opts: Dict[str, Any],
     trace_context: Optional[Dict[str, Any]] = None,
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     """Execute clause-level audit with memory."""
     norm_lang = _normalize_lang(lang, default="zh")
@@ -263,6 +270,50 @@ def execute_memory_audit(
         "skipped_low_priority_calls": 0,
         "called_high_priority_clauses": 0,
     }
+    progress_state = {
+        "started": 0,
+        "completed": 0,
+        "last_completed_label": "",
+    }
+
+    def _emit_memory_progress(
+        *,
+        request_status: str,
+        current_index: int = 0,
+        current_label: str = "",
+        request_kind: str = "",
+        round_index: int = 0,
+        clause_id: str = "",
+        last_error: str = "",
+    ) -> Dict[str, Any]:
+        detail = build_llm_progress_detail(
+            execution_path="memory",
+            total_planned=0,
+            total_upper_bound=int(llm_budget.get("limit") or 0),
+            exact_total_known=False,
+            started=int(progress_state.get("started") or 0),
+            completed=int(progress_state.get("completed") or 0),
+            current_index=current_index,
+            current_label=current_label,
+            request_kind=request_kind,
+            request_status=request_status,
+            round_index=round_index,
+            clause_id=clause_id,
+            last_completed_label=str(
+                progress_state.get("last_completed_label") or ""),
+            last_error=last_error,
+        )
+        report_progress(
+            progress_cb,
+            "auditing",
+            compute_llm_progress_percent(
+                int(progress_state.get("completed") or 0),
+                max(1, int(llm_budget.get("limit") or 0)),
+            ),
+            build_llm_progress_message(detail),
+            detail=detail,
+        )
+        return detail
 
     def _write_round(action: str, payload: Dict[str, Any], round_no: int = 0) -> None:
         rn = int(round_no or round_runtime.get("round") or 0)
@@ -295,6 +346,14 @@ def execute_memory_audit(
         },
         memory_dir=memory_dir,
     )
+    logger.info(
+        "audit_llm_plan_created",
+        audit_id=audit_id,
+        execution_path="memory",
+        llm_request_total_upper_bound=int(llm_budget.get("limit") or 0),
+        llm_request_exact_total_known=False,
+    )
+    _emit_memory_progress(request_status="planned")
     write_audit_trace(
         cfg,
         "workflow_memory_recall",
@@ -329,6 +388,8 @@ def execute_memory_audit(
         round_runtime=round_runtime,
         write_round=_write_round,
         full_contract_context=full_contract_context,
+        progress_event_cb=_emit_memory_progress,
+        progress_state=progress_state,
     )
 
     report = run_coro_sync(manager.audit_contract(

@@ -19,6 +19,7 @@ from app.services.crud import insert_document, insert_contract_audit, get_docume
 from app.services.audit_orchestrator import AuditServices, run_contract_pipeline_bundle
 from app.services.contract_preview_assets import build_contract_preview_manifest, find_preview_page
 from app.services.docx_renderer import render_tax_audit_docx
+from app.services.export_filenames import build_export_filename
 from app.services.audit_utils import _normalize_lang
 from app.core.utils import extract_text_with_config
 from app.core.config import get_config
@@ -59,16 +60,29 @@ def _build_audit_error_detail(err: Exception, language: str) -> str:
     return "Contract audit failed. Check LLM settings in Admin -> Model Config and retry."
 
 
-def _set_audit_progress(audit_id: str, status: str, progress: int, stage: str, message: str = "") -> None:
-    payload = {
-        "audit_id": audit_id,
-        "status": status,
-        "progress": int(progress),
-        "stage": stage,
-        "message": message,
-        "updated_at": datetime.utcnow().isoformat(),
-    }
+def _set_audit_progress(
+    audit_id: str,
+    status: str,
+    progress: int,
+    stage: str,
+    message: str = "",
+    detail: Optional[Dict[str, Any]] = None,
+) -> None:
     with _audit_progress_lock:
+        previous = _audit_progress.get(audit_id) or {}
+        next_detail = previous.get("detail") if isinstance(
+            previous.get("detail"), dict) else {}
+        if isinstance(detail, dict):
+            next_detail = {**next_detail, **detail}
+        payload = {
+            "audit_id": audit_id,
+            "status": status,
+            "progress": int(progress),
+            "stage": stage,
+            "message": message,
+            "updated_at": datetime.utcnow().isoformat(),
+            "detail": next_detail,
+        }
         _audit_progress[audit_id] = payload
 
 
@@ -98,6 +112,13 @@ def _build_retrieval_options(payload: Dict[str, Any]) -> Dict[str, Any]:
         "contract_chunk_max": payload.get("contract_chunk_max", "5"),
         "per_chunk_top_k": payload.get("per_chunk_top_k", "5"),
     }
+
+
+def _extract_report_risk_items(report: Dict[str, Any]) -> list[Dict[str, Any]]:
+    items = report.get("risk_items") if isinstance(report, dict) else []
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
 
 
 def build_router(cfg):
@@ -211,8 +232,9 @@ def build_router(cfg):
             "per_chunk_top_k": per_chunk_top_k,
         })
 
-        def _progress_cb(stage: str, percent: int, message: str = "") -> None:
-            _set_audit_progress(audit_id, "running", percent, stage, message)
+        def _progress_cb(stage: str, percent: int, message: str = "", detail: Optional[Dict[str, Any]] = None) -> None:
+            _set_audit_progress(audit_id, "running", percent,
+                                stage, message, detail=detail)
 
         try:
             services = AuditServices(
@@ -308,8 +330,9 @@ def build_router(cfg):
         model_cfg = cfg.get("llm_config") or {}
         retrieval_options = _build_retrieval_options(payload or {})
 
-        def _progress_cb(stage: str, percent: int, message: str = "") -> None:
-            _set_audit_progress(audit_id, "running", percent, stage, message)
+        def _progress_cb(stage: str, percent: int, message: str = "", detail: Optional[Dict[str, Any]] = None) -> None:
+            _set_audit_progress(audit_id, "running", percent,
+                                stage, message, detail=detail)
 
         try:
             services = AuditServices(
@@ -530,13 +553,15 @@ def build_router(cfg):
                 overview["contract_filename"] = doc.get(
                     "original_filename") or doc.get("filename") or ""
             report["overview"] = overview
-            report["contract_id"] = str(report.get("contract_id") or document_id)
+            report["contract_id"] = str(
+                report.get("contract_id") or document_id)
         else:
             risks = audit.get("risks") if isinstance(
                 audit.get("risks"), list) else []
             citations = audit.get("citations") if isinstance(
                 audit.get("citations"), list) else []
-            citation_map = {str(c.get("citation_id") or ""): c for c in citations if isinstance(c, dict)}
+            citation_map = {str(c.get("citation_id") or "")
+                                : c for c in citations if isinstance(c, dict)}
             risk_summary = {"high": 0, "medium": 0, "low": 0}
             risk_items = []
             evidence_items = []
@@ -544,7 +569,8 @@ def build_router(cfg):
                 if not isinstance(r, dict):
                     continue
                 level = str(r.get("level") or "medium").lower()
-                level = level if level in {"high", "medium", "low"} else "medium"
+                level = level if level in {
+                    "high", "medium", "low"} else "medium"
                 risk_summary[level] += 1
                 location = r.get("location") if isinstance(
                     r.get("location"), dict) else {}
@@ -605,8 +631,20 @@ def build_router(cfg):
             }
         report_dir = os.path.join(cfg["files_dir"], "contract_reports")
         os.makedirs(report_dir, exist_ok=True)
+        risk_items = _extract_report_risk_items(report)
         ext = "json" if fmt == "json" else "docx"
-        filename = f"contract_audit_report_{document_id}.{ext}"
+        source_filename = str(doc.get("original_filename")
+                              or doc.get("filename") or "")
+        generated_at = str(report.get("generated_at")
+                           or datetime.utcnow().isoformat())
+        suffix = "contract_audit_report"
+        filename = build_export_filename(
+            source_filename=source_filename,
+            generated_at=generated_at,
+            suffix=suffix,
+            ext=ext,
+            fallback_stem="contract",
+        )
         output_path = os.path.join(report_dir, filename)
         if fmt == "json":
             with open(output_path, "w", encoding="utf-8") as f:
@@ -627,6 +665,14 @@ def build_router(cfg):
                         status_code=400,
                         detail="commented original export only supports docx source files",
                     )
+                filename = build_export_filename(
+                    source_filename=source_filename,
+                    generated_at=generated_at,
+                    suffix="contract_with_comments",
+                    ext="docx",
+                    fallback_stem="contract",
+                )
+                output_path = os.path.join(report_dir, filename)
                 try:
                     insert_risk_comments(original_file, output_path, risk_items)
                 except zipfile.BadZipFile as exc:
@@ -652,12 +698,11 @@ def build_router(cfg):
                         status_code=500,
                         detail=f"failed to generate commented original: {exc}",
                     ) from exc
-                filename = f"contract_with_comments_{document_id}.docx"
             else:
                 # Export the standard audit report
+                output_path = os.path.join(report_dir, filename)
                 render_tax_audit_docx(
                     report, output_path, template_version=template_version, locale=locale, brand=brand)
-                filename = f"contract_audit_report_{document_id}.docx"
 
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         return FileResponse(output_path, media_type=media_type, filename=filename)
@@ -690,9 +735,11 @@ def build_router(cfg):
             output_dir = os.path.join(cfg["files_dir"], "contract_markdown")
         os.makedirs(output_dir, exist_ok=True)
 
-        source_name = doc.get("original_filename") or doc.get("filename") or "contract"
+        source_name = doc.get("original_filename") or doc.get(
+            "filename") or "contract"
         base_name = os.path.splitext(source_name)[0]
-        output_path = os.path.join(output_dir, f"{base_name}_{document_id[:8]}.md")
+        output_path = os.path.join(
+            output_dir, f"{base_name}_{document_id[:8]}.md")
 
         include_header = bool((payload or {}).get("include_metadata", True))
 

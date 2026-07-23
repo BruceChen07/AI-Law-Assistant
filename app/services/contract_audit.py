@@ -25,6 +25,12 @@ from app.services.contract_audit_modules import memory_pipeline as memory_pipeli
 from app.services.contract_audit_modules.memory_pipeline import execute_memory_audit
 from app.services.contract_audit_modules.result_assembler import attach_risk_locations
 from app.services.contract_audit_modules.trace_writer import write_audit_trace, write_round_trace, trace_clip
+from app.services.llm_progress import (
+    build_llm_progress_detail,
+    build_llm_progress_message,
+    compute_llm_progress_percent,
+    report_progress,
+)
 from app.memory_system.search import HybridSearcher
 from app.memory_system.experience_repo import save_audit_episode
 from app.core.llm_trace import new_trace_id
@@ -707,6 +713,7 @@ def _build_multipass_classic_audit(
     audit_id: str,
     trace_id: str,
     token_budget: Dict[str, Any],
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     policy = dict((token_budget or {}).get("policy") or {})
     clause_plan = plan_clause_groups(preview_clauses, policy)
@@ -715,27 +722,135 @@ def _build_multipass_classic_audit(
         int(policy.get("max_evidence_items_per_round") or 12),
     )
     rounds: List[Dict[str, Any]] = []
+    progress_state = {
+        "planned_total": len(clause_plan.get("rounds") or []),
+        "started": 0,
+        "completed": 0,
+        "last_completed_label": "",
+    }
+
+    def _emit_classic_progress(
+        *,
+        request_status: str,
+        current_index: int = 0,
+        current_label: str = "",
+        request_kind: str = "",
+        retry_index: int = 0,
+        round_index: int = 0,
+        last_error: str = "",
+    ) -> Dict[str, Any]:
+        total = int(progress_state.get("planned_total") or 0)
+        detail = build_llm_progress_detail(
+            execution_path="classic",
+            total_planned=total,
+            total_upper_bound=total,
+            exact_total_known=True,
+            started=int(progress_state.get("started") or 0),
+            completed=int(progress_state.get("completed") or 0),
+            current_index=current_index,
+            current_label=current_label,
+            request_kind=request_kind,
+            request_status=request_status,
+            retry_index=retry_index,
+            round_index=round_index,
+            last_completed_label=str(
+                progress_state.get("last_completed_label") or ""),
+            last_error=last_error,
+        )
+        report_progress(
+            progress_cb,
+            "auditing",
+            compute_llm_progress_percent(
+                int(progress_state.get("completed") or 0),
+                max(1, total),
+            ),
+            build_llm_progress_message(detail),
+            detail=detail,
+        )
+        return detail
+
+    logger.info(
+        "audit_llm_plan_created",
+        audit_id=audit_id,
+        execution_path="classic",
+        llm_request_total_planned=int(
+            progress_state.get("planned_total") or 0),
+        llm_request_exact_total_known=True,
+    )
+    _emit_classic_progress(request_status="planned")
+
     clause_group_map: Dict[str, List[Dict[str, Any]]] = {}
     for round_info, group in zip(clause_plan.get("rounds") or [], clause_plan.get("groups") or []):
         chunk_id = f"chunk-{int(round_info.get('round_index') or 0):03d}"
         clause_group_map[chunk_id] = group
-        rounds.append(
-            _run_multipass_chunk_round(
-                cfg=cfg,
-                llm=llm,
-                text=text,
-                lang=lang,
-                clauses=group,
-                selected_evidence=selected_evidence,
-                retrieval_opts=retrieval_opts,
-                audit_id=audit_id,
-                trace_id=trace_id,
-                round_index=int(round_info.get("round_index") or 0),
-                chunk_id=chunk_id,
-                estimated_clause_tokens=int(
-                    round_info.get("estimated_clause_tokens") or 0),
-                budget_trigger=list((token_budget or {}).get("reasons") or []),
-            )
+        progress_state["started"] = int(progress_state.get("started") or 0) + 1
+        current_index = int(progress_state.get("started") or 0)
+        current_round_index = int(round_info.get("round_index") or 0)
+        logger.info(
+            "audit_llm_request_start",
+            audit_id=audit_id,
+            execution_path="classic",
+            llm_request_current_index=current_index,
+            llm_request_total_planned=int(
+                progress_state.get("planned_total") or 0),
+            request_kind="chunk",
+            chunk_id=chunk_id,
+            retry_index=0,
+            round_index=current_round_index,
+        )
+        _emit_classic_progress(
+            request_status="running",
+            current_index=current_index,
+            current_label=chunk_id,
+            request_kind="chunk",
+            retry_index=0,
+            round_index=current_round_index,
+        )
+        round_result = _run_multipass_chunk_round(
+            cfg=cfg,
+            llm=llm,
+            text=text,
+            lang=lang,
+            clauses=group,
+            selected_evidence=selected_evidence,
+            retrieval_opts=retrieval_opts,
+            audit_id=audit_id,
+            trace_id=trace_id,
+            round_index=current_round_index,
+            chunk_id=chunk_id,
+            estimated_clause_tokens=int(
+                round_info.get("estimated_clause_tokens") or 0),
+            budget_trigger=list((token_budget or {}).get("reasons") or []),
+        )
+        rounds.append(round_result)
+        chunk_audit_result = round_result.get(
+            "chunk_audit_result") if isinstance(round_result.get("chunk_audit_result"), dict) else {}
+        progress_state["completed"] = int(
+            progress_state.get("completed") or 0) + 1
+        progress_state["last_completed_label"] = chunk_id
+        logger.info(
+            "audit_llm_request_done",
+            audit_id=audit_id,
+            execution_path="classic",
+            llm_request_current_index=current_index,
+            llm_request_total_planned=int(
+                progress_state.get("planned_total") or 0),
+            request_kind="chunk",
+            chunk_id=chunk_id,
+            retry_index=0,
+            round_index=current_round_index,
+            risk_count=int(chunk_audit_result.get("risk_count") or 0),
+            parse_failed_flag=bool(
+                chunk_audit_result.get("parse_failed_flag")),
+            truncated_flag=bool(chunk_audit_result.get("truncated_flag")),
+        )
+        _emit_classic_progress(
+            request_status="done",
+            current_index=current_index,
+            current_label=chunk_id,
+            request_kind="chunk",
+            retry_index=0,
+            round_index=current_round_index,
         )
     merged = _merge_multipass_audits(
         rounds,
@@ -789,6 +904,43 @@ def _build_multipass_classic_audit(
                     }
                 )
                 continue
+            old_total = int(progress_state.get("planned_total") or 0)
+            progress_state["planned_total"] = old_total + 1
+            logger.info(
+                "audit_llm_plan_adjusted",
+                audit_id=audit_id,
+                execution_path="classic",
+                llm_request_total_planned_before=old_total,
+                llm_request_total_planned_after=int(
+                    progress_state.get("planned_total") or 0),
+                reason="reliability_retry",
+                chunk_id=chunk_id,
+            )
+            progress_state["started"] = int(
+                progress_state.get("started") or 0) + 1
+            current_index = int(progress_state.get("started") or 0)
+            current_round_index = int(current_round.get("round_index") or 0)
+            retry_step = current_retry_index + 1
+            logger.info(
+                "audit_llm_request_start",
+                audit_id=audit_id,
+                execution_path="classic",
+                llm_request_current_index=current_index,
+                llm_request_total_planned=int(
+                    progress_state.get("planned_total") or 0),
+                request_kind="retry",
+                chunk_id=chunk_id,
+                retry_index=retry_step,
+                round_index=current_round_index,
+            )
+            _emit_classic_progress(
+                request_status="running",
+                current_index=current_index,
+                current_label=chunk_id,
+                request_kind="retry",
+                retry_index=retry_step,
+                round_index=current_round_index,
+            )
             next_round = _run_multipass_chunk_round(
                 cfg=cfg,
                 llm=llm,
@@ -804,14 +956,14 @@ def _build_multipass_classic_audit(
                 estimated_clause_tokens=int(
                     current_round.get("estimated_clause_tokens") or 0),
                 budget_trigger=list(current_round.get("budget_trigger") or []),
-                retry_index=current_retry_index + 1,
+                retry_index=retry_step,
                 retry_reasons=list(retry_target.get("reasons") or []),
             )
             retry_logs.append(
                 {
                     "chunk_id": chunk_id,
                     "retry_performed": True,
-                    "retry_index": current_retry_index + 1,
+                    "retry_index": retry_step,
                     "retry_reasons": list(retry_target.get("reasons") or []),
                     "before_parse_failed": bool((current_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
                     "after_parse_failed": bool((next_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
@@ -821,13 +973,44 @@ def _build_multipass_classic_audit(
                     "after_risk_count": int((next_round.get("chunk_audit_result") or {}).get("risk_count") or 0),
                 }
             )
+            retry_chunk_audit_result = next_round.get(
+                "chunk_audit_result") if isinstance(next_round.get("chunk_audit_result"), dict) else {}
+            progress_state["completed"] = int(
+                progress_state.get("completed") or 0) + 1
+            progress_state["last_completed_label"] = chunk_id
+            logger.info(
+                "audit_llm_request_done",
+                audit_id=audit_id,
+                execution_path="classic",
+                llm_request_current_index=current_index,
+                llm_request_total_planned=int(
+                    progress_state.get("planned_total") or 0),
+                request_kind="retry",
+                chunk_id=chunk_id,
+                retry_index=retry_step,
+                round_index=current_round_index,
+                risk_count=int(
+                    retry_chunk_audit_result.get("risk_count") or 0),
+                parse_failed_flag=bool(
+                    retry_chunk_audit_result.get("parse_failed_flag")),
+                truncated_flag=bool(
+                    retry_chunk_audit_result.get("truncated_flag")),
+            )
+            _emit_classic_progress(
+                request_status="done",
+                current_index=current_index,
+                current_label=chunk_id,
+                request_kind="retry",
+                retry_index=retry_step,
+                round_index=current_round_index,
+            )
             write_audit_trace(
                 cfg,
                 "audit_review_retry_done",
                 {
                     "audit_id": audit_id,
                     "chunk_id": chunk_id,
-                    "retry_index": current_retry_index + 1,
+                    "retry_index": retry_step,
                     "retry_reasons": list(retry_target.get("reasons") or []),
                     "before_parse_failed": bool((current_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
                     "after_parse_failed": bool((next_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
@@ -887,6 +1070,7 @@ def _run_budget_aware_classic_audit(
     trace_id: str,
     token_budget: Dict[str, Any],
     prompt_payload: Dict[str, Any],
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     if bool((token_budget or {}).get("requires_multi_pass")):
         return _build_multipass_classic_audit(
@@ -900,6 +1084,7 @@ def _run_budget_aware_classic_audit(
             audit_id=audit_id,
             trace_id=trace_id,
             token_budget=token_budget,
+            progress_cb=progress_cb,
         )
     classic_result = _build_classic_audit(
         cfg=cfg,
@@ -1007,20 +1192,15 @@ def audit_contract(
     reranker=None,
     translator=None,
     retrieval_options: Optional[Dict[str, Any]] = None,
-    progress_cb: Optional[Callable[[str, int, str], None]] = None,
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     """
     A unified facade function for contract auditing.
     It integrates text extraction, clause preview, evidence retrieval, and LLM clause-level auditing with memory.
     It remains completely transparent to upper-level calls.
     """
-    def _report(stage: str, percent: int, message: str = "") -> None:
-        if not callable(progress_cb):
-            return
-        try:
-            progress_cb(stage, percent, message)
-        except Exception:
-            return
+    def _report(stage: str, percent: int, message: str = "", detail: Optional[Dict[str, Any]] = None) -> None:
+        report_progress(progress_cb, stage, percent, message, detail=detail)
 
     audit_started_at = time.perf_counter()
     audit_id = f"audit_{uuid.uuid4().hex[:12]}"
@@ -1213,6 +1393,7 @@ def audit_contract(
                     "regulation_pack_id": regulation_identity.get("regulation_pack_id", ""),
                     "regulation_fingerprint": regulation_identity.get("regulation_fingerprint", ""),
                 },
+                progress_cb=progress_cb,
             )
             execution_path = "memory"
         except Exception as e:
@@ -1232,6 +1413,7 @@ def audit_contract(
                 trace_id=trace_id,
                 token_budget=token_budget,
                 prompt_payload=classic_prompt_payload,
+                progress_cb=progress_cb,
             )
             execution_path = str(
                 (memory_result.get("meta") or {}).get("execution_path") or "classic_fallback")
@@ -1265,6 +1447,7 @@ def audit_contract(
             trace_id=trace_id,
             token_budget=token_budget,
             prompt_payload=classic_prompt_payload,
+            progress_cb=progress_cb,
         )
         execution_path = str(
             (memory_result.get("meta") or {}).get("execution_path")
