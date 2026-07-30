@@ -54,6 +54,7 @@ data/memory/
 data/app.db
 data/llm_trace.db
 data/llm_traces_full/
+data/.audit_internal/
 logs/
 log/
 models/embedding/
