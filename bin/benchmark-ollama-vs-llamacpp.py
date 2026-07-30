@@ -238,8 +238,52 @@ def _extract_ollama_content(payload: dict) -> tuple[str, int, int]:
     return content, prompt_tokens, completion_tokens
 
 
-def _request_payload(runtime: str, model: str, prompt: str, max_tokens: int) -> tuple[str, dict]:
+def _extract_ollama_timings(payload: dict) -> dict:
+    def _ns_to_ms(key: str) -> float:
+        try:
+            return round(float(payload.get(key) or 0) / 1_000_000.0, 2)
+        except Exception:
+            return 0.0
+
+    load_ms = _ns_to_ms("load_duration")
+    prefill_ms = _ns_to_ms("prompt_eval_duration")
+    eval_ms = _ns_to_ms("eval_duration")
+    eval_count = int(payload.get("eval_count") or 0)
+    prompt_eval_count = int(payload.get("prompt_eval_count") or 0)
+    decode_tps = round(eval_count * 1000.0 / eval_ms, 2) if eval_ms > 0 else 0.0
+    prefill_tps = round(prompt_eval_count * 1000.0 /
+                        prefill_ms, 2) if prefill_ms > 0 else 0.0
+    return {
+        "load_duration_ms": load_ms,
+        "prompt_eval_ms": prefill_ms,
+        "eval_duration_ms": eval_ms,
+        "total_duration_ms": _ns_to_ms("total_duration"),
+        "first_token_ms": round(load_ms + prefill_ms, 2),
+        "decode_tokens_per_sec": decode_tps,
+        "prefill_tokens_per_sec": prefill_tps,
+    }
+
+
+def _ollama_unload_model(base_url: str, model: str) -> None:
+    try:
+        _http_json(
+            base_url.rstrip("/") + "/api/generate",
+            method="POST",
+            payload={"model": model, "keep_alive": 0},
+            timeout=60,
+        )
+    except Exception:
+        pass
+
+
+def _request_payload(runtime: str, model: str, prompt: str, max_tokens: int, num_ctx: int = 0) -> tuple[str, dict]:
     if runtime == "ollama":
+        options = {
+            "temperature": 0,
+            "num_predict": max_tokens,
+        }
+        if num_ctx > 0:
+            options["num_ctx"] = num_ctx
         return (
             "/api/chat",
             {
@@ -248,10 +292,8 @@ def _request_payload(runtime: str, model: str, prompt: str, max_tokens: int) -> 
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
-                "options": {
-                    "temperature": 0,
-                    "num_predict": max_tokens,
-                },
+                "think": False,
+                "options": options,
             },
         )
     return (
@@ -280,6 +322,7 @@ def _benchmark_runtime(
     warmup: int,
     start_command: str,
     repo_root: Path,
+    num_ctx: int = 0,
 ) -> dict:
     health_paths = [
         "/api/version", "/v1/models"] if runtime == "ollama" else ["/health", "/v1/models"]
@@ -320,7 +363,8 @@ def _benchmark_runtime(
     total_runs = max(0, warmup) + max(1, rounds)
     metrics = []
     for idx in range(total_runs):
-        path, payload = _request_payload(runtime, model, prompt, max_tokens)
+        path, payload = _request_payload(
+            runtime, model, prompt, max_tokens, num_ctx)
         sampler = Sampler(process_name)
         sampler.start()
         started = time.perf_counter()
@@ -350,6 +394,9 @@ def _benchmark_runtime(
                 "response_chars": len(content),
                 "content_preview": content[:200],
             }
+            if runtime == "ollama":
+                round_result["ollama_timings"] = _extract_ollama_timings(
+                    response)
         except Exception as exc:
             latency_sec = max(0.001, time.perf_counter() - started)
             round_result = {
@@ -394,6 +441,24 @@ def _benchmark_runtime(
         "peak_gpu_util_percent": round(max(gpu_util_values), 2) if gpu_util_values else 0.0,
         "peak_gpu_memory_mb": round(max(gpu_mem_values), 2) if gpu_mem_values else 0.0,
     }
+    timing_rows = [item.get("ollama_timings")
+                   for item in metrics if item.get("ollama_timings")]
+    if timing_rows:
+        first_token_values = [float(row["first_token_ms"])
+                              for row in timing_rows]
+        prefill_values = [float(row["prompt_eval_ms"]) for row in timing_rows]
+        decode_values = [float(row["decode_tokens_per_sec"])
+                         for row in timing_rows]
+        load_values = [float(row["load_duration_ms"]) for row in timing_rows]
+        result["summary"].update(
+            {
+                "avg_first_token_ms": round(sum(first_token_values) / len(first_token_values), 2),
+                "p95_first_token_ms": round(sorted(first_token_values)[math.ceil(len(first_token_values) * 0.95) - 1], 2),
+                "avg_prefill_ms": round(sum(prefill_values) / len(prefill_values), 2),
+                "avg_decode_tokens_per_sec": round(sum(decode_values) / len(decode_values), 2),
+                "max_load_duration_ms": round(max(load_values), 2),
+            }
+        )
     result["ok"] = True
     return result
 
@@ -421,8 +486,10 @@ def parse_args() -> argparse.Namespace:
         "--llama-cpp-url", default=DEFAULT_LLAMACPP_URL, help="llama.cpp base URL.")
     parser.add_argument("--ollama-model", required=True,
                         help="Ollama model name for the benchmark.")
-    parser.add_argument("--llama-cpp-model", required=True,
-                        help="llama.cpp model alias for the benchmark.")
+    parser.add_argument("--ollama-model-b", default="",
+                        help="Optional second Ollama model; enables ollama-vs-ollama comparison on the same endpoint and skips llama.cpp.")
+    parser.add_argument("--llama-cpp-model", default="",
+                        help="llama.cpp model alias for the benchmark (required unless --ollama-model-b is used).")
     parser.add_argument("--ollama-process", default="ollama.exe",
                         help="Process name used for memory sampling.")
     parser.add_argument("--llama-cpp-process", default="llama-server.exe",
@@ -437,6 +504,14 @@ def parse_args() -> argparse.Namespace:
                         default=1, help="Warmup rounds per runtime.")
     parser.add_argument("--max-tokens", type=int,
                         default=256, help="Max generation tokens.")
+    parser.add_argument("--num-ctx", type=int, default=0,
+                        help="Optional Ollama num_ctx override for each request.")
+    parser.add_argument("--scenario-label", default="",
+                        help="Optional scenario label recorded in the report.")
+    parser.add_argument("--unload-between", action="store_true", default=False,
+                        help="Unload each Ollama model after its benchmark (keep_alive=0) to avoid VRAM contention.")
+    parser.add_argument("--single-model", action="store_true", default=False,
+                        help="Benchmark only --ollama-model in isolation (skip the second runtime).")
     parser.add_argument("--timeout", type=int, default=120,
                         help="Request timeout in seconds.")
     parser.add_argument("--ollama-start-command", default="",
@@ -454,18 +529,28 @@ def main() -> int:
     prompt = _clean_text(args.prompt)
     if args.prompt_file:
         prompt = Path(args.prompt_file).read_text(encoding="utf-8").strip()
+    dual_ollama = bool(_clean_text(args.ollama_model_b))
+    single_model = bool(args.single_model)
+    if not single_model and not dual_ollama and not _clean_text(args.llama_cpp_model):
+        print("[ERROR] Provide --llama-cpp-model or --ollama-model-b (or --single-model).")
+        return 1
+    mode_slug = ("ollama-single" if single_model
+                 else "ollama-vs-ollama" if dual_ollama else "ollama-vs-llamacpp")
     report_path = Path(args.report_path).resolve() if args.report_path else (
         repo_root
         / "plan"
         / "local-llm-llamacpp"
         / "reports"
-        / f"benchmark-ollama-vs-llamacpp-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
+        / f"benchmark-{mode_slug}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.json"
     )
     report_path.parent.mkdir(parents=True, exist_ok=True)
 
+    ollama_base_url = _normalize_base_url(args.ollama_url, DEFAULT_OLLAMA_URL)
+    if dual_ollama and args.unload_between:
+        _ollama_unload_model(ollama_base_url, args.ollama_model_b)
     ollama_result = _benchmark_runtime(
         runtime="ollama",
-        base_url=_normalize_base_url(args.ollama_url, DEFAULT_OLLAMA_URL),
+        base_url=ollama_base_url,
         model=args.ollama_model,
         process_name=args.ollama_process,
         prompt=prompt,
@@ -475,75 +560,124 @@ def main() -> int:
         warmup=args.warmup_rounds,
         start_command=args.ollama_start_command,
         repo_root=repo_root,
+        num_ctx=args.num_ctx,
     )
-    llamacpp_result = _benchmark_runtime(
-        runtime="llama_cpp",
-        base_url=_normalize_base_url(args.llama_cpp_url, DEFAULT_LLAMACPP_URL),
-        model=args.llama_cpp_model,
-        process_name=args.llama_cpp_process,
-        prompt=prompt,
-        max_tokens=args.max_tokens,
-        rounds=args.rounds,
-        timeout=args.timeout,
-        warmup=args.warmup_rounds,
-        start_command=args.llama_cpp_start_command,
-        repo_root=repo_root,
-    )
+    if single_model:
+        if args.unload_between:
+            _ollama_unload_model(ollama_base_url, args.ollama_model)
+        second_result = {"ok": False, "skipped": True}
+    elif dual_ollama:
+        if args.unload_between:
+            _ollama_unload_model(ollama_base_url, args.ollama_model)
+        second_result = _benchmark_runtime(
+            runtime="ollama",
+            base_url=ollama_base_url,
+            model=args.ollama_model_b,
+            process_name=args.ollama_process,
+            prompt=prompt,
+            max_tokens=args.max_tokens,
+            rounds=args.rounds,
+            timeout=args.timeout,
+            warmup=args.warmup_rounds,
+            start_command=args.ollama_start_command,
+            repo_root=repo_root,
+            num_ctx=args.num_ctx,
+        )
+        if args.unload_between:
+            _ollama_unload_model(ollama_base_url, args.ollama_model_b)
+    else:
+        second_result = _benchmark_runtime(
+            runtime="llama_cpp",
+            base_url=_normalize_base_url(
+                args.llama_cpp_url, DEFAULT_LLAMACPP_URL),
+            model=args.llama_cpp_model,
+            process_name=args.llama_cpp_process,
+            prompt=prompt,
+            max_tokens=args.max_tokens,
+            rounds=args.rounds,
+            timeout=args.timeout,
+            warmup=args.warmup_rounds,
+            start_command=args.llama_cpp_start_command,
+            repo_root=repo_root,
+        )
 
     comparison = {"ready": False}
-    if ollama_result.get("ok") and llamacpp_result.get("ok"):
+    if single_model:
+        comparison = {"ready": False, "single_model": True}
+    if not single_model and ollama_result.get("ok") and second_result.get("ok"):
         ollama_summary = ollama_result["summary"]
-        llamacpp_summary = llamacpp_result["summary"]
+        second_summary = second_result["summary"]
         comparison = {
             "ready": True,
             "avg_latency_sec": _improvement(
                 float(ollama_summary["avg_latency_sec"]),
-                float(llamacpp_summary["avg_latency_sec"]),
+                float(second_summary["avg_latency_sec"]),
                 higher_better=False,
             ),
             "avg_tokens_per_sec": _improvement(
                 float(ollama_summary["avg_tokens_per_sec"]),
-                float(llamacpp_summary["avg_tokens_per_sec"]),
+                float(second_summary["avg_tokens_per_sec"]),
                 higher_better=True,
             ),
             "cold_start_ready_sec": _improvement(
                 float(ollama_result.get("launch", {}).get(
                     "ready_after_launch_sec", 0.0)),
-                float(llamacpp_result.get("launch", {}).get(
+                float(second_result.get("launch", {}).get(
                     "ready_after_launch_sec", 0.0)),
                 higher_better=False,
             ),
             "peak_memory_mb": _improvement(
                 float(ollama_summary["peak_memory_mb"]),
-                float(llamacpp_summary["peak_memory_mb"]),
+                float(second_summary["peak_memory_mb"]),
                 higher_better=False,
             ),
             "peak_gpu_util_percent": _improvement(
                 float(ollama_summary["peak_gpu_util_percent"]),
-                float(llamacpp_summary["peak_gpu_util_percent"]),
+                float(second_summary["peak_gpu_util_percent"]),
                 higher_better=True,
             ),
             "peak_gpu_memory_mb": _improvement(
                 float(ollama_summary["peak_gpu_memory_mb"]),
-                float(llamacpp_summary["peak_gpu_memory_mb"]),
+                float(second_summary["peak_gpu_memory_mb"]),
                 higher_better=False,
             ),
         }
+        if dual_ollama and "avg_first_token_ms" in ollama_summary and "avg_first_token_ms" in second_summary:
+            comparison["avg_first_token_ms"] = _improvement(
+                float(ollama_summary["avg_first_token_ms"]),
+                float(second_summary["avg_first_token_ms"]),
+                higher_better=False,
+            )
+            comparison["avg_decode_tokens_per_sec"] = _improvement(
+                float(ollama_summary["avg_decode_tokens_per_sec"]),
+                float(second_summary["avg_decode_tokens_per_sec"]),
+                higher_better=True,
+            )
 
+    second_key = "ollama_b" if dual_ollama else "llama_cpp"
     report = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mode": mode_slug,
+        "scenario_label": _clean_text(args.scenario_label),
         "runtime_policy": {
             "edge_only": True,
             "cloud_fallback_allowed": False,
         },
-        "hardware_note": "Run the legacy Ollama baseline and the target llama.cpp runtime sequentially on the same host with the same business prompt set; ModelScope llama.cpp artifacts are treated as an independent runtime target.",
+        "hardware_note": (
+            "Two Ollama models benchmarked sequentially on the same endpoint with identical prompts; models optionally unloaded between runs to avoid VRAM contention."
+            if dual_ollama
+            else "Run the legacy Ollama baseline and the target llama.cpp runtime sequentially on the same host with the same business prompt set; ModelScope llama.cpp artifacts are treated as an independent runtime target."
+        ),
         "prompt_chars": len(prompt),
+        "prompt_tokens_estimated": _estimate_tokens(prompt),
+        "num_ctx": args.num_ctx,
+        "max_tokens": args.max_tokens,
         "rounds": args.rounds,
         "warmup_rounds": args.warmup_rounds,
         "ollama": ollama_result,
-        "llama_cpp": llamacpp_result,
+        second_key: second_result,
         "comparison": comparison,
-        "ok": bool(comparison.get("ready")),
+        "ok": bool(ollama_result.get("ok")) if single_model else bool(comparison.get("ready")),
     }
     with report_path.open("w", encoding="utf-8") as file_obj:
         json.dump(report, file_obj, ensure_ascii=False, indent=2)
