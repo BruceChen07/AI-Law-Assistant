@@ -1,0 +1,478 @@
+{
+  "generated_at": "2026-07-29T15:46:01.695935+00:00",
+  "mode": "ollama-vs-ollama",
+  "scenario_label": "L1-short-200",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "hardware_note": "Two Ollama models benchmarked sequentially on the same endpoint with identical prompts; models optionally unloaded between runs to avoid VRAM contention.",
+  "prompt_chars": 302,
+  "prompt_tokens_estimated": 244,
+  "num_ctx": 16384,
+  "max_tokens": 256,
+  "rounds": 5,
+  "warmup_rounds": 1,
+  "ollama": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3.6:35b-a3b",
+    "ready": {
+      "ok": true,
+      "url": "http://127.0.0.1:11434/api/version",
+      "latency_ms": 1,
+      "attempts": [],
+      "payload": {
+        "version": "0.32.1"
+      }
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [
+      {
+        "index": 0,
+        "warmup": true,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 26.5952,
+        "prompt_tokens": 155,
+        "completion_tokens": 80,
+        "tokens_per_sec": 3.01,
+        "response_chars": 146,
+        "content_preview": "{\n  \"error\": \"输入材料不完整，无法进行有效分析。提供的文本仅包含《中华人民共和国个人所得税法》的标题及修订历史片段，未包含具体的合同条款内容或完整的税法条文（如税率、纳税义务人定义、扣缴义务等）。请提供完整的合同涉税条款及相关的完整税法法规原文，以便识别具体的涉税风险点。\"\n}",
+        "ollama_timings": {
+          "load_duration_ms": 22911.58,
+          "prompt_eval_ms": 1084.44,
+          "eval_duration_ms": 2593.77,
+          "total_duration_ms": 26594.97,
+          "first_token_ms": 23996.02,
+          "decode_tokens_per_sec": 30.84,
+          "prefill_tokens_per_sec": 142.93
+        },
+        "resource": {
+          "sample_count": 36,
+          "peak_memory_mb": 73.37,
+          "avg_memory_mb": 61.69,
+          "peak_gpu_util_percent": 99.0,
+          "avg_gpu_util_percent": 17.86,
+          "peak_gpu_memory_mb": 11796.0
+        }
+      },
+      {
+        "index": 1,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 3.2629,
+        "prompt_tokens": 155,
+        "completion_tokens": 80,
+        "tokens_per_sec": 24.52,
+        "response_chars": 146,
+        "content_preview": "{\n  \"error\": \"输入材料不完整，无法进行有效分析。提供的文本仅包含《中华人民共和国个人所得税法》的标题及修订历史片段，未包含具体的合同条款内容或完整的税法条文（如税率、纳税义务人定义、扣缴义务等）。请提供完整的合同涉税条款及相关的完整税法法规原文，以便识别具体的涉税风险点。\"\n}",
+        "ollama_timings": {
+          "load_duration_ms": 332.68,
+          "prompt_eval_ms": 88.79,
+          "eval_duration_ms": 2835.56,
+          "total_duration_ms": 3259.17,
+          "first_token_ms": 421.47,
+          "decode_tokens_per_sec": 28.21,
+          "prefill_tokens_per_sec": 1745.69
+        },
+        "resource": {
+          "sample_count": 5,
+          "peak_memory_mb": 75.19,
+          "avg_memory_mb": 75.13,
+          "peak_gpu_util_percent": 43.0,
+          "avg_gpu_util_percent": 32.6,
+          "peak_gpu_memory_mb": 11794.0
+        }
+      },
+      {
+        "index": 2,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 3.2449,
+        "prompt_tokens": 155,
+        "completion_tokens": 80,
+        "tokens_per_sec": 24.65,
+        "response_chars": 146,
+        "content_preview": "{\n  \"error\": \"输入材料不完整，无法进行有效分析。提供的文本仅包含《中华人民共和国个人所得税法》的标题及修订历史片段，未包含具体的合同条款内容或完整的税法条文（如税率、纳税义务人定义、扣缴义务等）。请提供完整的合同涉税条款及相关的完整税法法规原文，以便识别具体的涉税风险点。\"\n}",
+        "ollama_timings": {
+          "load_duration_ms": 331.76,
+          "prompt_eval_ms": 89.49,
+          "eval_duration_ms": 2818.09,
+          "total_duration_ms": 3243.3,
+          "first_token_ms": 421.25,
+          "decode_tokens_per_sec": 28.39,
+          "prefill_tokens_per_sec": 1732.04
+        },
+        "resource": {
+          "sample_count": 5,
+          "peak_memory_mb": 77.52,
+          "avg_memory_mb": 75.54,
+          "peak_gpu_util_percent": 43.0,
+          "avg_gpu_util_percent": 37.4,
+          "peak_gpu_memory_mb": 11794.0
+        }
+      },
+      {
+        "index": 3,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 3.3038,
+        "prompt_tokens": 155,
+        "completion_tokens": 80,
+        "tokens_per_sec": 24.21,
+        "response_chars": 146,
+        "content_preview": "{\n  \"error\": \"输入材料不完整，无法进行有效分析。提供的文本仅包含《中华人民共和国个人所得税法》的标题及修订历史片段，未包含具体的合同条款内容或完整的税法条文（如税率、纳税义务人定义、扣缴义务等）。请提供完整的合同涉税条款及相关的完整税法法规原文，以便识别具体的涉税风险点。\"\n}",
+        "ollama_timings": {
+          "load_duration_ms": 326.84,
+          "prompt_eval_ms": 91.26,
+          "eval_duration_ms": 2881.09,
+          "total_duration_ms": 3302.36,
+          "first_token_ms": 418.1,
+          "decode_tokens_per_sec": 27.77,
+          "prefill_tokens_per_sec": 1698.44
+        },
+        "resource": {
+          "sample_count": 5,
+          "peak_memory_mb": 75.47,
+          "avg_memory_mb": 75.01,
+          "peak_gpu_util_percent": 41.0,
+          "avg_gpu_util_percent": 37.0,
+          "peak_gpu_memory_mb": 11794.0
+        }
+      },
+      {
+        "index": 4,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 3.2899,
+        "prompt_tokens": 155,
+        "completion_tokens": 80,
+        "tokens_per_sec": 24.32,
+        "response_chars": 146,
+        "content_preview": "{\n  \"error\": \"输入材料不完整，无法进行有效分析。提供的文本仅包含《中华人民共和国个人所得税法》的标题及修订历史片段，未包含具体的合同条款内容或完整的税法条文（如税率、纳税义务人定义、扣缴义务等）。请提供完整的合同涉税条款及相关的完整税法法规原文，以便识别具体的涉税风险点。\"\n}",
+        "ollama_timings": {
+          "load_duration_ms": 320.03,
+          "prompt_eval_ms": 93.24,
+          "eval_duration_ms": 2869.15,
+          "total_duration_ms": 3288.64,
+          "first_token_ms": 413.27,
+          "decode_tokens_per_sec": 27.88,
+          "prefill_tokens_per_sec": 1662.38
+        },
+        "resource": {
+          "sample_count": 5,
+          "peak_memory_mb": 73.78,
+          "avg_memory_mb": 73.28,
+          "peak_gpu_util_percent": 42.0,
+          "avg_gpu_util_percent": 39.0,
+          "peak_gpu_memory_mb": 11794.0
+        }
+      },
+      {
+        "index": 5,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 3.2763,
+        "prompt_tokens": 155,
+        "completion_tokens": 80,
+        "tokens_per_sec": 24.42,
+        "response_chars": 146,
+        "content_preview": "{\n  \"error\": \"输入材料不完整，无法进行有效分析。提供的文本仅包含《中华人民共和国个人所得税法》的标题及修订历史片段，未包含具体的合同条款内容或完整的税法条文（如税率、纳税义务人定义、扣缴义务等）。请提供完整的合同涉税条款及相关的完整税法法规原文，以便识别具体的涉税风险点。\"\n}",
+        "ollama_timings": {
+          "load_duration_ms": 331.7,
+          "prompt_eval_ms": 88.25,
+          "eval_duration_ms": 2852.13,
+          "total_duration_ms": 3275.12,
+          "first_token_ms": 419.95,
+          "decode_tokens_per_sec": 28.05,
+          "prefill_tokens_per_sec": 1756.37
+        },
+        "resource": {
+          "sample_count": 5,
+          "peak_memory_mb": 74.68,
+          "avg_memory_mb": 73.56,
+          "peak_gpu_util_percent": 39.0,
+          "avg_gpu_util_percent": 36.2,
+          "peak_gpu_memory_mb": 11782.0
+        }
+      }
+    ],
+    "summary": {
+      "successful_rounds": 5,
+      "avg_latency_sec": 3.2756,
+      "p95_latency_sec": 3.3038,
+      "avg_tokens_per_sec": 24.42,
+      "peak_memory_mb": 77.52,
+      "peak_gpu_util_percent": 43.0,
+      "peak_gpu_memory_mb": 11794.0,
+      "avg_first_token_ms": 418.81,
+      "p95_first_token_ms": 421.47,
+      "avg_prefill_ms": 90.21,
+      "avg_decode_tokens_per_sec": 28.06,
+      "max_load_duration_ms": 332.68
+    },
+    "ok": true
+  },
+  "ollama_b": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3:14b",
+    "ready": {
+      "ok": true,
+      "url": "http://127.0.0.1:11434/api/version",
+      "latency_ms": 1,
+      "attempts": [],
+      "payload": {
+        "version": "0.32.1"
+      }
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [
+      {
+        "index": 0,
+        "warmup": true,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 25.4477,
+        "prompt_tokens": 176,
+        "completion_tokens": 256,
+        "tokens_per_sec": 10.06,
+        "response_chars": 610,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确约定个人所得税的承担方\",\n    \"clause\": \"合同中未明确约定因履行本合同所产生的个人所得税由哪一方承担。\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第六条\",\n    \"severity\": \"中\"\n  },\n  {\n    \"risk_titl",
+        "ollama_timings": {
+          "load_duration_ms": 9525.68,
+          "prompt_eval_ms": 390.15,
+          "eval_duration_ms": 15527.69,
+          "total_duration_ms": 25442.26,
+          "first_token_ms": 9915.83,
+          "decode_tokens_per_sec": 16.49,
+          "prefill_tokens_per_sec": 451.11
+        },
+        "resource": {
+          "sample_count": 34,
+          "peak_memory_mb": 70.8,
+          "avg_memory_mb": 68.12,
+          "peak_gpu_util_percent": 55.0,
+          "avg_gpu_util_percent": 31.5,
+          "peak_gpu_memory_mb": 11486.0
+        }
+      },
+      {
+        "index": 1,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 15.7592,
+        "prompt_tokens": 176,
+        "completion_tokens": 256,
+        "tokens_per_sec": 16.24,
+        "response_chars": 610,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确约定个人所得税的承担方\",\n    \"clause\": \"合同中未明确约定因履行本合同所产生的个人所得税由哪一方承担。\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第六条\",\n    \"severity\": \"中\"\n  },\n  {\n    \"risk_titl",
+        "ollama_timings": {
+          "load_duration_ms": 177.08,
+          "prompt_eval_ms": 65.72,
+          "eval_duration_ms": 15486.44,
+          "total_duration_ms": 15757.8,
+          "first_token_ms": 242.8,
+          "decode_tokens_per_sec": 16.53,
+          "prefill_tokens_per_sec": 2678.03
+        },
+        "resource": {
+          "sample_count": 21,
+          "peak_memory_mb": 72.29,
+          "avg_memory_mb": 72.24,
+          "peak_gpu_util_percent": 58.0,
+          "avg_gpu_util_percent": 43.81,
+          "peak_gpu_memory_mb": 11486.0
+        }
+      },
+      {
+        "index": 2,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 15.7022,
+        "prompt_tokens": 176,
+        "completion_tokens": 256,
+        "tokens_per_sec": 16.3,
+        "response_chars": 610,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确约定个人所得税的承担方\",\n    \"clause\": \"合同中未明确约定因履行本合同所产生的个人所得税由哪一方承担。\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第六条\",\n    \"severity\": \"中\"\n  },\n  {\n    \"risk_titl",
+        "ollama_timings": {
+          "load_duration_ms": 183.43,
+          "prompt_eval_ms": 63.45,
+          "eval_duration_ms": 15426.8,
+          "total_duration_ms": 15700.98,
+          "first_token_ms": 246.88,
+          "decode_tokens_per_sec": 16.59,
+          "prefill_tokens_per_sec": 2773.84
+        },
+        "resource": {
+          "sample_count": 21,
+          "peak_memory_mb": 71.75,
+          "avg_memory_mb": 71.14,
+          "peak_gpu_util_percent": 56.0,
+          "avg_gpu_util_percent": 43.76,
+          "peak_gpu_memory_mb": 11486.0
+        }
+      },
+      {
+        "index": 3,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 15.6855,
+        "prompt_tokens": 176,
+        "completion_tokens": 256,
+        "tokens_per_sec": 16.32,
+        "response_chars": 610,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确约定个人所得税的承担方\",\n    \"clause\": \"合同中未明确约定因履行本合同所产生的个人所得税由哪一方承担。\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第六条\",\n    \"severity\": \"中\"\n  },\n  {\n    \"risk_titl",
+        "ollama_timings": {
+          "load_duration_ms": 183.53,
+          "prompt_eval_ms": 64.8,
+          "eval_duration_ms": 15435.12,
+          "total_duration_ms": 15686.68,
+          "first_token_ms": 248.33,
+          "decode_tokens_per_sec": 16.59,
+          "prefill_tokens_per_sec": 2716.05
+        },
+        "resource": {
+          "sample_count": 21,
+          "peak_memory_mb": 71.36,
+          "avg_memory_mb": 71.21,
+          "peak_gpu_util_percent": 57.0,
+          "avg_gpu_util_percent": 45.9,
+          "peak_gpu_memory_mb": 11486.0
+        }
+      },
+      {
+        "index": 4,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 15.7666,
+        "prompt_tokens": 176,
+        "completion_tokens": 256,
+        "tokens_per_sec": 16.24,
+        "response_chars": 610,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确约定个人所得税的承担方\",\n    \"clause\": \"合同中未明确约定因履行本合同所产生的个人所得税由哪一方承担。\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第六条\",\n    \"severity\": \"中\"\n  },\n  {\n    \"risk_titl",
+        "ollama_timings": {
+          "load_duration_ms": 170.31,
+          "prompt_eval_ms": 65.38,
+          "eval_duration_ms": 15525.01,
+          "total_duration_ms": 15765.29,
+          "first_token_ms": 235.69,
+          "decode_tokens_per_sec": 16.49,
+          "prefill_tokens_per_sec": 2691.95
+        },
+        "resource": {
+          "sample_count": 21,
+          "peak_memory_mb": 71.36,
+          "avg_memory_mb": 71.35,
+          "peak_gpu_util_percent": 55.0,
+          "avg_gpu_util_percent": 47.9,
+          "peak_gpu_memory_mb": 11486.0
+        }
+      },
+      {
+        "index": 5,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 15.7512,
+        "prompt_tokens": 176,
+        "completion_tokens": 256,
+        "tokens_per_sec": 16.25,
+        "response_chars": 610,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确约定个人所得税的承担方\",\n    \"clause\": \"合同中未明确约定因履行本合同所产生的个人所得税由哪一方承担。\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第六条\",\n    \"severity\": \"中\"\n  },\n  {\n    \"risk_titl",
+        "ollama_timings": {
+          "load_duration_ms": 178.38,
+          "prompt_eval_ms": 64.97,
+          "eval_duration_ms": 15502.26,
+          "total_duration_ms": 15749.63,
+          "first_token_ms": 243.35,
+          "decode_tokens_per_sec": 16.51,
+          "prefill_tokens_per_sec": 2708.94
+        },
+        "resource": {
+          "sample_count": 21,
+          "peak_memory_mb": 71.95,
+          "avg_memory_mb": 71.27,
+          "peak_gpu_util_percent": 57.0,
+          "avg_gpu_util_percent": 47.14,
+          "peak_gpu_memory_mb": 11483.0
+        }
+      }
+    ],
+    "summary": {
+      "successful_rounds": 5,
+      "avg_latency_sec": 15.7329,
+      "p95_latency_sec": 15.7666,
+      "avg_tokens_per_sec": 16.27,
+      "peak_memory_mb": 72.29,
+      "peak_gpu_util_percent": 58.0,
+      "peak_gpu_memory_mb": 11486.0,
+      "avg_first_token_ms": 243.41,
+      "p95_first_token_ms": 248.33,
+      "avg_prefill_ms": 64.86,
+      "avg_decode_tokens_per_sec": 16.54,
+      "max_load_duration_ms": 183.53
+    },
+    "ok": true
+  },
+  "comparison": {
+    "ready": true,
+    "avg_latency_sec": {
+      "delta": -12.4573,
+      "ratio": 0.2082
+    },
+    "avg_tokens_per_sec": {
+      "delta": -8.15,
+      "ratio": 0.6663
+    },
+    "cold_start_ready_sec": {
+      "delta": 0.0,
+      "ratio": 0.0
+    },
+    "peak_memory_mb": {
+      "delta": 5.23,
+      "ratio": 1.0723
+    },
+    "peak_gpu_util_percent": {
+      "delta": 15.0,
+      "ratio": 1.3488
+    },
+    "peak_gpu_memory_mb": {
+      "delta": 308.0,
+      "ratio": 1.0268
+    },
+    "avg_first_token_ms": {
+      "delta": 175.4,
+      "ratio": 1.7206
+    },
+    "avg_decode_tokens_per_sec": {
+      "delta": -11.52,
+      "ratio": 0.5895
+    }
+  },
+  "ok": true
+}

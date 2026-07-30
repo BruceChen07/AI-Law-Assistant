@@ -1,0 +1,208 @@
+{
+  "generated_at": "2026-07-29T16:21:05.634217+00:00",
+  "mode": "ollama-vs-ollama",
+  "scenario_label": "L1-xlong-14000",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "hardware_note": "Two Ollama models benchmarked sequentially on the same endpoint with identical prompts; models optionally unloaded between runs to avoid VRAM contention.",
+  "prompt_chars": 12922,
+  "prompt_tokens_estimated": 12621,
+  "num_ctx": 16384,
+  "max_tokens": 2048,
+  "rounds": 5,
+  "warmup_rounds": 1,
+  "ollama": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3.6:35b-a3b",
+    "ready": {
+      "ok": true,
+      "url": "http://127.0.0.1:11434/api/version",
+      "latency_ms": 0,
+      "attempts": [],
+      "payload": {
+        "version": "0.32.1"
+      }
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [
+      {
+        "index": 0,
+        "warmup": true,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 16.5556,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "[WinError 10054] An existing connection was forcibly closed by the remote host",
+        "resource": {
+          "sample_count": 23,
+          "peak_memory_mb": 314.32,
+          "avg_memory_mb": 77.39,
+          "peak_gpu_util_percent": 99.0,
+          "avg_gpu_util_percent": 16.91,
+          "peak_gpu_memory_mb": 10371.0
+        }
+      },
+      {
+        "index": 1,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0249,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 21.0,
+          "avg_gpu_util_percent": 9.33,
+          "peak_gpu_memory_mb": 10249.0
+        }
+      },
+      {
+        "index": 2,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0509,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 14.0,
+          "avg_gpu_util_percent": 8.0,
+          "peak_gpu_memory_mb": 10249.0
+        }
+      },
+      {
+        "index": 3,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0419,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 5.0,
+          "avg_gpu_util_percent": 3.67,
+          "peak_gpu_memory_mb": 10250.0
+        }
+      },
+      {
+        "index": 4,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.042,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 11.0,
+          "avg_gpu_util_percent": 8.0,
+          "peak_gpu_memory_mb": 10252.0
+        }
+      },
+      {
+        "index": 5,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0396,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 2.0,
+          "avg_gpu_util_percent": 1.33,
+          "peak_gpu_memory_mb": 10361.0
+        }
+      }
+    ],
+    "summary": {
+      "error": "ollama benchmark did not produce successful measured rounds"
+    },
+    "ok": false
+  },
+  "ollama_b": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3:14b",
+    "ready": {
+      "ok": false,
+      "url": "",
+      "latency_ms": 0,
+      "attempts": [
+        {
+          "url": "http://127.0.0.1:11434/api/version",
+          "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+        },
+        {
+          "url": "http://127.0.0.1:11434/v1/models",
+          "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+        }
+      ],
+      "payload": {}
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [],
+    "summary": {
+      "error": "ollama endpoint is not reachable"
+    },
+    "ok": false
+  },
+  "comparison": {
+    "ready": false
+  },
+  "ok": false
+}

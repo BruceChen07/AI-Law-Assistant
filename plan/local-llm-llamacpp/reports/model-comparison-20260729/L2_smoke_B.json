@@ -1,0 +1,50 @@
+{
+  "generated_at": "2026-07-29T16:43:35.240246+00:00",
+  "round_label": "SMOKE-B-14b",
+  "main_model": "qwen3:14b",
+  "small_model": "qwen3:4b",
+  "num_ctx_main": 8192,
+  "num_ctx_small": 8192,
+  "keep_alive": "30m",
+  "provider": "ollama",
+  "trace_window": {
+    "start": "2026-07-29T16:42:13.692382+00:00",
+    "end": "2026-07-29T16:43:35.240246+00:00"
+  },
+  "contracts_tested": [
+    "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx"
+  ],
+  "passes": 1,
+  "totals": {
+    "runs": 1,
+    "ok": 1,
+    "failed": 0,
+    "avg_elapsed_sec": 81.548,
+    "avg_risk_total": 4.0
+  },
+  "records": [
+    {
+      "run_id": "111bb999",
+      "pass": 1,
+      "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 81.548,
+      "started_at": "2026-07-29T16:42:13.692382+00:00",
+      "ended_at": "2026-07-29T16:43:35.240246+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 4,
+        "low": 0
+      },
+      "risk_total": 4,
+      "citation": {
+        "total": 4,
+        "valid": 0,
+        "rate": 0.0,
+        "citation_pool_size": 8
+      }
+    }
+  ]
+}

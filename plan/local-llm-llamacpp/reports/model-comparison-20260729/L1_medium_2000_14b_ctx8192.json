@@ -1,0 +1,238 @@
+{
+  "generated_at": "2026-07-29T16:32:23.499913+00:00",
+  "mode": "ollama-single",
+  "scenario_label": "L1-medium-2000-14b-ctx8192",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "hardware_note": "Run the legacy Ollama baseline and the target llama.cpp runtime sequentially on the same host with the same business prompt set; ModelScope llama.cpp artifacts are treated as an independent runtime target.",
+  "prompt_chars": 1922,
+  "prompt_tokens_estimated": 1795,
+  "num_ctx": 8192,
+  "max_tokens": 1536,
+  "rounds": 5,
+  "warmup_rounds": 1,
+  "ollama": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3:14b",
+    "ready": {
+      "ok": true,
+      "url": "http://127.0.0.1:11434/api/version",
+      "latency_ms": 62,
+      "attempts": [],
+      "payload": {
+        "version": "0.32.1"
+      }
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [
+      {
+        "index": 0,
+        "warmup": true,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 18.5556,
+        "prompt_tokens": 1183,
+        "completion_tokens": 399,
+        "tokens_per_sec": 21.5,
+        "response_chars": 1038,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确区分居民个人与非居民个人的纳税义务\",\n    \"clause\": \"第一条\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第一条\",\n    \"severity\": \"高\"\n  },\n  {\n    \"risk_title\": \"未明确综合所得与非综合所得的分类",
+        "ollama_timings": {
+          "load_duration_ms": 4794.32,
+          "prompt_eval_ms": 1166.4,
+          "eval_duration_ms": 12582.97,
+          "total_duration_ms": 18554.59,
+          "first_token_ms": 5960.72,
+          "decode_tokens_per_sec": 31.71,
+          "prefill_tokens_per_sec": 1014.23
+        },
+        "resource": {
+          "sample_count": 25,
+          "peak_memory_mb": 70.17,
+          "avg_memory_mb": 64.0,
+          "peak_gpu_util_percent": 100.0,
+          "avg_gpu_util_percent": 77.32,
+          "peak_gpu_memory_mb": 11644.0
+        }
+      },
+      {
+        "index": 1,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 12.8458,
+        "prompt_tokens": 1183,
+        "completion_tokens": 399,
+        "tokens_per_sec": 31.06,
+        "response_chars": 1038,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确区分居民个人与非居民个人的纳税义务\",\n    \"clause\": \"第一条\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第一条\",\n    \"severity\": \"高\"\n  },\n  {\n    \"risk_title\": \"未明确综合所得与非综合所得的分类",
+        "ollama_timings": {
+          "load_duration_ms": 168.66,
+          "prompt_eval_ms": 34.58,
+          "eval_duration_ms": 12631.4,
+          "total_duration_ms": 12844.55,
+          "first_token_ms": 203.24,
+          "decode_tokens_per_sec": 31.59,
+          "prefill_tokens_per_sec": 34210.53
+        },
+        "resource": {
+          "sample_count": 18,
+          "peak_memory_mb": 70.1,
+          "avg_memory_mb": 70.07,
+          "peak_gpu_util_percent": 99.0,
+          "avg_gpu_util_percent": 92.67,
+          "peak_gpu_memory_mb": 11791.0
+        }
+      },
+      {
+        "index": 2,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 12.8131,
+        "prompt_tokens": 1183,
+        "completion_tokens": 399,
+        "tokens_per_sec": 31.14,
+        "response_chars": 1038,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确区分居民个人与非居民个人的纳税义务\",\n    \"clause\": \"第一条\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第一条\",\n    \"severity\": \"高\"\n  },\n  {\n    \"risk_title\": \"未明确综合所得与非综合所得的分类",
+        "ollama_timings": {
+          "load_duration_ms": 163.39,
+          "prompt_eval_ms": 35.76,
+          "eval_duration_ms": 12602.42,
+          "total_duration_ms": 12811.57,
+          "first_token_ms": 199.15,
+          "decode_tokens_per_sec": 31.66,
+          "prefill_tokens_per_sec": 33081.66
+        },
+        "resource": {
+          "sample_count": 18,
+          "peak_memory_mb": 70.06,
+          "avg_memory_mb": 70.0,
+          "peak_gpu_util_percent": 99.0,
+          "avg_gpu_util_percent": 98.06,
+          "peak_gpu_memory_mb": 11701.0
+        }
+      },
+      {
+        "index": 3,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 12.8346,
+        "prompt_tokens": 1183,
+        "completion_tokens": 399,
+        "tokens_per_sec": 31.09,
+        "response_chars": 1038,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确区分居民个人与非居民个人的纳税义务\",\n    \"clause\": \"第一条\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第一条\",\n    \"severity\": \"高\"\n  },\n  {\n    \"risk_title\": \"未明确综合所得与非综合所得的分类",
+        "ollama_timings": {
+          "load_duration_ms": 164.16,
+          "prompt_eval_ms": 34.06,
+          "eval_duration_ms": 12625.4,
+          "total_duration_ms": 12833.15,
+          "first_token_ms": 198.22,
+          "decode_tokens_per_sec": 31.6,
+          "prefill_tokens_per_sec": 34732.82
+        },
+        "resource": {
+          "sample_count": 18,
+          "peak_memory_mb": 69.87,
+          "avg_memory_mb": 69.86,
+          "peak_gpu_util_percent": 99.0,
+          "avg_gpu_util_percent": 98.0,
+          "peak_gpu_memory_mb": 11588.0
+        }
+      },
+      {
+        "index": 4,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 12.6437,
+        "prompt_tokens": 1183,
+        "completion_tokens": 399,
+        "tokens_per_sec": 31.56,
+        "response_chars": 1038,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确区分居民个人与非居民个人的纳税义务\",\n    \"clause\": \"第一条\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第一条\",\n    \"severity\": \"高\"\n  },\n  {\n    \"risk_title\": \"未明确综合所得与非综合所得的分类",
+        "ollama_timings": {
+          "load_duration_ms": 167.83,
+          "prompt_eval_ms": 34.44,
+          "eval_duration_ms": 12430.81,
+          "total_duration_ms": 12642.2,
+          "first_token_ms": 202.27,
+          "decode_tokens_per_sec": 32.1,
+          "prefill_tokens_per_sec": 34349.59
+        },
+        "resource": {
+          "sample_count": 17,
+          "peak_memory_mb": 69.88,
+          "avg_memory_mb": 69.88,
+          "peak_gpu_util_percent": 98.0,
+          "avg_gpu_util_percent": 97.71,
+          "peak_gpu_memory_mb": 11856.0
+        }
+      },
+      {
+        "index": 5,
+        "warmup": false,
+        "ok": true,
+        "status_code": 200,
+        "latency_sec": 12.6457,
+        "prompt_tokens": 1183,
+        "completion_tokens": 399,
+        "tokens_per_sec": 31.55,
+        "response_chars": 1038,
+        "content_preview": "```json\n[\n  {\n    \"risk_title\": \"未明确区分居民个人与非居民个人的纳税义务\",\n    \"clause\": \"第一条\",\n    \"law_title\": \"中华人民共和国个人所得税法\",\n    \"article_no\": \"第一条\",\n    \"severity\": \"高\"\n  },\n  {\n    \"risk_title\": \"未明确综合所得与非综合所得的分类",
+        "ollama_timings": {
+          "load_duration_ms": 160.88,
+          "prompt_eval_ms": 32.72,
+          "eval_duration_ms": 12441.09,
+          "total_duration_ms": 12644.27,
+          "first_token_ms": 193.6,
+          "decode_tokens_per_sec": 32.07,
+          "prefill_tokens_per_sec": 36155.26
+        },
+        "resource": {
+          "sample_count": 17,
+          "peak_memory_mb": 69.92,
+          "avg_memory_mb": 69.92,
+          "peak_gpu_util_percent": 98.0,
+          "avg_gpu_util_percent": 92.18,
+          "peak_gpu_memory_mb": 11774.0
+        }
+      }
+    ],
+    "summary": {
+      "successful_rounds": 5,
+      "avg_latency_sec": 12.7566,
+      "p95_latency_sec": 12.8458,
+      "avg_tokens_per_sec": 31.28,
+      "peak_memory_mb": 70.1,
+      "peak_gpu_util_percent": 99.0,
+      "peak_gpu_memory_mb": 11856.0,
+      "avg_first_token_ms": 199.3,
+      "p95_first_token_ms": 203.24,
+      "avg_prefill_ms": 34.31,
+      "avg_decode_tokens_per_sec": 31.8,
+      "max_load_duration_ms": 168.66
+    },
+    "ok": true
+  },
+  "llama_cpp": {
+    "ok": false,
+    "skipped": true
+  },
+  "comparison": {
+    "ready": false,
+    "single_model": true
+  },
+  "ok": true
+}

@@ -1,0 +1,179 @@
+{
+  "generated_at": "2026-07-29T16:26:36.988227+00:00",
+  "mode": "ollama-single",
+  "scenario_label": "L1-xlong-14000-14b",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "hardware_note": "Run the legacy Ollama baseline and the target llama.cpp runtime sequentially on the same host with the same business prompt set; ModelScope llama.cpp artifacts are treated as an independent runtime target.",
+  "prompt_chars": 12922,
+  "prompt_tokens_estimated": 12621,
+  "num_ctx": 16384,
+  "max_tokens": 2048,
+  "rounds": 5,
+  "warmup_rounds": 1,
+  "ollama": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3:14b",
+    "ready": {
+      "ok": true,
+      "url": "http://127.0.0.1:11434/api/version",
+      "latency_ms": 58,
+      "attempts": [],
+      "payload": {
+        "version": "0.32.1"
+      }
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [
+      {
+        "index": 0,
+        "warmup": true,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 3.6378,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "[WinError 10054] An existing connection was forcibly closed by the remote host",
+        "resource": {
+          "sample_count": 6,
+          "peak_memory_mb": 69.61,
+          "avg_memory_mb": 55.74,
+          "peak_gpu_util_percent": 34.0,
+          "avg_gpu_util_percent": 13.5,
+          "peak_gpu_memory_mb": 9341.0
+        }
+      },
+      {
+        "index": 1,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0375,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 26.0,
+          "avg_gpu_util_percent": 24.67,
+          "peak_gpu_memory_mb": 9279.0
+        }
+      },
+      {
+        "index": 2,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.035,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 27.0,
+          "avg_gpu_util_percent": 26.0,
+          "peak_gpu_memory_mb": 9279.0
+        }
+      },
+      {
+        "index": 3,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0308,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 92.0,
+          "avg_gpu_util_percent": 33.67,
+          "peak_gpu_memory_mb": 11758.0
+        }
+      },
+      {
+        "index": 4,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0314,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 37.0,
+          "avg_gpu_util_percent": 17.67,
+          "peak_gpu_memory_mb": 11782.0
+        }
+      },
+      {
+        "index": 5,
+        "warmup": false,
+        "ok": false,
+        "status_code": 0,
+        "latency_sec": 2.0354,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "tokens_per_sec": 0.0,
+        "response_chars": 0,
+        "content_preview": "",
+        "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>",
+        "resource": {
+          "sample_count": 3,
+          "peak_memory_mb": 0.0,
+          "avg_memory_mb": 0.0,
+          "peak_gpu_util_percent": 27.0,
+          "avg_gpu_util_percent": 18.0,
+          "peak_gpu_memory_mb": 11779.0
+        }
+      }
+    ],
+    "summary": {
+      "error": "ollama benchmark did not produce successful measured rounds"
+    },
+    "ok": false
+  },
+  "llama_cpp": {
+    "ok": false,
+    "skipped": true
+  },
+  "comparison": {
+    "ready": false,
+    "single_model": true
+  },
+  "ok": false
+}

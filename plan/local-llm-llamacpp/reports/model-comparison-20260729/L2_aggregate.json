@@ -1,0 +1,355 @@
+{
+  "db_path": "E:\\workspace\\AI-Law-Assistant\\data\\llm_trace.db",
+  "rounds": [
+    {
+      "label": "A-35b-a3b",
+      "main_model": "qwen3.6:35b-a3b",
+      "small_model": "qwen3:4b",
+      "num_ctx_main": 8192,
+      "trace_window": {
+        "start": "2026-07-29T17:11:17.635187+00:00",
+        "end": "2026-07-29T17:18:52.169604+00:00"
+      },
+      "contract_summary": {
+        "runs": 10,
+        "ok": 3,
+        "failed": 7,
+        "fail_reasons": {
+          "server_connection": 5,
+          "ocr_unavailable": 2
+        },
+        "avg_elapsed_sec": 109.9,
+        "p95_elapsed_sec": 218.779,
+        "avg_risk_total": 1.67,
+        "sum_risk_total": 5,
+        "avg_citation_rate": 0.0,
+        "per_contract": [
+          {
+            "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 218.779,
+            "risk_total": 5,
+            "citation_rate": 0.0,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 27.906,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "员工餐补平台服务合同格式24.3.7.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 83.007,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+            "pass": 1,
+            "ok": false,
+            "elapsed_sec": 111.901,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "RuntimeError: llm request failed: ollama request failed after read retry: [WinError 10061] No connection could be made because the target machine actively refused it"
+          },
+          {
+            "contract": "软件服务协议-红客厅（中智股份）.pdf",
+            "pass": 1,
+            "ok": false,
+            "elapsed_sec": 0.234,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified"
+          },
+          {
+            "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+            "pass": 2,
+            "ok": false,
+            "elapsed_sec": 3.992,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it"
+          },
+          {
+            "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+            "pass": 2,
+            "ok": false,
+            "elapsed_sec": 2.432,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it"
+          },
+          {
+            "contract": "员工餐补平台服务合同格式24.3.7.docx",
+            "pass": 2,
+            "ok": false,
+            "elapsed_sec": 2.97,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it"
+          },
+          {
+            "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+            "pass": 2,
+            "ok": false,
+            "elapsed_sec": 3.192,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it"
+          },
+          {
+            "contract": "软件服务协议-红客厅（中智股份）.pdf",
+            "pass": 2,
+            "ok": false,
+            "elapsed_sec": 0.122,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified"
+          }
+        ]
+      },
+      "db_spans": {
+        "spans_total": 40,
+        "status": {
+          "success": 35,
+          "failed": 5
+        },
+        "models": {
+          "qwen3.6:35b-a3b": 40
+        },
+        "roles": {
+          "main": 40
+        },
+        "task_profiles": {
+          "contract_audit_main": 40
+        },
+        "small_model_calls": 0,
+        "retry_spans": 0,
+        "tokens": {
+          "prompt": 82969,
+          "completion": 8745,
+          "total": 91714,
+          "avg_total_per_call": 2620.4
+        },
+        "latency_ms": {
+          "avg_total": 12396.9,
+          "p95_total": 28687,
+          "avg_load": 301.4,
+          "avg_prompt_eval": 3563.1,
+          "avg_eval": 8293.8
+        },
+        "json_validity_db": {
+          "first_pass_success_rate_pct": 0.0,
+          "first_pass_ok": 0,
+          "first_pass_total": 35,
+          "overall_json_ok": 0,
+          "needed_cleanup": 0
+        }
+      },
+      "json_metrics": {
+        "available": true,
+        "response_events": 35,
+        "json_ok_total": 35,
+        "json_ok_rate_pct": 100.0,
+        "first_pass_responses": 35,
+        "first_pass_json_ok": 35,
+        "first_pass_json_ok_rate_pct": 100.0,
+        "retry_responses": 0,
+        "retry_responses_json_ok": 0,
+        "json_repair_estimated": 0
+      }
+    },
+    {
+      "label": "B-14b",
+      "main_model": "qwen3:14b",
+      "small_model": "qwen3:4b",
+      "num_ctx_main": 8192,
+      "trace_window": {
+        "start": "2026-07-29T17:02:32.471748+00:00",
+        "end": "2026-07-29T17:09:35.507133+00:00"
+      },
+      "contract_summary": {
+        "runs": 10,
+        "ok": 8,
+        "failed": 2,
+        "fail_reasons": {
+          "ocr_unavailable": 2
+        },
+        "avg_elapsed_sec": 52.84,
+        "p95_elapsed_sec": 108.733,
+        "avg_risk_total": 4.25,
+        "sum_risk_total": 34,
+        "avg_citation_rate": 0.0,
+        "per_contract": [
+          {
+            "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 66.718,
+            "risk_total": 2,
+            "citation_rate": 0.0,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 5.701,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "员工餐补平台服务合同格式24.3.7.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 42.04,
+            "risk_total": 1,
+            "citation_rate": 0.0,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+            "pass": 1,
+            "ok": true,
+            "elapsed_sec": 108.733,
+            "risk_total": 16,
+            "citation_rate": 0.0,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "软件服务协议-红客厅（中智股份）.pdf",
+            "pass": 1,
+            "ok": false,
+            "elapsed_sec": 0.24,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified"
+          },
+          {
+            "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+            "pass": 2,
+            "ok": true,
+            "elapsed_sec": 73.26,
+            "risk_total": 3,
+            "citation_rate": 0.0,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+            "pass": 2,
+            "ok": true,
+            "elapsed_sec": 4.894,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "员工餐补平台服务合同格式24.3.7.docx",
+            "pass": 2,
+            "ok": true,
+            "elapsed_sec": 38.338,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+            "pass": 2,
+            "ok": true,
+            "elapsed_sec": 82.996,
+            "risk_total": 12,
+            "citation_rate": 0.0,
+            "execution_path": "multipass_classic_stage1",
+            "error": ""
+          },
+          {
+            "contract": "软件服务协议-红客厅（中智股份）.pdf",
+            "pass": 2,
+            "ok": false,
+            "elapsed_sec": 0.12,
+            "risk_total": 0,
+            "citation_rate": null,
+            "execution_path": "",
+            "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified"
+          }
+        ]
+      },
+      "db_spans": {
+        "spans_total": 70,
+        "status": {
+          "success": 70
+        },
+        "models": {
+          "qwen3:14b": 70
+        },
+        "roles": {
+          "main": 70
+        },
+        "task_profiles": {
+          "contract_audit_main": 70
+        },
+        "small_model_calls": 0,
+        "retry_spans": 0,
+        "tokens": {
+          "prompt": 176524,
+          "completion": 10915,
+          "total": 187439,
+          "avg_total_per_call": 2677.7
+        },
+        "latency_ms": {
+          "avg_total": 5913.4,
+          "p95_total": 18214,
+          "avg_load": 156.2,
+          "avg_prompt_eval": 649.8,
+          "avg_eval": 4880.0
+        },
+        "json_validity_db": {
+          "first_pass_success_rate_pct": 0.0,
+          "first_pass_ok": 0,
+          "first_pass_total": 70,
+          "overall_json_ok": 0,
+          "needed_cleanup": 0
+        }
+      },
+      "json_metrics": {
+        "available": true,
+        "response_events": 70,
+        "json_ok_total": 70,
+        "json_ok_rate_pct": 100.0,
+        "first_pass_responses": 70,
+        "first_pass_json_ok": 70,
+        "first_pass_json_ok_rate_pct": 100.0,
+        "retry_responses": 0,
+        "retry_responses_json_ok": 0,
+        "json_repair_estimated": 0
+      }
+    }
+  ]
+}

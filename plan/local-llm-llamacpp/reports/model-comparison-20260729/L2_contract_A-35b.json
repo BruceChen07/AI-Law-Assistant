@@ -1,0 +1,207 @@
+{
+  "generated_at": "2026-07-29T17:18:52.169604+00:00",
+  "round_label": "A-35b-a3b",
+  "main_model": "qwen3.6:35b-a3b",
+  "small_model": "qwen3:4b",
+  "num_ctx_main": 8192,
+  "num_ctx_small": 8192,
+  "keep_alive": "30m",
+  "provider": "ollama",
+  "note": "attempt#2 of 3; runtime crashed mid-run (WinError 10061 after CGo native fault). attempt#1 and attempt#3 also crashed (3/3). This report preserves the 3 clean pass-1 contracts obtained before the crash; spans preserved in llm_trace.db under this trace_window.",
+  "stability_reproductions": {
+    "attempt_1": "crashed mid pass-2 (WinError 10061)",
+    "attempt_2": "ran ~7.5min, 3 clean pass-1 contracts, then crashed on 4th contract (this report)",
+    "attempt_3": "crashed on chunk-002 of 1st contract, runs=10 ok=0, trace_window 17:22:35..17:23:35; root cause: signal arrived during external code execution @ runtime.cgocall (native llama.cpp/CUDA fault)"
+  },
+  "trace_window": {
+    "start": "2026-07-29T17:11:17.635187+00:00",
+    "end": "2026-07-29T17:18:52.169604+00:00"
+  },
+  "contracts_tested": [
+    "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+    "关爱通南京与致逸美妆产品返点补充协议.docx",
+    "员工餐补平台服务合同格式24.3.7.docx",
+    "薪资税务代理服务合同（最终版）_202500403.docx",
+    "软件服务协议-红客厅（中智股份）.pdf"
+  ],
+  "passes": 2,
+  "totals": {
+    "runs": 10,
+    "ok": 3,
+    "failed": 7,
+    "avg_elapsed_sec": 109.897,
+    "avg_risk_total": 1.67
+  },
+  "records": [
+    {
+      "run_id": "a1bdd5ac",
+      "pass": 1,
+      "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 218.779,
+      "started_at": "2026-07-29T17:11:17.635187+00:00",
+      "ended_at": "2026-07-29T17:14:56.414138+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 2,
+        "medium": 3,
+        "low": 0
+      },
+      "risk_total": 5,
+      "citation": {
+        "risk_total": 5,
+        "with_ref": 5,
+        "mapped": 0,
+        "rate": 0.0,
+        "citation_pool_size": 8
+      }
+    },
+    {
+      "run_id": "9b29eee1",
+      "pass": 1,
+      "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 27.906,
+      "started_at": "2026-07-29T17:14:56.414138+00:00",
+      "ended_at": "2026-07-29T17:15:24.320866+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      },
+      "risk_total": 0,
+      "citation": {
+        "risk_total": 0,
+        "with_ref": 0,
+        "mapped": 0,
+        "rate": null,
+        "citation_pool_size": 4
+      }
+    },
+    {
+      "run_id": "6d8da8e4",
+      "pass": 1,
+      "contract": "员工餐补平台服务合同格式24.3.7.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 83.007,
+      "started_at": "2026-07-29T17:15:24.320866+00:00",
+      "ended_at": "2026-07-29T17:16:47.327892+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      },
+      "risk_total": 0,
+      "citation": {
+        "risk_total": 0,
+        "with_ref": 0,
+        "mapped": 0,
+        "rate": null,
+        "citation_pool_size": 12
+      }
+    },
+    {
+      "run_id": "3f7494a3",
+      "pass": 1,
+      "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+      "ok": false,
+      "error": "RuntimeError: llm request failed: ollama request failed after read retry: [WinError 10061] No connection could be made because the target machine actively refused it",
+      "elapsed_sec": 111.901,
+      "started_at": "2026-07-29T17:16:47.327892+00:00",
+      "ended_at": "2026-07-29T17:18:39.228459+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "6964ee58",
+      "pass": 1,
+      "contract": "软件服务协议-红客厅（中智股份）.pdf",
+      "ok": false,
+      "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "elapsed_sec": 0.234,
+      "started_at": "2026-07-29T17:18:39.228459+00:00",
+      "ended_at": "2026-07-29T17:18:39.462385+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "0d2a8923",
+      "pass": 2,
+      "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+      "ok": false,
+      "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it",
+      "elapsed_sec": 3.992,
+      "started_at": "2026-07-29T17:18:39.462385+00:00",
+      "ended_at": "2026-07-29T17:18:43.454688+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "5ed91075",
+      "pass": 2,
+      "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+      "ok": false,
+      "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it",
+      "elapsed_sec": 2.432,
+      "started_at": "2026-07-29T17:18:43.454688+00:00",
+      "ended_at": "2026-07-29T17:18:45.886548+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "4212cc05",
+      "pass": 2,
+      "contract": "员工餐补平台服务合同格式24.3.7.docx",
+      "ok": false,
+      "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it",
+      "elapsed_sec": 2.97,
+      "started_at": "2026-07-29T17:18:45.886548+00:00",
+      "ended_at": "2026-07-29T17:18:48.856202+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "caf91a24",
+      "pass": 2,
+      "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+      "ok": false,
+      "error": "RuntimeError: llm request failed: [WinError 10061] No connection could be made because the target machine actively refused it",
+      "elapsed_sec": 3.192,
+      "started_at": "2026-07-29T17:18:48.856202+00:00",
+      "ended_at": "2026-07-29T17:18:52.048170+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "ff318450",
+      "pass": 2,
+      "contract": "软件服务协议-红客厅（中智股份）.pdf",
+      "ok": false,
+      "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "elapsed_sec": 0.122,
+      "started_at": "2026-07-29T17:18:52.048680+00:00",
+      "ended_at": "2026-07-29T17:18:52.169604+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    }
+  ]
+}

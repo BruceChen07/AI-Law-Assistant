@@ -1,0 +1,251 @@
+{
+  "generated_at": "2026-07-29T17:09:35.507133+00:00",
+  "round_label": "B-14b",
+  "main_model": "qwen3:14b",
+  "small_model": "qwen3:4b",
+  "num_ctx_main": 8192,
+  "num_ctx_small": 8192,
+  "keep_alive": "30m",
+  "provider": "ollama",
+  "trace_window": {
+    "start": "2026-07-29T17:02:32.471748+00:00",
+    "end": "2026-07-29T17:09:35.507133+00:00"
+  },
+  "contracts_tested": [
+    "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+    "关爱通南京与致逸美妆产品返点补充协议.docx",
+    "员工餐补平台服务合同格式24.3.7.docx",
+    "薪资税务代理服务合同（最终版）_202500403.docx",
+    "软件服务协议-红客厅（中智股份）.pdf"
+  ],
+  "passes": 2,
+  "totals": {
+    "runs": 10,
+    "ok": 8,
+    "failed": 2,
+    "avg_elapsed_sec": 52.835,
+    "avg_risk_total": 4.25
+  },
+  "records": [
+    {
+      "run_id": "70e06746",
+      "pass": 1,
+      "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 66.718,
+      "started_at": "2026-07-29T17:02:32.471748+00:00",
+      "ended_at": "2026-07-29T17:03:39.189201+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 1,
+        "medium": 1,
+        "low": 0
+      },
+      "risk_total": 2,
+      "citation": {
+        "risk_total": 2,
+        "with_ref": 2,
+        "mapped": 0,
+        "rate": 0.0,
+        "citation_pool_size": 8
+      }
+    },
+    {
+      "run_id": "b6ede8d8",
+      "pass": 1,
+      "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 5.701,
+      "started_at": "2026-07-29T17:03:39.189201+00:00",
+      "ended_at": "2026-07-29T17:03:44.890334+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      },
+      "risk_total": 0,
+      "citation": {
+        "risk_total": 0,
+        "with_ref": 0,
+        "mapped": 0,
+        "rate": null,
+        "citation_pool_size": 4
+      }
+    },
+    {
+      "run_id": "01f4ad87",
+      "pass": 1,
+      "contract": "员工餐补平台服务合同格式24.3.7.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 42.04,
+      "started_at": "2026-07-29T17:03:44.890334+00:00",
+      "ended_at": "2026-07-29T17:04:26.930276+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 1,
+        "low": 0
+      },
+      "risk_total": 1,
+      "citation": {
+        "risk_total": 1,
+        "with_ref": 1,
+        "mapped": 0,
+        "rate": 0.0,
+        "citation_pool_size": 12
+      }
+    },
+    {
+      "run_id": "d0c8a8be",
+      "pass": 1,
+      "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 108.733,
+      "started_at": "2026-07-29T17:04:26.930276+00:00",
+      "ended_at": "2026-07-29T17:06:15.663484+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 1,
+        "medium": 13,
+        "low": 2
+      },
+      "risk_total": 16,
+      "citation": {
+        "risk_total": 16,
+        "with_ref": 16,
+        "mapped": 0,
+        "rate": 0.0,
+        "citation_pool_size": 12
+      }
+    },
+    {
+      "run_id": "8e2d9392",
+      "pass": 1,
+      "contract": "软件服务协议-红客厅（中智股份）.pdf",
+      "ok": false,
+      "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "elapsed_sec": 0.24,
+      "started_at": "2026-07-29T17:06:15.663484+00:00",
+      "ended_at": "2026-07-29T17:06:15.902863+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    },
+    {
+      "run_id": "c9922c07",
+      "pass": 2,
+      "contract": "Employee_Meal_Subsidy_Platform_Service_Contract-ee4b22557b.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 73.26,
+      "started_at": "2026-07-29T17:06:15.902863+00:00",
+      "ended_at": "2026-07-29T17:07:29.162931+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 2,
+        "medium": 1,
+        "low": 0
+      },
+      "risk_total": 3,
+      "citation": {
+        "risk_total": 3,
+        "with_ref": 3,
+        "mapped": 0,
+        "rate": 0.0,
+        "citation_pool_size": 8
+      }
+    },
+    {
+      "run_id": "78bd4f0f",
+      "pass": 2,
+      "contract": "关爱通南京与致逸美妆产品返点补充协议.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 4.894,
+      "started_at": "2026-07-29T17:07:29.162931+00:00",
+      "ended_at": "2026-07-29T17:07:34.056601+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      },
+      "risk_total": 0,
+      "citation": {
+        "risk_total": 0,
+        "with_ref": 0,
+        "mapped": 0,
+        "rate": null,
+        "citation_pool_size": 4
+      }
+    },
+    {
+      "run_id": "1aa6aa05",
+      "pass": 2,
+      "contract": "员工餐补平台服务合同格式24.3.7.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 38.338,
+      "started_at": "2026-07-29T17:07:34.056601+00:00",
+      "ended_at": "2026-07-29T17:08:12.394384+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 0,
+        "medium": 0,
+        "low": 0
+      },
+      "risk_total": 0,
+      "citation": {
+        "risk_total": 0,
+        "with_ref": 0,
+        "mapped": 0,
+        "rate": null,
+        "citation_pool_size": 12
+      }
+    },
+    {
+      "run_id": "cab91a62",
+      "pass": 2,
+      "contract": "薪资税务代理服务合同（最终版）_202500403.docx",
+      "ok": true,
+      "error": "",
+      "elapsed_sec": 82.996,
+      "started_at": "2026-07-29T17:08:12.394384+00:00",
+      "ended_at": "2026-07-29T17:09:35.390119+00:00",
+      "execution_path": "multipass_classic_stage1",
+      "risk_summary": {
+        "high": 1,
+        "medium": 8,
+        "low": 3
+      },
+      "risk_total": 12,
+      "citation": {
+        "risk_total": 12,
+        "with_ref": 12,
+        "mapped": 0,
+        "rate": 0.0,
+        "citation_pool_size": 12
+      }
+    },
+    {
+      "run_id": "d2ff264b",
+      "pass": 2,
+      "contract": "软件服务协议-红客厅（中智股份）.pdf",
+      "ok": false,
+      "error": "OCRExtractionError: OCR_PARSE_FAILED: FileNotFoundError: [WinError 2] The system cannot find the file specified",
+      "elapsed_sec": 0.12,
+      "started_at": "2026-07-29T17:09:35.390119+00:00",
+      "ended_at": "2026-07-29T17:09:35.507133+00:00",
+      "execution_path": "",
+      "risk_summary": {},
+      "risk_total": 0,
+      "citation": {}
+    }
+  ]
+}
