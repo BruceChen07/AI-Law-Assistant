@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Literal
 from fastapi import APIRouter, HTTPException, Depends, Query, Request, Response
 from pydantic import BaseModel
+from jinja2 import Environment, StrictUndefined, TemplateError, TemplateSyntaxError
 from app.core.auth import get_all_users, update_user_role, log_audit
 from app.api.dependencies import require_admin, get_app_llm
 from app.core.database import get_conn
@@ -49,6 +50,49 @@ class DocumentListResponse(BaseModel):
 class DeleteResponse(BaseModel):
     message: str
     deleted_id: str
+
+
+class PromptSummaryResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    status: Literal["enabled", "disabled"]
+    created_by: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+class PromptDetailResponse(PromptSummaryResponse):
+    template_text: str
+    sample_input_json: str
+
+
+class PromptListResponse(BaseModel):
+    items: List[PromptSummaryResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class PromptUpsertRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    template_text: str
+    sample_input_json: Optional[str] = "{}"
+
+
+class PromptStatusUpdateRequest(BaseModel):
+    enabled: bool
+
+
+class PromptPreviewRequest(BaseModel):
+    template_text: str
+    sample_input_json: Optional[str] = "{}"
+
+
+class PromptPreviewResponse(BaseModel):
+    rendered_text: str
+    normalized_context: dict
 
 
 # ============ Stats Models ============
@@ -263,6 +307,104 @@ def _get_memory_runtime_config(cfg: dict) -> dict:
     }
 
 
+def _clean_optional_text(value: Optional[str]) -> str:
+    return str(value or "").strip()
+
+
+def _normalize_prompt_status(enabled: bool) -> str:
+    return "enabled" if enabled else "disabled"
+
+
+def _validate_prompt_name(name: Optional[str]) -> str:
+    clean_name = _clean_optional_text(name)
+    if not clean_name:
+        raise HTTPException(status_code=400, detail="prompt name is required")
+    if len(clean_name) > 120:
+        raise HTTPException(
+            status_code=400, detail="prompt name must be <= 120 characters")
+    return clean_name
+
+
+def _validate_prompt_template(template_text: Optional[str]) -> str:
+    clean_template = str(template_text or "").strip()
+    if not clean_template:
+        raise HTTPException(
+            status_code=400, detail="template_text is required")
+    if len(clean_template) > 50000:
+        raise HTTPException(
+            status_code=400, detail="template_text must be <= 50000 characters")
+    return clean_template
+
+
+def _normalize_prompt_sample_input(sample_input_json: Optional[str]) -> tuple[str, dict]:
+    raw = str(sample_input_json or "").strip() or "{}"
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"sample_input_json must be valid JSON: {exc.msg}",
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(
+            status_code=400, detail="sample_input_json must be a JSON object")
+    normalized = json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True)
+    return normalized, parsed
+
+
+def _normalize_prompt_payload(payload: PromptUpsertRequest) -> tuple[dict, dict]:
+    sample_input_json, context = _normalize_prompt_sample_input(
+        payload.sample_input_json)
+    data = {
+        "name": _validate_prompt_name(payload.name),
+        "description": _clean_optional_text(payload.description),
+        "template_text": _validate_prompt_template(payload.template_text),
+        "sample_input_json": sample_input_json,
+    }
+    return data, context
+
+
+def _render_prompt_preview(template_text: str, context: dict) -> str:
+    env = Environment(undefined=StrictUndefined, autoescape=False)
+    try:
+        template = env.from_string(template_text)
+        return template.render(**context)
+    except TemplateSyntaxError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"template syntax error at line {exc.lineno}: {exc.message}",
+        ) from exc
+    except TemplateError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"template render failed: {str(exc)}") from exc
+
+
+def _prompt_row_to_summary(row) -> PromptSummaryResponse:
+    return PromptSummaryResponse(
+        id=row["id"],
+        name=row["name"],
+        description=str(row["description"] or ""),
+        status=row["status"],
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _prompt_row_to_detail(row) -> PromptDetailResponse:
+    return PromptDetailResponse(
+        id=row["id"],
+        name=row["name"],
+        description=str(row["description"] or ""),
+        template_text=row["template_text"],
+        sample_input_json=str(row["sample_input_json"] or "{}"),
+        status=row["status"],
+        created_by=row["created_by"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
 def _llm_trace_dir(cfg: dict) -> str:
     trace_dir = str(cfg.get("llm_trace_dir") or "").strip()
     if not trace_dir:
@@ -330,6 +472,241 @@ def _iter_trace_rows(trace_dir: str, start_dt: datetime, end_dt: datetime, max_r
                     str(e),
                 )
         day += timedelta(days=1)
+
+
+@router.get("/prompts", response_model=PromptListResponse)
+def list_prompts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=200),
+    search: Optional[str] = None,
+    status: Optional[Literal["enabled", "disabled"]] = None,
+    current_user: dict = Depends(require_admin),
+):
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+    where_clauses = ["1 = 1"]
+    params = []
+    if search:
+        where_clauses.append("(name LIKE ? OR description LIKE ?)")
+        params.extend([f"%{search}%", f"%{search}%"])
+    if status:
+        where_clauses.append("status = ?")
+        params.append(status)
+    where_sql = " AND ".join(where_clauses)
+
+    cur.execute(f"SELECT COUNT(*) AS total FROM audit_prompt WHERE {where_sql}", params)
+    total = int(cur.fetchone()["total"])
+
+    offset = (page - 1) * page_size
+    cur.execute(
+        f"""
+        SELECT id, name, description, status, created_by, created_at, updated_at
+        FROM audit_prompt
+        WHERE {where_sql}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT ? OFFSET ?
+        """,
+        params + [page_size, offset],
+    )
+    rows = cur.fetchall()
+    conn.close()
+    return PromptListResponse(
+        items=[_prompt_row_to_summary(row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/prompts/preview", response_model=PromptPreviewResponse)
+def preview_prompt(
+    payload: PromptPreviewRequest,
+    current_user: dict = Depends(require_admin),
+):
+    template_text = _validate_prompt_template(payload.template_text)
+    normalized_json, context = _normalize_prompt_sample_input(
+        payload.sample_input_json)
+    rendered_text = _render_prompt_preview(template_text, context)
+    return PromptPreviewResponse(
+        rendered_text=rendered_text,
+        normalized_context=json.loads(normalized_json),
+    )
+
+
+@router.get("/prompts/{prompt_id}", response_model=PromptDetailResponse)
+def get_prompt(
+    prompt_id: str,
+    current_user: dict = Depends(require_admin),
+):
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM audit_prompt WHERE id = ?", (prompt_id,))
+    row = cur.fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return _prompt_row_to_detail(row)
+
+
+@router.post("/prompts", response_model=PromptDetailResponse)
+def create_prompt(
+    payload: PromptUpsertRequest,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    data, context = _normalize_prompt_payload(payload)
+    _render_prompt_preview(data["template_text"], context)
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM audit_prompt WHERE lower(name) = lower(?)", (data["name"],))
+    existing = cur.fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Prompt name already exists")
+    now = datetime.utcnow().isoformat()
+    prompt_id = str(uuid.uuid4())
+    cur.execute(
+        """
+        INSERT INTO audit_prompt(
+            id, name, description, template_text, sample_input_json,
+            status, created_by, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            prompt_id,
+            data["name"],
+            data["description"],
+            data["template_text"],
+            data["sample_input_json"],
+            "enabled",
+            str(current_user.get("username") or current_user.get("id") or ""),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    cur.execute("SELECT * FROM audit_prompt WHERE id = ?", (prompt_id,))
+    row = cur.fetchone()
+    conn.close()
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"], "create", "prompt", prompt_id,
+        ip_address, user_agent, f"Created prompt: {data['name']}"
+    )
+    return _prompt_row_to_detail(row)
+
+
+@router.put("/prompts/{prompt_id}", response_model=PromptDetailResponse)
+def update_prompt(
+    prompt_id: str,
+    payload: PromptUpsertRequest,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    data, context = _normalize_prompt_payload(payload)
+    _render_prompt_preview(data["template_text"], context)
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM audit_prompt WHERE id = ?", (prompt_id,))
+    existing = cur.fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    cur.execute(
+        "SELECT id FROM audit_prompt WHERE lower(name) = lower(?) AND id <> ?",
+        (data["name"], prompt_id),
+    )
+    duplicate = cur.fetchone()
+    if duplicate:
+        conn.close()
+        raise HTTPException(status_code=409, detail="Prompt name already exists")
+    now = datetime.utcnow().isoformat()
+    cur.execute(
+        """
+        UPDATE audit_prompt
+        SET name = ?, description = ?, template_text = ?, sample_input_json = ?, updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            data["name"],
+            data["description"],
+            data["template_text"],
+            data["sample_input_json"],
+            now,
+            prompt_id,
+        ),
+    )
+    conn.commit()
+    cur.execute("SELECT * FROM audit_prompt WHERE id = ?", (prompt_id,))
+    row = cur.fetchone()
+    conn.close()
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"], "update", "prompt", prompt_id,
+        ip_address, user_agent, f"Updated prompt: {data['name']}"
+    )
+    return _prompt_row_to_detail(row)
+
+
+@router.put("/prompts/{prompt_id}/status", response_model=PromptDetailResponse)
+def update_prompt_status(
+    prompt_id: str,
+    payload: PromptStatusUpdateRequest,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM audit_prompt WHERE id = ?", (prompt_id,))
+    existing = cur.fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    status = _normalize_prompt_status(payload.enabled)
+    now = datetime.utcnow().isoformat()
+    cur.execute(
+        "UPDATE audit_prompt SET status = ?, updated_at = ? WHERE id = ?",
+        (status, now, prompt_id),
+    )
+    conn.commit()
+    cur.execute("SELECT * FROM audit_prompt WHERE id = ?", (prompt_id,))
+    row = cur.fetchone()
+    conn.close()
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"], "update_status", "prompt", prompt_id,
+        ip_address, user_agent, f"Set prompt status to {status}: {existing['name']}"
+    )
+    return _prompt_row_to_detail(row)
+
+
+@router.delete("/prompts/{prompt_id}", response_model=DeleteResponse)
+def delete_prompt(
+    prompt_id: str,
+    request: Request,
+    current_user: dict = Depends(require_admin),
+):
+    conn = get_conn(get_config())
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM audit_prompt WHERE id = ?", (prompt_id,))
+    existing = cur.fetchone()
+    if not existing:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    cur.execute("DELETE FROM audit_prompt WHERE id = ?", (prompt_id,))
+    conn.commit()
+    conn.close()
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_audit(
+        current_user["id"], "delete", "prompt", prompt_id,
+        ip_address, user_agent, f"Deleted prompt: {existing['name']}"
+    )
+    return DeleteResponse(message="Prompt deleted successfully", deleted_id=prompt_id)
 
 
 # ============ Document CRUD ============

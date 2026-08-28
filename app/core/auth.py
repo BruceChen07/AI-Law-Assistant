@@ -1,5 +1,6 @@
 import os
 import uuid
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
 import jwt
@@ -28,7 +29,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
+    to_encode.update({"exp": expire, "jti": str(uuid.uuid4())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -133,12 +134,21 @@ def create_session(user_id: str, token: str, ip_address: str = None, user_agent:
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (session_id, user_id, token, ip_address, user_agent, expires_at, now))
-    conn.commit()
-    conn.close()
+    try:
+        cur.execute("""
+            INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session_id, user_id, token, ip_address, user_agent, expires_at, now))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        cur.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        cur.execute("""
+            INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session_id, user_id, token, ip_address, user_agent, expires_at, now))
+        conn.commit()
+    finally:
+        conn.close()
     return session_id
 
 

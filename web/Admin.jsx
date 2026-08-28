@@ -1,7 +1,14 @@
 import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminUpdatePromptStatus, adminPreviewPrompt, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
+
+const createEmptyPromptForm = () => ({
+  name: "",
+  description: "",
+  template_text: "",
+  sample_input_json: '{\n  "contract_title": "Service Agreement",\n  "counterparty": "Acme Corp",\n  "effective_date": "2026-08-28"\n}'
+})
 
 export default function Admin({ onBack, lang }) {
   const [tab, setTab] = useState("documents")
@@ -61,6 +68,22 @@ export default function Admin({ onBack, lang }) {
   const [regSearchError, setRegSearchError] = useState("")
   const [regShowAdvanced, setRegShowAdvanced] = useState(false)
   const [regExpanded, setRegExpanded] = useState({})
+  const [prompts, setPrompts] = useState([])
+  const [promptPagination, setPromptPagination] = useState({ page: 1, page_size: 20, total: 0 })
+  const [promptSearch, setPromptSearch] = useState("")
+  const [promptStatusFilter, setPromptStatusFilter] = useState("all")
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [promptMessage, setPromptMessage] = useState("")
+  const [promptError, setPromptError] = useState("")
+  const [promptForm, setPromptForm] = useState(createEmptyPromptForm)
+  const [promptFormErrors, setPromptFormErrors] = useState({})
+  const [promptEditingId, setPromptEditingId] = useState("")
+  const [promptDeleteConfirm, setPromptDeleteConfirm] = useState("")
+  const [promptStatusUpdatingId, setPromptStatusUpdatingId] = useState("")
+  const [promptPreview, setPromptPreview] = useState("")
+  const [promptPreviewError, setPromptPreviewError] = useState("")
+  const [promptPreviewLoading, setPromptPreviewLoading] = useState(false)
   
   const fileInputRef = useRef(null)
 
@@ -73,6 +96,7 @@ export default function Admin({ onBack, lang }) {
     if (tab === "documents") loadDocuments()
     if (tab === "users") loadUsers()
     if (tab === "stats") loadStats()
+    if (tab === "prompts") loadPrompts()
     if (tab === "model") {
       loadLLM()
       loadUIConfig()
@@ -80,13 +104,40 @@ export default function Admin({ onBack, lang }) {
       loadMemoryConfig()
     }
     if (tab === "regulations") {}
-  }, [tab, pagination.page, docCategory])
+  }, [tab, pagination.page, docCategory, promptPagination.page, promptStatusFilter])
 
   useEffect(() => {
     setRegUpload(prev => ({ ...prev, language: lang || "zh" }))
     setRegQuery(prev => ({ ...prev, language: lang || "zh" }))
     setLlmTestPrompt(prev => prev || t.llmTestDefaultPrompt)
   }, [lang])
+
+  useEffect(() => {
+    if (tab !== "prompts") return
+    if (!promptForm.template_text.trim()) {
+      setPromptPreview("")
+      setPromptPreviewError("")
+      setPromptPreviewLoading(false)
+      return
+    }
+    const timer = setTimeout(async () => {
+      setPromptPreviewLoading(true)
+      setPromptPreviewError("")
+      try {
+        const res = await adminPreviewPrompt({
+          template_text: promptForm.template_text,
+          sample_input_json: promptForm.sample_input_json
+        })
+        setPromptPreview(res.rendered_text || "")
+      } catch (err) {
+        setPromptPreview("")
+        setPromptPreviewError(err.message)
+      } finally {
+        setPromptPreviewLoading(false)
+      }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [tab, promptForm.template_text, promptForm.sample_input_json])
   
   const loadDocuments = async () => {
     setLoading(true)
@@ -194,6 +245,158 @@ export default function Admin({ onBack, lang }) {
     } catch (err) {
       setMemoryMsg(String(err?.message || err || "load memory config failed"))
     }
+  }
+
+  const loadPrompts = async (override = {}) => {
+    setPromptLoading(true)
+    setPromptError("")
+    try {
+      const page = override.page ?? promptPagination.page
+      const searchValue = String(override.search ?? promptSearch).trim()
+      const statusValue = override.status ?? promptStatusFilter
+      const params = {
+        page,
+        page_size: promptPagination.page_size
+      }
+      if (searchValue) params.search = searchValue
+      if (statusValue && statusValue !== "all") params.status = statusValue
+      const data = await adminListPrompts(params)
+      setPrompts(Array.isArray(data.items) ? data.items : [])
+      setPromptPagination(prev => ({
+        ...prev,
+        page: Number(data.page || page),
+        total: Number(data.total || 0)
+      }))
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
+  const resetPromptEditor = (nextPrompt = null) => {
+    if (nextPrompt) {
+      setPromptEditingId(nextPrompt.id || "")
+      setPromptForm({
+        name: nextPrompt.name || "",
+        description: nextPrompt.description || "",
+        template_text: nextPrompt.template_text || "",
+        sample_input_json: nextPrompt.sample_input_json || "{}"
+      })
+      return
+    }
+    setPromptEditingId("")
+    setPromptForm(createEmptyPromptForm())
+    setPromptPreview("")
+    setPromptPreviewError("")
+  }
+
+  const validatePromptForm = () => {
+    const nextErrors = {}
+    if (!String(promptForm.name || "").trim()) nextErrors.name = t.promptRequired
+    if (!String(promptForm.template_text || "").trim()) nextErrors.template_text = t.promptRequired
+    try {
+      const parsed = JSON.parse(String(promptForm.sample_input_json || "{}").trim() || "{}")
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        nextErrors.sample_input_json = lang === "zh" ? "请输入 JSON 对象" : "Please enter a JSON object"
+      }
+    } catch {
+      nextErrors.sample_input_json = lang === "zh" ? "JSON 格式不合法" : "Invalid JSON"
+    }
+    setPromptFormErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
+  }
+
+  const openPromptCreate = () => {
+    setPromptMessage("")
+    setPromptError("")
+    setPromptFormErrors({})
+    resetPromptEditor()
+  }
+
+  const openPromptEdit = async (promptId) => {
+    setPromptLoading(true)
+    setPromptError("")
+    setPromptMessage("")
+    setPromptFormErrors({})
+    try {
+      const data = await adminGetPrompt(promptId)
+      resetPromptEditor(data)
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
+  const savePrompt = async () => {
+    setPromptMessage("")
+    setPromptError("")
+    if (!validatePromptForm()) {
+      setPromptError(t.promptFormInvalid)
+      return
+    }
+    setPromptSaving(true)
+    try {
+      const payload = {
+        name: String(promptForm.name || "").trim(),
+        description: String(promptForm.description || "").trim(),
+        template_text: String(promptForm.template_text || ""),
+        sample_input_json: String(promptForm.sample_input_json || "{}").trim() || "{}"
+      }
+      const saved = promptEditingId
+        ? await adminUpdatePrompt(promptEditingId, payload)
+        : await adminCreatePrompt(payload)
+      resetPromptEditor(saved)
+      setPromptMessage(t.promptSaved)
+      await loadPrompts()
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptSaving(false)
+    }
+  }
+
+  const togglePromptStatus = async (prompt) => {
+    setPromptStatusUpdatingId(prompt.id)
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      await adminUpdatePromptStatus(prompt.id, prompt.status !== "enabled")
+      await loadPrompts()
+      if (promptEditingId === prompt.id) {
+        const latest = await adminGetPrompt(prompt.id)
+        resetPromptEditor(latest)
+      }
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptStatusUpdatingId("")
+    }
+  }
+
+  const removePrompt = async (promptId) => {
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      await adminDeletePrompt(promptId)
+      setPromptDeleteConfirm("")
+      if (promptEditingId === promptId) resetPromptEditor()
+      setPromptMessage(t.promptDeleted)
+      await loadPrompts({
+        page: prompts.length === 1 && promptPagination.page > 1
+          ? promptPagination.page - 1
+          : promptPagination.page
+      })
+    } catch (err) {
+      setPromptError(err.message)
+    }
+  }
+
+  const submitPromptSearch = async (e) => {
+    e.preventDefault()
+    setPromptPagination(prev => ({ ...prev, page: 1 }))
+    await loadPrompts({ page: 1 })
   }
 
   const saveVectorStoreConfig = async () => {
@@ -431,6 +634,10 @@ export default function Admin({ onBack, lang }) {
     if (s.length <= 300) return s
     return `${s.slice(0, 300)}...`
   }
+
+  const getPromptStatusLabel = (status) => (
+    status === "enabled" ? t.promptStatusEnabled : t.promptStatusDisabled
+  )
   
   if (!admin) {
     return (
@@ -458,6 +665,7 @@ export default function Admin({ onBack, lang }) {
         <button className={tab === "stats" ? "active" : ""} onClick={() => setTab("stats")}>{t.tabStats}</button>
         <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>{t.tabDocs}</button>
         <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>{t.tabUsers}</button>
+        <button className={tab === "prompts" ? "active" : ""} onClick={() => setTab("prompts")}>{t.tabPrompts}</button>
         <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>{t.tabModel}</button>
         <button className={tab === "regulations" ? "active" : ""} onClick={() => setTab("regulations")}>{t.tabRegulations}</button>
         <button className={tab === "token-monitor" ? "active" : ""} onClick={() => setTab("token-monitor")}>{t.tabTokenMonitor}</button>
@@ -576,6 +784,202 @@ export default function Admin({ onBack, lang }) {
               disabled={pagination.page * pagination.page_size >= pagination.total}
               onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
             >{t.next}</button>
+          </div>
+        </div>
+      )}
+
+      {tab === "prompts" && (
+        <div className="card">
+          <div className="prompt-header">
+            <div>
+              <h2>{t.promptMgmt}</h2>
+              <p className="meta">{t.promptPreviewHint}</p>
+            </div>
+            <div className="row">
+              <button onClick={openPromptCreate}>{t.promptCreate}</button>
+              <button onClick={() => loadPrompts()}>{t.promptRefresh}</button>
+            </div>
+          </div>
+
+          <div className="prompt-layout">
+            <div className="prompt-panel">
+              <form className="prompt-toolbar" onSubmit={submitPromptSearch}>
+                <input
+                  placeholder={t.promptSearchPlaceholder}
+                  value={promptSearch}
+                  onChange={e => setPromptSearch(e.target.value)}
+                />
+                <select
+                  value={promptStatusFilter}
+                  onChange={e => {
+                    setPromptStatusFilter(e.target.value)
+                    setPromptPagination(prev => ({ ...prev, page: 1 }))
+                  }}
+                >
+                  <option value="all">{t.promptSearchStatusAll}</option>
+                  <option value="enabled">{t.promptSearchStatusEnabled}</option>
+                  <option value="disabled">{t.promptSearchStatusDisabled}</option>
+                </select>
+                <button type="submit">{t.searchBtn}</button>
+              </form>
+
+              {promptError && <div className="prompt-banner error">{promptError}</div>}
+              {promptMessage && <div className="prompt-banner success">{promptMessage}</div>}
+
+              {promptLoading ? <p>{t.loading}</p> : prompts.length === 0 ? (
+                <div className="prompt-empty">{t.promptEmpty}</div>
+              ) : (
+                <>
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>{t.promptName}</th>
+                        <th>{t.promptStatus}</th>
+                        <th>{t.promptCreatedAt}</th>
+                        <th>{t.promptUpdatedAt}</th>
+                        <th>{t.colActions}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {prompts.map(prompt => (
+                        <tr key={prompt.id} className={promptEditingId === prompt.id ? "prompt-row-active" : ""}>
+                          <td>
+                            <div className="title">{prompt.name}</div>
+                            <div className="meta">{prompt.description || "-"}</div>
+                          </td>
+                          <td>
+                            <span className={`prompt-status-badge ${prompt.status}`}>
+                              {getPromptStatusLabel(prompt.status)}
+                            </span>
+                          </td>
+                          <td>{formatDate(prompt.created_at)}</td>
+                          <td>{formatDate(prompt.updated_at)}</td>
+                          <td>
+                            <div className="prompt-actions-inline">
+                              <button type="button" onClick={() => openPromptEdit(prompt.id)}>{t.promptEdit}</button>
+                              <button
+                                type="button"
+                                disabled={promptStatusUpdatingId === prompt.id}
+                                onClick={() => togglePromptStatus(prompt)}
+                              >
+                                {prompt.status === "enabled" ? t.promptDisable : t.promptEnable}
+                              </button>
+                              {promptDeleteConfirm === prompt.id ? (
+                                <>
+                                  <button type="button" onClick={() => removePrompt(prompt.id)}>{t.confirm}</button>
+                                  <button type="button" onClick={() => setPromptDeleteConfirm("")}>{t.cancel}</button>
+                                </>
+                              ) : (
+                                <button type="button" onClick={() => setPromptDeleteConfirm(prompt.id)}>{t.delete}</button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  <div className="pagination">
+                    <button
+                      disabled={promptPagination.page === 1}
+                      onClick={() => setPromptPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+                    >
+                      {t.previous}
+                    </button>
+                    <span>
+                      {lang === "zh"
+                        ? `第 ${promptPagination.page} / ${Math.max(1, Math.ceil(promptPagination.total / promptPagination.page_size))} 页`
+                        : `Page ${promptPagination.page} of ${Math.max(1, Math.ceil(promptPagination.total / promptPagination.page_size))}`}
+                    </span>
+                    <button
+                      disabled={promptPagination.page * promptPagination.page_size >= promptPagination.total}
+                      onClick={() => setPromptPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                    >
+                      {t.next}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="prompt-panel prompt-editor-panel">
+              <div className="prompt-editor-header">
+                <div>
+                  <h3>{t.promptEditorTitle}</h3>
+                  {promptEditingId && <div className="meta">{t.promptUpdatedAt}: {formatDate(prompts.find(item => item.id === promptEditingId)?.updated_at)}</div>}
+                </div>
+                {promptEditingId && (
+                  <span className={`prompt-status-badge ${prompts.find(item => item.id === promptEditingId)?.status || "enabled"}`}>
+                    {getPromptStatusLabel(prompts.find(item => item.id === promptEditingId)?.status || "enabled")}
+                  </span>
+                )}
+              </div>
+
+              <div className="prompt-form-grid">
+                <label className="prompt-field">
+                  <span>{t.promptName}</span>
+                  <input
+                    value={promptForm.name}
+                    onChange={e => setPromptForm(prev => ({ ...prev, name: e.target.value }))}
+                  />
+                  {promptFormErrors.name && <span className="prompt-field-error">{promptFormErrors.name}</span>}
+                </label>
+
+                <label className="prompt-field">
+                  <span>{t.promptDescription}</span>
+                  <input
+                    value={promptForm.description}
+                    onChange={e => setPromptForm(prev => ({ ...prev, description: e.target.value }))}
+                  />
+                </label>
+
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptTemplate}</span>
+                  <textarea
+                    rows={12}
+                    value={promptForm.template_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, template_text: e.target.value }))}
+                  />
+                  {promptFormErrors.template_text && <span className="prompt-field-error">{promptFormErrors.template_text}</span>}
+                </label>
+
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptSampleInput}</span>
+                  <textarea
+                    rows={10}
+                    value={promptForm.sample_input_json}
+                    onChange={e => setPromptForm(prev => ({ ...prev, sample_input_json: e.target.value }))}
+                  />
+                  {promptFormErrors.sample_input_json && <span className="prompt-field-error">{promptFormErrors.sample_input_json}</span>}
+                </label>
+              </div>
+
+              <div className="prompt-actions">
+                <button disabled={promptSaving} onClick={savePrompt}>
+                  {promptSaving ? t.loading : (promptEditingId ? t.promptSaveUpdate : t.promptSaveCreate)}
+                </button>
+                <button type="button" onClick={openPromptCreate}>{t.promptCreate}</button>
+                {promptEditingId && promptDeleteConfirm === promptEditingId && (
+                  <span className="meta">{t.promptDeleteConfirm}</span>
+                )}
+              </div>
+
+              <div className="prompt-preview-box">
+                <div className="prompt-preview-header">
+                  <strong>{t.promptPreview}</strong>
+                  <span className="meta">
+                    {promptPreviewLoading ? t.loading : t.promptPreviewHint}
+                  </span>
+                </div>
+                {promptPreviewError ? (
+                  <div className="prompt-banner error">{t.promptPreviewFailed}: {promptPreviewError}</div>
+                ) : promptPreview ? (
+                  <pre className="prompt-preview-content">{promptPreview}</pre>
+                ) : (
+                  <div className="prompt-empty">{t.promptPreviewEmpty}</div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}

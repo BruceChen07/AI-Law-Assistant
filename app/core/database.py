@@ -130,6 +130,24 @@ def init_db(cfg):
         "CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action)")
 
     cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_prompt(
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        template_text TEXT NOT NULL,
+        sample_input_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'enabled',
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_prompt_status ON audit_prompt(status)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_prompt_updated_at ON audit_prompt(updated_at)")
+
+    cur.execute("""
     CREATE TABLE IF NOT EXISTS contract_audit(
         id TEXT PRIMARY KEY,
         document_id TEXT NOT NULL,
