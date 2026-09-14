@@ -39,23 +39,19 @@ def _build_audit_error_detail(err: Exception, language: str) -> str:
     is_zh = str(language or "zh").lower().startswith("zh")
     if "invalid_api_key" in low or "incorrect api key" in low or "authentication" in low or "401" in low:
         if is_zh:
-            return "LLM 鉴权失败：API Key 无效或已过期。请前往【Admin -> 模型配置】更新 API Base、Model、API Key 后重试。"
-        return "LLM authentication failed: API key is invalid or expired. Go to Admin -> Model Config and update API Base, Model, and API key, then retry."
+            return "LLM 鉴权失败：请检查当前模型服务对应的 Windows 环境变量是否已正确配置，并确认密钥未过期后重试。"
+        return "LLM authentication failed. Check the Windows environment variables for the active model provider and confirm the credentials are still valid."
     if "timeout" in low or "timed out" in low:
         if is_zh:
-            return "LLM 请求超时。请在【Admin -> 模型配置】适当增大 timeout，或更换更稳定的模型后重试。"
-        return "LLM request timed out. Increase timeout in Admin -> Model Config or switch to a more stable model, then retry."
-    if "keyring" in low:
-        if is_zh:
-            return "本地安全密钥存储不可用。请安装 keyring 依赖或改用环境变量配置 LLM_API_KEY 后重试。"
-        return "Local secure key storage is unavailable. Install keyring or use LLM_API_KEY environment variable, then retry."
+            return "LLM 请求超时。请检查当前模型服务可用性，必要时调整环境变量中的模型配置或切换到更稳定的服务后重试。"
+        return "LLM request timed out. Check provider availability and adjust the environment-managed model configuration if needed."
     if "ocr_parse_failed" in low or "ocr_failed" in low or "torchvision" in low:
         if is_zh:
             return "OCR 解析失败，未能正确抽取 PDF 文本，审计流程已中止。请检查 OCR 依赖（如 torchvision）和 MinerU 配置后重试。"
         return "OCR parsing failed and PDF text was not extracted correctly. Audit flow has been stopped. Check OCR dependencies (e.g., torchvision) and MinerU configuration, then retry."
     if is_zh:
-        return "合同审计失败。请检查【Admin -> 模型配置】中的 LLM 参数后重试。"
-    return "Contract audit failed. Check LLM settings in Admin -> Model Config and retry."
+        return "合同审计失败。请检查当前生效的模型环境变量配置后重试。"
+    return "Contract audit failed. Check the active environment-based LLM configuration and retry."
 
 
 def _set_audit_progress(audit_id: str, status: str, progress: int, stage: str, message: str = "") -> None:

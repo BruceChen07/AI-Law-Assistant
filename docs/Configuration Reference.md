@@ -75,23 +75,19 @@ This document explains the configuration fields in `app/config.example.json`.
 
 | Key | Type | Description |
 |---|---|---|
-| `provider` | string | LLM provider type, currently OpenAI-compatible style. |
+| `provider` | string | Non-sensitive default provider (`openai`, `openai_compatible`, `qwen`, `wenxin`, `ollama`). |
 | `api_base` | string | Base URL of chat-completions API. |
-| `api_key` | string | API key. Prefer secure store/environment in production. |
 | `model` | string | Model name. |
 | `temperature` | float | Sampling temperature. |
 | `max_tokens` | int | Max response tokens. |
 | `timeout` | int | Request timeout in seconds. |
 | `headers` | object | Extra HTTP headers. |
 
-### `secret_store`
+Security note:
 
-| Key | Type | Description |
-|---|---|---|
-| `enabled` | bool | Enable secure key storage. |
-| `backend` | string | Secret backend (`keyring`, etc.). |
-| `service_name` | string | Keyring service namespace. |
-| `llm_api_key_name` | string | Key name used for storing LLM key. |
+- Do not store API keys in `app/config.json`
+- API keys are loaded from environment variables only
+- Admin UI only displays effective runtime config and environment status
 
 ## 7) Retrieval & Translation
 
@@ -206,6 +202,23 @@ This setup uses translated Chinese query for RAG and avoids redundant English se
 - Keep `contract_audit_debug_retention_days` small (e.g. `7`) to control disk usage.
 
 ### Production mode
-- Prefer secure key storage (`secret_store.enabled: true`) and do not store raw API keys in config files.
+- Use environment variables for all LLM secrets and keep config files secret-free.
 - Set strict CORS origins.
 - Tune trace/debug retention and archive settings based on compliance/storage policy.
+
+## LLM Environment Variables
+
+Recommended variables:
+
+| Variable | Description |
+|---|---|
+| `LLM_PROVIDER` | Active provider selector. |
+| `LLM_API_BASE` | Optional global base URL override. |
+| `LLM_MODEL` | Optional global model override. |
+| `LLM_API_KEY` | Generic API key for OpenAI-compatible providers. |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | OpenAI variables. |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` / `DASHSCOPE_MODEL` | Qwen / DashScope variables. |
+| `QIANFAN_BEARER_TOKEN` / `QIANFAN_API_KEY` | Wenxin bearer-style auth variables. |
+| `QIANFAN_ACCESS_KEY` / `QIANFAN_SECRET_KEY` | Wenxin AK/SK pair for runtime token exchange. |
+| `QIANFAN_BASE_URL` / `QIANFAN_MODEL` | Wenxin endpoint and model. |
+| `OLLAMA_HOST` / `OLLAMA_MODEL` | Ollama endpoint and model. |

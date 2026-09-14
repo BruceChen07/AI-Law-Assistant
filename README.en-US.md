@@ -16,7 +16,7 @@ A contract auditing system designed for finance, tax, and legal affairs. It incl
 - **Regulation Management**: Admin upload, clause parsing, retrieval, and task tracking
 - **Hybrid + Cross-language Retrieval**: BM25 + vector recall + optional reranking, with translation-assisted querying (`translation_config`)
 - **Memory-based Audit Pipeline**: Clause-round auditing, citation whitelist mapping, unverifiable-risk filtering, and audit trace outputs
-- **Secure Runtime Config**: LLM keys are intended to be loaded from secure store/environment instead of plaintext config persistence
+- **Secure Runtime Config**: LLM secrets are loaded from environment variables only and are not persisted in project config files
 - **Model/UI Configuration**: Centralized LLM/runtime config and UI feature toggles
 - **Authentication & Admin**: Login, role-based management endpoints
 - **Web UI**: React + Vite frontend with English/Chinese switching
@@ -84,7 +84,7 @@ cp app/config.example.json app/config.json
 Copy-Item app/config.example.json app/config.json
 ```
 
-Modify `app/config.json` as needed. For production use, keep LLM API keys in secure store/environment variables rather than plaintext config.
+Modify `app/config.json` as needed. LLM secrets must stay in environment variables and should never be written into config files.
 
 ### 4. Initialize Database
 
@@ -159,8 +159,8 @@ Supported fields:
 ### Model Configuration (Admin Page)
 
 1. Go to Admin → "Model Configuration".
-2. Fill in the API endpoint, model, temperature, max tokens, etc.
-3. It takes effect immediately after saving.
+2. Review the active provider, model, endpoint, resolved environment variables, and missing variables.
+3. To switch providers, update Windows environment variables and restart the service.
 
 ### OCR Verification
 
@@ -204,7 +204,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 Use `app/config.example.json` as the source of truth. Key groups to review:
 
 - `llm_config`: provider/base URL/model/sampling/timeout
-- `secret_store`: secure key backend (for LLM API key persistence)
+- `llm_config`: non-sensitive defaults only; keep secrets out of config
 - `embedding_profiles` / `reranker_profiles`: language-specific model paths
 - `translation_config`: cross-language retrieval translation settings
 - `retrieval_regulation_language`: primary language of the regulation corpus

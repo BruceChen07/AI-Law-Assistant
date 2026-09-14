@@ -19,7 +19,7 @@
 - **法规管理**：Admin 支持法规上传、条款解析、混合检索与任务追踪
 - **混合检索与跨语种召回**：BM25 + 向量召回 + 可选重排，支持翻译增强查询（translation_config）
 - **记忆式审计管线**：支持条款级轮次审计、引用白名单映射、未验证风险过滤与调试追踪
-- **安全配置**：LLM 密钥优先走安全存储/环境变量，避免在配置文件中明文持久化
+- **安全配置**：LLM 密钥仅从环境变量读取，避免在配置文件中明文持久化
 - **模型与界面配置**：集中式 LLM 参数、UI 开关、运行时热更新
 - **鉴权与管理**：用户登录、角色权限、管理员配置接口
 - **Web UI**：React + Vite 前端，中英文切换
@@ -87,7 +87,7 @@ cp app/config.example.json app/config.json
 Copy-Item app/config.example.json app/config.json
 ```
 
-根据需要修改 `app/config.json`。建议将 LLM 密钥通过环境变量或安全存储管理，不在配置文件中写入明文。
+根据需要修改 `app/config.json`。从当前版本开始，LLM 密钥只允许通过环境变量注入，不应写入配置文件。
 
 ### 4. 初始化数据库
 
@@ -163,8 +163,16 @@ npm run storybook
 ### 模型配置（Admin 页面）
 
 1. 进入 Admin → 「模型配置」
-2. 填写 API 端点、模型、温度、最大 Token 等
-3. 保存后立即生效
+2. 查看当前生效的 provider、模型、接口地址、环境变量来源与缺失项
+3. 如需切换模型服务，请先在 Windows 环境变量中修改，再重启服务
+
+说明：
+
+- Admin 页面不再提供 API Key 输入框
+- Admin 页面不再保存任何密钥
+- 页面内的连通性测试会直接使用当前环境变量配置
+
+完整说明见：[Windows 环境变量化大模型配置指南](file:///d:/Workspace/AI-Law-Assistant/docs/windows-llm-env-setup.zh-CN.md)
 
 ### 记忆模块开关与成本控制（Admin 页面）
 
@@ -364,7 +372,6 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
     "llm_config": {
         "provider": "ollama",
         "api_base": "http://127.0.0.1:11434/v1",
-        "api_key": "",
         "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
@@ -411,7 +418,7 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | `ocr_dpi`                | int     | OCR 转换 DPI                |
 | `ocr_engine`             | string  | OCR 引擎（auto/tesseract/其他） |
 | `ocr_engine_order`       | array   | OCR 引擎优先级                 |
-| `llm_config`             | object  | LLM 参数配置                  |
+| `llm_config`             | object  | LLM 非敏感默认参数配置（不含密钥） |
 | `memory_runtime_config`  | object  | 记忆模块运行时开关与预算配置            |
 | `memory_module_enabled`  | boolean | 是否启用经验记忆审计（关闭后走 classic）    |
 | `memory_mode_when_disabled` | string | 禁用记忆后的模式（当前支持 `classic`） |
@@ -439,6 +446,24 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | `APP_PORT`             | 8000        | 服务端口      |
 | `APP_CONFIG`           | config.json | 配置文件路径    |
 | `APP_PORT_AUTO_SWITCH` | 1           | 端口冲突时自动漂移 |
+
+常用 LLM 环境变量：
+
+| 变量 | 说明 |
+| --- | --- |
+| `LLM_PROVIDER` | 当前启用的模型服务，支持 `openai` / `openai_compatible` / `qwen` / `wenxin` / `ollama` |
+| `LLM_API_BASE` | 可选，覆盖当前 provider 的接口地址 |
+| `LLM_MODEL` | 可选，覆盖当前 provider 的模型名 |
+| `OPENAI_API_KEY` | OpenAI API Key |
+| `DASHSCOPE_API_KEY` | 通义千问 / DashScope API Key |
+| `QIANFAN_BEARER_TOKEN` | 文心一言 Bearer Token |
+| `QIANFAN_ACCESS_KEY` / `QIANFAN_SECRET_KEY` | 文心一言 AK/SK，程序运行时自动换取临时访问令牌 |
+| `OLLAMA_HOST` | Ollama 服务地址 |
+| `OLLAMA_MODEL` | Ollama 模型名 |
+
+完整配置步骤与排查指南见：
+
+- [docs/windows-llm-env-setup.zh-CN.md](file:///d:/Workspace/AI-Law-Assistant/docs/windows-llm-env-setup.zh-CN.md)
 
 ### 运行测试
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminUpdatePromptStatus, adminPreviewPrompt, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminUpdatePromptStatus, adminPreviewPrompt, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
@@ -22,9 +22,6 @@ export default function Admin({ onBack, lang }) {
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [userDeleteConfirm, setUserDeleteConfirm] = useState(null)
   const [llmConfig, setLlmConfig] = useState(null)
-  const [llmHasApiKey, setLlmHasApiKey] = useState(false)
-  const [llmSaving, setLlmSaving] = useState(false)
-  const [llmClearingKey, setLlmClearingKey] = useState(false)
   const [llmError, setLlmError] = useState("")
   const [llmTestPrompt, setLlmTestPrompt] = useState("")
   const [llmTestResult, setLlmTestResult] = useState("")
@@ -187,15 +184,21 @@ export default function Admin({ onBack, lang }) {
       const data = await adminGetLLMConfig()
       setLlmConfig({
         provider: data.provider || "openai_compatible",
+        provider_label: data.provider_label || data.provider || "openai_compatible",
         api_base: data.api_base || "",
-        api_key: "",
         model: data.model || "",
         temperature: data.temperature ?? 0.2,
         max_tokens: data.max_tokens ?? 2048,
         timeout: data.timeout ?? 60,
-        headers: data.headers || {}
+        headers: data.headers || {},
+        env_managed: data.env_managed !== false,
+        supported_env_vars: Array.isArray(data.supported_env_vars) ? data.supported_env_vars : [],
+        required_env_vars: Array.isArray(data.required_env_vars) ? data.required_env_vars : [],
+        missing_env_vars: Array.isArray(data.missing_env_vars) ? data.missing_env_vars : [],
+        env_sources: data.env_sources || {},
+        security_issues: Array.isArray(data.security_issues) ? data.security_issues : [],
+        route: data.route || {}
       })
-      setLlmHasApiKey(!!data.has_api_key)
       setLlmTestPrompt(prev => prev || t.llmTestDefaultPrompt)
       setLlmTestResult("")
       setLlmTestError("")
@@ -421,65 +424,10 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
-  const validateLLM = (cfg) => {
-    if (!cfg.api_base || !cfg.api_base.startsWith("http")) return false
-    if (!cfg.model) return false
-    const temperature = Number(cfg.temperature)
-    if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) return false
-    const maxTokens = Number(cfg.max_tokens)
-    if (Number.isNaN(maxTokens) || maxTokens <= 0) return false
-    const timeout = Number(cfg.timeout)
-    if (Number.isNaN(timeout) || timeout <= 0) return false
-    if (cfg.headers && typeof cfg.headers !== "object") return false
-    return true
-  }
-
-  const saveLLM = async () => {
-    if (!llmConfig) return
-    if (!validateLLM(llmConfig)) {
-      setLlmError(t.validateFailed)
-      return
-    }
-    setLlmSaving(true)
-    try {
-      await adminUpdateLLMConfig({
-        provider: llmConfig.provider,
-        api_base: llmConfig.api_base,
-        api_key: llmConfig.api_key || "",
-        model: llmConfig.model,
-        temperature: Number(llmConfig.temperature),
-        max_tokens: Number(llmConfig.max_tokens),
-        timeout: Number(llmConfig.timeout),
-        headers: llmConfig.headers || {}
-      })
-      setLlmError(t.saved)
-      setLlmHasApiKey(true)
-      setLlmConfig(prev => ({ ...prev, api_key: "" }))
-    } catch (err) {
-      setLlmError(err.message)
-    } finally {
-      setLlmSaving(false)
-    }
-  }
-
-  const clearLLMApiKey = async () => {
-    setLlmClearingKey(true)
-    try {
-      await adminDeleteLLMApiKey()
-      setLlmHasApiKey(false)
-      setLlmConfig(prev => prev ? { ...prev, api_key: "" } : prev)
-      setLlmError(t.llmApiKeyCleared)
-    } catch (err) {
-      setLlmError(err.message)
-    } finally {
-      setLlmClearingKey(false)
-    }
-  }
-
   const testLLM = async () => {
     if (!llmConfig) return
-    if (!validateLLM(llmConfig)) {
-      setLlmTestError(t.validateFailed)
+    if (Array.isArray(llmConfig.missing_env_vars) && llmConfig.missing_env_vars.length > 0) {
+      setLlmTestError(`${t.llmMissingEnv}: ${llmConfig.missing_env_vars.join(", ")}`)
       return
     }
     const prompt = (llmTestPrompt || t.llmTestDefaultPrompt).trim()
@@ -991,47 +939,66 @@ export default function Admin({ onBack, lang }) {
             <div className="form">
               <div className="row">
                 <label>{t.provider}</label>
-                <select value={llmConfig.provider} onChange={e => setLlmConfig(prev => ({ ...prev, provider: e.target.value }))}>
-                  <option value="openai_compatible">openai_compatible</option>
-                  <option value="openai">openai</option>
-                  <option value="qwen">qwen</option>
-                  <option value="wenxin">wenxin</option>
-                </select>
+                <div>{llmConfig.provider_label} ({llmConfig.provider})</div>
               </div>
               <div className="row">
                 <label>{t.apiBase}</label>
-                <input value={llmConfig.api_base} onChange={e => setLlmConfig(prev => ({ ...prev, api_base: e.target.value }))} />
-              </div>
-              <div className="row">
-                <label>{t.apiKey}</label>
-                <input
-                  type="password"
-                  value={llmConfig.api_key}
-                  placeholder={llmHasApiKey && !llmConfig.api_key ? t.llmApiKeySavedMask : ""}
-                  onChange={e => setLlmConfig(prev => ({ ...prev, api_key: e.target.value }))}
-                />
-                {llmHasApiKey && !llmConfig.api_key ? <span className="llm-key-hint">{t.llmApiKeySavedHint}</span> : null}
+                <div>{llmConfig.api_base || "-"}</div>
               </div>
               <div className="row">
                 <label>{t.model}</label>
-                <input value={llmConfig.model} onChange={e => setLlmConfig(prev => ({ ...prev, model: e.target.value }))} />
+                <div>{llmConfig.model || "-"}</div>
               </div>
               <div className="row">
                 <label>{t.temperature}</label>
-                <input type="number" step="0.1" value={llmConfig.temperature} onChange={e => setLlmConfig(prev => ({ ...prev, temperature: e.target.value }))} />
+                <div>{llmConfig.temperature}</div>
               </div>
               <div className="row">
                 <label>{t.maxTokens}</label>
-                <input type="number" value={llmConfig.max_tokens} onChange={e => setLlmConfig(prev => ({ ...prev, max_tokens: e.target.value }))} />
+                <div>{llmConfig.max_tokens}</div>
               </div>
               <div className="row">
                 <label>{t.timeout}</label>
-                <input type="number" value={llmConfig.timeout} onChange={e => setLlmConfig(prev => ({ ...prev, timeout: e.target.value }))} />
+                <div>{llmConfig.timeout}</div>
               </div>
               <div className="row">
-                <button disabled={llmSaving} onClick={saveLLM}>{t.save}</button>
-                <button disabled={llmClearingKey || !llmHasApiKey} onClick={clearLLMApiKey}>{t.llmClearApiKey}</button>
-                {llmError && <span style={{ marginLeft: 12 }}>{llmError}</span>}
+                <label>{t.llmConfigMode}</label>
+                <div>{llmConfig.env_managed ? t.llmConfigModeEnv : t.llmConfigModeMixed}</div>
+              </div>
+              {!!llmConfig.route?.selected_role && (
+                <div className="row">
+                  <label>{t.llmRoute}</label>
+                  <div>{llmConfig.route.selected_role} / {llmConfig.route.selected_source || "-"}</div>
+                </div>
+              )}
+              {Array.isArray(llmConfig.security_issues) && llmConfig.security_issues.length > 0 && (
+                <div className="prompt-banner error">
+                  {llmConfig.security_issues.join(" ")}
+                </div>
+              )}
+              {Array.isArray(llmConfig.missing_env_vars) && llmConfig.missing_env_vars.length > 0 && (
+                <div className="prompt-banner error">
+                  {t.llmMissingEnv}: {llmConfig.missing_env_vars.join(", ")}
+                </div>
+              )}
+              {llmError && <div className="prompt-banner error">{llmError}</div>}
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.llmEnvSupported}</label>
+                </div>
+                <div className="content">
+                  {(llmConfig.supported_env_vars || []).join(", ") || "-"}
+                </div>
+              </div>
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.llmEnvResolved}</label>
+                </div>
+                <div className="content">
+                  {Object.keys(llmConfig.env_sources || {}).length > 0
+                    ? Object.entries(llmConfig.env_sources).map(([key, value]) => `${key}: ${value}`).join(" | ")
+                    : t.llmEnvResolvedNone}
+                </div>
               </div>
               <div className="llm-test">
                 <div className="row">

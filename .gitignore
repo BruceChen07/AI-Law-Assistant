@@ -73,6 +73,14 @@ Thumbs.db
 # Config (private)
 app/config.json
 !app/config.example.json
+.env
+.env.*
+*.env
+*.secret.json
+*.credentials.json
+secrets.*
+config.local.json
+app/config.local.json
 
 # Runtime state
 .runtime/services.pids.json

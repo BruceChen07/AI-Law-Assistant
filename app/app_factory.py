@@ -119,6 +119,22 @@ def create_app():
     else:
         logger.info("model_preflight_disabled")
     llm = LLMService(cfg)
+    llm_runtime = llm.describe_runtime_config()
+    logger.info(
+        "llm_env_precheck provider=%s model=%s api_base=%s missing_envs=%s",
+        llm_runtime.get("provider", ""),
+        llm_runtime.get("model", ""),
+        llm_runtime.get("api_base", ""),
+        llm_runtime.get("missing_env_vars", []),
+    )
+    for issue in llm_runtime.get("security_issues", []):
+        logger.warning("llm_security_issue detail=%s", issue)
+    if llm_runtime.get("missing_env_vars"):
+        logger.warning(
+            "llm_env_missing required=%s missing=%s",
+            llm_runtime.get("required_env_vars", []),
+            llm_runtime.get("missing_env_vars", []),
+        )
     translator = TranslationService(cfg)
 
     app = FastAPI(title="Law Assistant")

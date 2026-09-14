@@ -69,7 +69,6 @@
     "llm_config": {
         "provider": "ollama",
         "api_base": "http://127.0.0.1:11434/v1",
-        "api_key": "",
         "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
@@ -85,7 +84,6 @@
         "main_model": {
             "provider": "ollama",
             "api_base": "http://127.0.0.1:11434/v1",
-            "api_key": "",
             "model": "qwen3.6:27b",
             "temperature": 0.2,
             "max_tokens": 2048,
@@ -95,7 +93,6 @@
         "small_model": {
             "provider": "ollama",
             "api_base": "http://127.0.0.1:11434/v1",
-            "api_key": "",
             "model": "llama3.2:3b",
             "temperature": 0.1,
             "max_tokens": 1024,
@@ -130,12 +127,6 @@
             "memory_clause_force_cloud_for_priority": false,
             "memory_flush_force_cloud": false
         }
-    },
-    "secret_store": {
-        "enabled": true,
-        "backend": "keyring",
-        "service_name": "ai-law-assistant",
-        "llm_api_key_name": "llm_api_key"
     },
     "rag_db_paths": {
         "zh": "../data/rag_zh.db",
