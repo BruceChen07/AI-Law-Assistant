@@ -205,6 +205,105 @@
   gap: 18px;
 }
 
+.prompt-binding-summary {
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 18px;
+  background:
+    linear-gradient(135deg, rgba(99, 102, 241, 0.08), rgba(15, 23, 42, 0.02)),
+    var(--admin-panel-bg);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.05);
+}
+
+.prompt-binding-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.prompt-binding-title {
+  display: grid;
+  gap: 6px;
+}
+
+.prompt-binding-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.prompt-binding-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.9fr);
+  gap: 16px;
+}
+
+.prompt-binding-card,
+.prompt-binding-meta {
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 16px;
+}
+
+.prompt-binding-card {
+  display: grid;
+  gap: 10px;
+}
+
+.prompt-binding-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.prompt-binding-name strong {
+  font-size: 18px;
+}
+
+.prompt-binding-desc {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.prompt-binding-meta {
+  display: grid;
+  gap: 10px;
+}
+
+.prompt-binding-meta-item {
+  display: grid;
+  gap: 4px;
+}
+
+.prompt-binding-meta-item span {
+  color: var(--muted);
+  font-size: 12px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.prompt-binding-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+}
+
 .prompt-panel {
   border: 1px solid var(--border);
   border-radius: 16px;
@@ -263,6 +362,12 @@
 }
 
 .prompt-actions-inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.prompt-binding-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -334,9 +439,19 @@
   margin: 0;
   white-space: pre-wrap;
   word-break: break-word;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.65;
-  font-family: "JetBrains Mono", monospace;
+  font-family: inherit;
+}
+
+.prompt-preview-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.prompt-preview-section {
+  display: grid;
+  gap: 8px;
 }
 
 .prompt-empty {
@@ -352,6 +467,7 @@
 }
 
 @media (max-width: 1024px) {
+  .prompt-binding-grid,
   .prompt-layout {
     grid-template-columns: 1fr;
   }
@@ -359,7 +475,8 @@
 
 @media (max-width: 720px) {
   .prompt-header,
-  .prompt-editor-header {
+  .prompt-editor-header,
+  .prompt-binding-header {
     flex-direction: column;
   }
 

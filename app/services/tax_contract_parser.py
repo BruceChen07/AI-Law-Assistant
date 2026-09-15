@@ -12,6 +12,7 @@ from app.services.crud import (
 from app.services.tax_parser import extract_regulation_text
 from app.services.audit_utils import is_tax_related_text
 from app.services.tax_common import parse_llm_json_object
+from app.services.prompt_binding import render_prompt_messages
 
 logger = logging.getLogger("law_assistant")
 
@@ -97,28 +98,18 @@ def extract_clause_entities(clause_text: str, cfg: dict = None, llm=None) -> dic
         return {}
 
     if cfg and llm is not None and is_tax_related_text(txt):
-        prompt = f"""
-        你是一个合同实体抽取助手。请从以下合同条款中提取财税相关实体，并以JSON格式返回。
-        
-        需要提取的字段及格式（如果条款中没有对应信息，请返回null）：
-        - taxpayer_type: 纳税人类型（如 "一般纳税人", "小规模纳税人"）
-        - tax_category: 税种（如 "VAT", "CIT", "PIT"，如果中文写了"增值税"则转为"VAT"）
-        - tax_rate: 税率（如 0.13, 0.09, 0.06，将百分比转为小数）
-        - invoice_type: 发票类型（如 "专用发票", "普通发票", "电子发票"）
-        - transaction_type: 交易类型/业务类型（如 "销售货物", "提供劳务", "租赁"）
-        - amount: 金额（如 "100万元"）
-        - invoice_time: 开票时点/期限（如 "30日内", "付款前"）
-        - withholding_obligation: 是否有代扣代缴义务（"是" 或 "否"）
-        
-        合同条款：
-        {txt}
-        
-        请仅返回纯JSON对象，不要有任何其他说明：
-        """
+        rendered = render_prompt_messages(
+            "tax_contract_parser.entity_extract",
+            {"clause_text": txt},
+            cfg=cfg,
+        )
+        prompt = str(rendered.get("rendered_text") or txt)
+        llm_system = str(rendered.get("rendered_system_text") or "")
         try:
             response, _ = _chat_with_task_profile(
                 llm,
-                [{"role": "user", "content": prompt}],
+                [{"role": "system", "content": llm_system},
+                    {"role": "user", "content": prompt}],
                 "entity_extract_small",
                 overrides={"temperature": 0.1},
             )

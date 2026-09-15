@@ -20,6 +20,7 @@ from app.memory_system.experience_repo import (
     recall_similar_audit_memories,
 )
 from app.services.local_llm_runtime import call_with_fallback, get_execution_flag
+from app.services.prompt_binding import render_prompt_messages
 
 logger = structlog.get_logger(__name__)
 
@@ -546,7 +547,13 @@ def create_memory_callbacks(
             return {"summary": "", "risks": []}
 
     async def _flush_cb(prompt: str) -> str:
-        content = f"请把以下上下文压缩为可持久化的Markdown记忆要点：\n\n{prompt}"
+        rendered_flush = render_prompt_messages(
+            "memory_pipeline.flush_markdown",
+            {"prompt": prompt},
+            cfg=cfg,
+        )
+        llm_system = str(rendered_flush.get("rendered_system_text") or "")
+        content = str(rendered_flush.get("rendered_text") or prompt)
         flush_round = int(round_runtime.get("round") or 0)
         flush_trace_meta = {
             **base_trace_meta,
@@ -567,7 +574,7 @@ def create_memory_callbacks(
         write_round(
             "flush_prompt",
             {"clause_id": str(round_runtime.get("clause_id") or ""),
-             "prompt": prompt, "llm_system": "你是记忆压缩助手。", "llm_user": content},
+             "prompt": prompt, "llm_system": llm_system, "llm_user": content},
             flush_round,
         )
         if int(llm_budget.get("calls") or 0) >= int(llm_budget.get("limit") or 1):
@@ -598,7 +605,7 @@ def create_memory_callbacks(
             result_text, _raw, fallback_meta = call_with_fallback(
                 llm,
                 cfg,
-                [{"role": "system", "content": "你是记忆压缩助手。"},
+                [{"role": "system", "content": llm_system},
                  {"role": "user", "content": content}],
                 "memory_flush",
                 overrides={"max_tokens": 220, "enable_thinking": False, "reasoning_effort": "low",

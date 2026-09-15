@@ -8,6 +8,7 @@ from app.services.local_llm_runtime import (
     get_local_worker_limit,
     is_high_risk_force_cloud,
 )
+from app.services.prompt_binding import render_prompt_messages
 from app.services.crud import (
     get_tax_contract_document,
     list_clause_rule_matches_by_contract,
@@ -113,21 +114,19 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
         clause_text = evidence.get("clause_excerpt", "")
         rule_text = evidence.get("rule_excerpt", "")
 
-        # Build prompt for dynamic risk issue generation
         lang_instruction = "English" if english_mode else "Chinese"
-        prompt = f"""
-        You are a senior tax auditor. Based on the following contract clause and tax rule, generate a specific risk issue description and a concrete revision suggestion.
-        
-        Match Type: {label} ("non_compliant" means conflict, "not_mentioned" means missing key obligations)
-        Contract Clause: "{clause_text}"
-        Tax Rule: "{rule_text}"
-        
-        Respond ONLY with a JSON object in {lang_instruction} language, using this format:
-        {{
-            "issue_text": "Detailed description of the specific risk or conflict found.",
-            "suggestion": "Concrete, actionable suggestion on how to revise the clause."
-        }}
-        """
+        rendered = render_prompt_messages(
+            "tax_risk.issue_generation",
+            {
+                "label": label,
+                "clause_text": clause_text,
+                "rule_text": rule_text,
+                "lang_instruction": lang_instruction,
+            },
+            cfg=cfg,
+        )
+        prompt = str(rendered.get("rendered_text") or "")
+        llm_system = str(rendered.get("rendered_system_text") or "")
 
         issue_text = _build_issue_text(m, english_mode=english_mode)
         suggestion = _build_suggestion(m, english_mode=english_mode)
@@ -136,7 +135,8 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
             response, _raw, fallback_meta = call_with_fallback(
                 llm,
                 cfg,
-                [{"role": "user", "content": prompt}],
+                [{"role": "system", "content": llm_system},
+                    {"role": "user", "content": prompt}],
                 "tax_risk_main",
                 force_cloud=(
                     label == "non_compliant" and is_high_risk_force_cloud(cfg)),

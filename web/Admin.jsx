@@ -1,14 +1,52 @@
 import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminUpdatePromptStatus, adminPreviewPrompt, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import { adminI18n } from "./i18n/adminI18n"
 
 const createEmptyPromptForm = () => ({
+  prompt_key: "",
   name: "",
   description: "",
-  template_text: "",
+  display_system_text: "",
+  display_focus_text: "",
+  display_template_text: "",
   sample_input_json: '{\n  "contract_title": "Service Agreement",\n  "counterparty": "Acme Corp",\n  "effective_date": "2026-08-28"\n}'
 })
+
+const BUILTIN_PROMPT_LABELS = {
+  "contract_audit.classic_json": {
+    zh: "合同审计结果提示词",
+    en: "Contract Audit Result Prompt"
+  },
+  "audit_prompt.tax_audit_json": {
+    zh: "财税审计提示词",
+    en: "Tax Audit Prompt"
+  },
+  "memory_pipeline.clause_audit": {
+    zh: "条款审计提示词",
+    en: "Clause Audit Prompt"
+  },
+  "memory_pipeline.flush_markdown": {
+    zh: "记忆整理提示词",
+    en: "Memory Summary Prompt"
+  },
+  "tax_risk.issue_generation": {
+    zh: "税务风险建议提示词",
+    en: "Tax Risk Suggestion Prompt"
+  },
+  "tax_matcher.clause_rule_match": {
+    zh: "条款法规匹配提示词",
+    en: "Clause Rule Match Prompt"
+  },
+  "tax_contract_parser.entity_extract": {
+    zh: "合同实体抽取提示词",
+    en: "Contract Entity Extraction Prompt"
+  },
+  "admin.llm_test": {
+    zh: "模型测试提示词",
+    en: "Model Test Prompt"
+  }
+}
 
 export default function Admin({ onBack, lang }) {
   const [tab, setTab] = useState("documents")
@@ -78,22 +116,35 @@ export default function Admin({ onBack, lang }) {
   const [promptEditingId, setPromptEditingId] = useState("")
   const [promptDeleteConfirm, setPromptDeleteConfirm] = useState("")
   const [promptStatusUpdatingId, setPromptStatusUpdatingId] = useState("")
-  const [promptPreview, setPromptPreview] = useState("")
+  const [promptPreviewSystem, setPromptPreviewSystem] = useState("")
+  const [promptPreviewUser, setPromptPreviewUser] = useState("")
   const [promptPreviewError, setPromptPreviewError] = useState("")
   const [promptPreviewLoading, setPromptPreviewLoading] = useState(false)
+  const [promptRestoreLoading, setPromptRestoreLoading] = useState(false)
+  const [promptBindings, setPromptBindings] = useState([])
+  const [promptBindingUpdatingScene, setPromptBindingUpdatingScene] = useState("")
+  const [promptEditingSource, setPromptEditingSource] = useState("custom")
   
   const fileInputRef = useRef(null)
 
   const user = getCurrentUser()
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
+  const getPromptDisplayName = (prompt) => {
+    const key = String(prompt?.prompt_key || prompt?.id || "").trim()
+    const localized = BUILTIN_PROMPT_LABELS[key]
+    return localized?.[lang || "zh"] || String(prompt?.name || "").trim() || "-"
+  }
   
   useEffect(() => {
     if (!admin) return
     if (tab === "documents") loadDocuments()
     if (tab === "users") loadUsers()
     if (tab === "stats") loadStats()
-    if (tab === "prompts") loadPrompts()
+    if (tab === "prompts") {
+      loadPrompts()
+      loadPromptBindings()
+    }
     if (tab === "model") {
       loadLLM()
       loadUIConfig()
@@ -111,8 +162,9 @@ export default function Admin({ onBack, lang }) {
 
   useEffect(() => {
     if (tab !== "prompts") return
-    if (!promptForm.template_text.trim()) {
-      setPromptPreview("")
+    if (!promptForm.display_template_text.trim()) {
+      setPromptPreviewSystem("")
+      setPromptPreviewUser("")
       setPromptPreviewError("")
       setPromptPreviewLoading(false)
       return
@@ -122,19 +174,39 @@ export default function Admin({ onBack, lang }) {
       setPromptPreviewError("")
       try {
         const res = await adminPreviewPrompt({
-          template_text: promptForm.template_text,
+          prompt_id: promptEditingId,
+          prompt_key: promptForm.prompt_key,
+          editor_lang: lang || "zh",
+          display_system_text: promptForm.display_system_text,
+          display_focus_text: promptForm.display_focus_text,
+          display_template_text: promptForm.display_template_text,
           sample_input_json: promptForm.sample_input_json
         })
-        setPromptPreview(res.rendered_text || "")
+        setPromptPreviewSystem(res.rendered_system_text || "")
+        setPromptPreviewUser(res.rendered_text || "")
       } catch (err) {
-        setPromptPreview("")
+        setPromptPreviewSystem("")
+        setPromptPreviewUser("")
         setPromptPreviewError(err.message)
       } finally {
         setPromptPreviewLoading(false)
       }
     }, 350)
     return () => clearTimeout(timer)
-  }, [tab, promptForm.template_text, promptForm.sample_input_json])
+  }, [tab, lang, promptEditingId, promptForm.prompt_key, promptForm.display_system_text, promptForm.display_focus_text, promptForm.display_template_text, promptForm.sample_input_json])
+
+  useEffect(() => {
+    if (tab !== "prompts" || !promptEditingId) return
+    openPromptEdit(promptEditingId)
+  }, [lang])
+
+  useEffect(() => {
+    if (tab !== "prompts") return undefined
+    const timer = window.setInterval(() => {
+      loadPromptBindings({ silent: true })
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [tab])
   
   const loadDocuments = async () => {
     setLoading(true)
@@ -277,35 +349,50 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
+  const loadPromptBindings = async ({ silent = false } = {}) => {
+    try {
+      const data = await adminListPromptBindings()
+      setPromptBindings(Array.isArray(data.items) ? data.items : [])
+    } catch (err) {
+      if (!silent) setPromptError(err.message)
+    }
+  }
+
+  const refreshPromptWorkspace = async (override = {}) => {
+    await Promise.all([
+      loadPrompts(override),
+      loadPromptBindings()
+    ])
+  }
+
   const resetPromptEditor = (nextPrompt = null) => {
     if (nextPrompt) {
       setPromptEditingId(nextPrompt.id || "")
+      setPromptEditingSource(nextPrompt.source || "custom")
       setPromptForm({
+        prompt_key: nextPrompt.prompt_key || "",
         name: nextPrompt.name || "",
         description: nextPrompt.description || "",
-        template_text: nextPrompt.template_text || "",
+        display_system_text: nextPrompt.display_system_text || "",
+        display_focus_text: nextPrompt.display_focus_text || "",
+        display_template_text: nextPrompt.display_template_text || "",
         sample_input_json: nextPrompt.sample_input_json || "{}"
       })
       return
     }
     setPromptEditingId("")
+    setPromptEditingSource("custom")
     setPromptForm(createEmptyPromptForm())
-    setPromptPreview("")
+    setPromptPreviewSystem("")
+    setPromptPreviewUser("")
     setPromptPreviewError("")
+    setPromptDeleteConfirm("")
   }
 
   const validatePromptForm = () => {
     const nextErrors = {}
     if (!String(promptForm.name || "").trim()) nextErrors.name = t.promptRequired
-    if (!String(promptForm.template_text || "").trim()) nextErrors.template_text = t.promptRequired
-    try {
-      const parsed = JSON.parse(String(promptForm.sample_input_json || "{}").trim() || "{}")
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        nextErrors.sample_input_json = lang === "zh" ? "请输入 JSON 对象" : "Please enter a JSON object"
-      }
-    } catch {
-      nextErrors.sample_input_json = lang === "zh" ? "JSON 格式不合法" : "Invalid JSON"
-    }
+    if (!String(promptForm.display_template_text || "").trim()) nextErrors.display_template_text = t.promptRequired
     setPromptFormErrors(nextErrors)
     return Object.keys(nextErrors).length === 0
   }
@@ -323,7 +410,7 @@ export default function Admin({ onBack, lang }) {
     setPromptMessage("")
     setPromptFormErrors({})
     try {
-      const data = await adminGetPrompt(promptId)
+      const data = await adminGetPrompt(promptId, lang || "zh")
       resetPromptEditor(data)
     } catch (err) {
       setPromptError(err.message)
@@ -344,7 +431,11 @@ export default function Admin({ onBack, lang }) {
       const payload = {
         name: String(promptForm.name || "").trim(),
         description: String(promptForm.description || "").trim(),
-        template_text: String(promptForm.template_text || ""),
+        prompt_key: String(promptForm.prompt_key || "").trim(),
+        editor_lang: lang || "zh",
+        display_system_text: String(promptForm.display_system_text || ""),
+        display_focus_text: String(promptForm.display_focus_text || ""),
+        display_template_text: String(promptForm.display_template_text || ""),
         sample_input_json: String(promptForm.sample_input_json || "{}").trim() || "{}"
       }
       const saved = promptEditingId
@@ -352,11 +443,28 @@ export default function Admin({ onBack, lang }) {
         : await adminCreatePrompt(payload)
       resetPromptEditor(saved)
       setPromptMessage(t.promptSaved)
-      await loadPrompts()
+      await refreshPromptWorkspace()
     } catch (err) {
       setPromptError(err.message)
     } finally {
       setPromptSaving(false)
+    }
+  }
+
+  const restorePromptDefault = async () => {
+    if (!promptEditingId) return
+    setPromptRestoreLoading(true)
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      const restored = await adminRestorePromptDefault(promptEditingId, lang || "zh")
+      resetPromptEditor(restored)
+      setPromptMessage(t.promptRestored)
+      await refreshPromptWorkspace()
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptRestoreLoading(false)
     }
   }
 
@@ -366,9 +474,9 @@ export default function Admin({ onBack, lang }) {
     setPromptError("")
     try {
       await adminUpdatePromptStatus(prompt.id, prompt.status !== "enabled")
-      await loadPrompts()
+      await refreshPromptWorkspace()
       if (promptEditingId === prompt.id) {
-        const latest = await adminGetPrompt(prompt.id)
+        const latest = await adminGetPrompt(prompt.id, lang || "zh")
         resetPromptEditor(latest)
       }
     } catch (err) {
@@ -386,7 +494,7 @@ export default function Admin({ onBack, lang }) {
       setPromptDeleteConfirm("")
       if (promptEditingId === promptId) resetPromptEditor()
       setPromptMessage(t.promptDeleted)
-      await loadPrompts({
+      await refreshPromptWorkspace({
         page: prompts.length === 1 && promptPagination.page > 1
           ? promptPagination.page - 1
           : promptPagination.page
@@ -399,7 +507,23 @@ export default function Admin({ onBack, lang }) {
   const submitPromptSearch = async (e) => {
     e.preventDefault()
     setPromptPagination(prev => ({ ...prev, page: 1 }))
-    await loadPrompts({ page: 1 })
+    await refreshPromptWorkspace({ page: 1 })
+  }
+
+  const updatePromptBinding = async (sceneKey, promptId = "") => {
+    if (!sceneKey) return
+    setPromptBindingUpdatingScene(sceneKey)
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      await adminUpdatePromptBinding(sceneKey, promptId)
+      setPromptMessage(t.promptBindingSaved)
+      await refreshPromptWorkspace()
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptBindingUpdatingScene("")
+    }
   }
 
   const saveVectorStoreConfig = async () => {
@@ -586,6 +710,20 @@ export default function Admin({ onBack, lang }) {
   const getPromptStatusLabel = (status) => (
     status === "enabled" ? t.promptStatusEnabled : t.promptStatusDisabled
   )
+
+  const currentPromptBinding = Array.isArray(promptBindings) && promptBindings.length > 0
+    ? promptBindings[0]
+    : null
+  const currentBindingSceneKey = currentPromptBinding?.scene_key || ""
+  const currentBindingPromptId = currentPromptBinding?.active_prompt?.id || ""
+  const promptEditingIsSystem = promptEditingSource === "system"
+  const promptEditingStatus = prompts.find(item => item.id === promptEditingId)?.status || "enabled"
+  const promptEditorLanguageLabel = lang === "en" ? t.promptLangEnglish : t.promptLangChinese
+  const promptEditorDisplayName = getPromptDisplayName({
+    id: promptEditingId,
+    prompt_key: promptForm.prompt_key,
+    name: promptForm.name
+  })
   
   if (!admin) {
     return (
@@ -605,7 +743,7 @@ export default function Admin({ onBack, lang }) {
         <div>
           <button onClick={onBack || (() => window.history.back())} style={{ marginRight: 8 }}>{t.back}</button>
           <span>{t.welcome}, {user?.username} </span>
-          <button onClick={logout}>Logout</button>
+          <button onClick={logout}>{t.logout}</button>
         </div>
       </div>
       
@@ -741,11 +879,11 @@ export default function Admin({ onBack, lang }) {
           <div className="prompt-header">
             <div>
               <h2>{t.promptMgmt}</h2>
-              <p className="meta">{t.promptPreviewHint}</p>
+              <p className="meta">{t.promptBusinessHint}</p>
             </div>
             <div className="row">
               <button onClick={openPromptCreate}>{t.promptCreate}</button>
-              <button onClick={() => loadPrompts()}>{t.promptRefresh}</button>
+              <button onClick={() => refreshPromptWorkspace()}>{t.promptRefresh}</button>
             </div>
           </div>
 
@@ -783,47 +921,62 @@ export default function Admin({ onBack, lang }) {
                       <tr>
                         <th>{t.promptName}</th>
                         <th>{t.promptStatus}</th>
-                        <th>{t.promptCreatedAt}</th>
-                        <th>{t.promptUpdatedAt}</th>
                         <th>{t.colActions}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {prompts.map(prompt => (
-                        <tr key={prompt.id} className={promptEditingId === prompt.id ? "prompt-row-active" : ""}>
-                          <td>
-                            <div className="title">{prompt.name}</div>
-                            <div className="meta">{prompt.description || "-"}</div>
-                          </td>
-                          <td>
-                            <span className={`prompt-status-badge ${prompt.status}`}>
-                              {getPromptStatusLabel(prompt.status)}
-                            </span>
-                          </td>
-                          <td>{formatDate(prompt.created_at)}</td>
-                          <td>{formatDate(prompt.updated_at)}</td>
-                          <td>
-                            <div className="prompt-actions-inline">
-                              <button type="button" onClick={() => openPromptEdit(prompt.id)}>{t.promptEdit}</button>
-                              <button
-                                type="button"
-                                disabled={promptStatusUpdatingId === prompt.id}
-                                onClick={() => togglePromptStatus(prompt)}
-                              >
-                                {prompt.status === "enabled" ? t.promptDisable : t.promptEnable}
-                              </button>
-                              {promptDeleteConfirm === prompt.id ? (
-                                <>
-                                  <button type="button" onClick={() => removePrompt(prompt.id)}>{t.confirm}</button>
-                                  <button type="button" onClick={() => setPromptDeleteConfirm("")}>{t.cancel}</button>
-                                </>
-                              ) : (
-                                <button type="button" onClick={() => setPromptDeleteConfirm(prompt.id)}>{t.delete}</button>
+                      {prompts.map(prompt => {
+                        const isSystemPrompt = prompt.source === "system" || prompt.managed_scope === "system"
+                        const isCurrentPrompt = currentBindingPromptId === prompt.id
+                        return (
+                          <tr key={prompt.id} className={promptEditingId === prompt.id || currentBindingPromptId === prompt.id ? "prompt-row-active" : ""}>
+                            <td>
+                              <div className="title">{getPromptDisplayName(prompt)}</div>
+                              {isCurrentPrompt && (
+                                <div className="prompt-binding-actions">
+                                  <span className="prompt-binding-chip">{t.promptBindingCurrentBadge}</span>
+                                </div>
                               )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td>
+                              <span className={`prompt-status-badge ${prompt.status}`}>
+                                {getPromptStatusLabel(prompt.status)}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="prompt-actions-inline">
+                                <button type="button" onClick={() => openPromptEdit(prompt.id)}>{t.promptEdit}</button>
+                                <button
+                                  type="button"
+                                  disabled={!currentBindingSceneKey || prompt.status !== "enabled" || promptBindingUpdatingScene === currentBindingSceneKey || currentBindingPromptId === prompt.id}
+                                  onClick={() => updatePromptBinding(currentBindingSceneKey, prompt.id)}
+                                >
+                                  {currentBindingPromptId === prompt.id ? t.promptBindingCurrentBadge : t.promptBindingSetActive}
+                                </button>
+                                {!isSystemPrompt && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={promptStatusUpdatingId === prompt.id}
+                                      onClick={() => togglePromptStatus(prompt)}
+                                    >
+                                      {prompt.status === "enabled" ? t.promptDisable : t.promptEnable}
+                                    </button>
+                                    {promptDeleteConfirm === prompt.id ? (
+                                      <>
+                                        <button type="button" onClick={() => removePrompt(prompt.id)}>{t.confirm}</button>
+                                        <button type="button" onClick={() => setPromptDeleteConfirm("")}>{t.cancel}</button>
+                                      </>
+                                    ) : (
+                                      <button type="button" onClick={() => setPromptDeleteConfirm(prompt.id)}>{t.delete}</button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
                     </tbody>
                   </table>
 
@@ -854,51 +1007,57 @@ export default function Admin({ onBack, lang }) {
               <div className="prompt-editor-header">
                 <div>
                   <h3>{t.promptEditorTitle}</h3>
-                  {promptEditingId && <div className="meta">{t.promptUpdatedAt}: {formatDate(prompts.find(item => item.id === promptEditingId)?.updated_at)}</div>}
+                  {promptEditingId && <div className="meta">{promptEditorDisplayName}</div>}
+                  <div className="meta">{t.promptLanguageLabel}: {promptEditorLanguageLabel}</div>
+                  <div className="meta">{t.promptNoCodeHint}</div>
+                  {promptEditingIsSystem && <div className="meta">{t.promptSystemHint}</div>}
                 </div>
                 {promptEditingId && (
-                  <span className={`prompt-status-badge ${prompts.find(item => item.id === promptEditingId)?.status || "enabled"}`}>
-                    {getPromptStatusLabel(prompts.find(item => item.id === promptEditingId)?.status || "enabled")}
+                  <span className={`prompt-status-badge ${promptEditingStatus}`}>
+                    {getPromptStatusLabel(promptEditingStatus)}
                   </span>
                 )}
               </div>
 
               <div className="prompt-form-grid">
-                <label className="prompt-field">
-                  <span>{t.promptName}</span>
-                  <input
-                    value={promptForm.name}
-                    onChange={e => setPromptForm(prev => ({ ...prev, name: e.target.value }))}
-                  />
-                  {promptFormErrors.name && <span className="prompt-field-error">{promptFormErrors.name}</span>}
-                </label>
+                {!promptEditingIsSystem && (
+                  <label className="prompt-field">
+                    <span>{t.promptName}</span>
+                    <input
+                      value={promptForm.name}
+                      onChange={e => setPromptForm(prev => ({ ...prev, name: e.target.value }))}
+                    />
+                    {promptFormErrors.name && <span className="prompt-field-error">{promptFormErrors.name}</span>}
+                  </label>
+                )}
 
-                <label className="prompt-field">
-                  <span>{t.promptDescription}</span>
-                  <input
-                    value={promptForm.description}
-                    onChange={e => setPromptForm(prev => ({ ...prev, description: e.target.value }))}
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptRoleText}</span>
+                  <textarea
+                    rows={6}
+                    value={promptForm.display_system_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, display_system_text: e.target.value }))}
                   />
                 </label>
 
                 <label className="prompt-field prompt-field-wide">
-                  <span>{t.promptTemplate}</span>
+                  <span>{t.promptFocusText}</span>
+                  <textarea
+                    rows={4}
+                    value={promptForm.display_focus_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, display_focus_text: e.target.value }))}
+                    placeholder={t.promptFocusPlaceholder}
+                  />
+                </label>
+
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptTaskText}</span>
                   <textarea
                     rows={12}
-                    value={promptForm.template_text}
-                    onChange={e => setPromptForm(prev => ({ ...prev, template_text: e.target.value }))}
+                    value={promptForm.display_template_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, display_template_text: e.target.value }))}
                   />
-                  {promptFormErrors.template_text && <span className="prompt-field-error">{promptFormErrors.template_text}</span>}
-                </label>
-
-                <label className="prompt-field prompt-field-wide">
-                  <span>{t.promptSampleInput}</span>
-                  <textarea
-                    rows={10}
-                    value={promptForm.sample_input_json}
-                    onChange={e => setPromptForm(prev => ({ ...prev, sample_input_json: e.target.value }))}
-                  />
-                  {promptFormErrors.sample_input_json && <span className="prompt-field-error">{promptFormErrors.sample_input_json}</span>}
+                  {promptFormErrors.display_template_text && <span className="prompt-field-error">{promptFormErrors.display_template_text}</span>}
                 </label>
               </div>
 
@@ -907,6 +1066,11 @@ export default function Admin({ onBack, lang }) {
                   {promptSaving ? t.loading : (promptEditingId ? t.promptSaveUpdate : t.promptSaveCreate)}
                 </button>
                 <button type="button" onClick={openPromptCreate}>{t.promptCreate}</button>
+                {promptEditingIsSystem && promptEditingId && (
+                  <button type="button" disabled={promptRestoreLoading} onClick={restorePromptDefault}>
+                    {promptRestoreLoading ? t.loading : t.promptRestoreDefault}
+                  </button>
+                )}
                 {promptEditingId && promptDeleteConfirm === promptEditingId && (
                   <span className="meta">{t.promptDeleteConfirm}</span>
                 )}
@@ -921,8 +1085,17 @@ export default function Admin({ onBack, lang }) {
                 </div>
                 {promptPreviewError ? (
                   <div className="prompt-banner error">{t.promptPreviewFailed}: {promptPreviewError}</div>
-                ) : promptPreview ? (
-                  <pre className="prompt-preview-content">{promptPreview}</pre>
+                ) : (promptPreviewSystem || promptPreviewUser) ? (
+                  <div className="prompt-preview-stack">
+                    <div className="prompt-preview-section">
+                      <div className="meta">{t.promptPreviewSystem}</div>
+                      <pre className="prompt-preview-content">{promptPreviewSystem || "-"}</pre>
+                    </div>
+                    <div className="prompt-preview-section">
+                      <div className="meta">{t.promptPreviewUser}</div>
+                      <pre className="prompt-preview-content">{promptPreviewUser || "-"}</pre>
+                    </div>
+                  </div>
                 ) : (
                   <div className="prompt-empty">{t.promptPreviewEmpty}</div>
                 )}

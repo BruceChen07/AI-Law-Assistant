@@ -7,8 +7,9 @@ export async function adminListPrompts(params = {}) {
   })
 }
 
-export async function adminGetPrompt(promptId) {
-  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}`, {
+export async function adminGetPrompt(promptId, editorLang = "zh") {
+  const query = new URLSearchParams({ editor_lang: editorLang || "zh" }).toString()
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}?${query}`, {
     headers: { ...getAuthHeaders() }
   })
 }
@@ -36,6 +37,14 @@ export async function adminDeletePrompt(promptId) {
   })
 }
 
+export async function adminRestorePromptDefault(promptId, editorLang = "zh") {
+  const query = new URLSearchParams({ editor_lang: editorLang || "zh" }).toString()
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}/restore-default?${query}`, {
+    method: "POST",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function adminUpdatePromptStatus(promptId, enabled) {
   return requestJson(`${API_BASE}/api/admin/prompts/${promptId}/status`, {
     method: "PUT",
@@ -49,6 +58,20 @@ export async function adminPreviewPrompt(payload) {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify(payload)
+  })
+}
+
+export async function adminListPromptBindings() {
+  return requestJson(`${API_BASE}/api/admin/prompt-bindings`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminUpdatePromptBinding(sceneKey, promptId) {
+  return requestJson(`${API_BASE}/api/admin/prompt-bindings/${encodeURIComponent(sceneKey)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ prompt_id: promptId || "" })
   })
 }
 

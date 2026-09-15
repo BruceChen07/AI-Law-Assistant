@@ -23,6 +23,7 @@ from app.services.local_llm_runtime import (
     get_tax_match_min_confidence,
     is_high_risk_force_cloud,
 )
+from app.services.prompt_binding import render_prompt_messages
 
 logger = logging.getLogger("law_assistant")
 
@@ -67,24 +68,13 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
     if llm is None:
         raise ValueError("llm service is required")
 
-    prompt = f"""
-    You are an expert tax and legal auditor. 
-    Analyze the relationship between the following contract clause and the tax rule.
-    
-    Contract Clause:
-    "{clause_text}"
-    
-    Tax Rule:
-    "{rule_text}"
-    
-    Determine if the clause complies with the rule.
-    Return ONLY a JSON object with the following structure:
-    {{
-        "label": "compliant" | "non_compliant" | "not_mentioned",
-        "score": float between 0.0 and 1.0 (confidence score),
-        "reason": "short explanation of the relationship in English or Chinese"
-    }}
-    """
+    rendered = render_prompt_messages(
+        "tax_matcher.clause_rule_match",
+        {"clause_text": clause_text, "rule_text": rule_text},
+        cfg=cfg,
+    )
+    prompt = str(rendered.get("rendered_text") or "")
+    llm_system = str(rendered.get("rendered_system_text") or "")
 
     label = "not_mentioned"
     score = 0.12
@@ -94,7 +84,8 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
         response, raw, fallback_meta = call_with_fallback(
             llm,
             cfg,
-            [{"role": "user", "content": prompt}],
+            [{"role": "system", "content": llm_system},
+                {"role": "user", "content": prompt}],
             "tax_match_small",
             validator=lambda text, _raw: _is_valid_match_result(
                 parse_llm_json_object(text)),
@@ -114,7 +105,8 @@ def evaluate_clause_rule_match_llm(clause: dict, rule: dict, cfg: dict, llm: LLM
             review_response, review_raw, review_meta = call_with_fallback(
                 llm,
                 cfg,
-                [{"role": "user", "content": prompt}],
+                [{"role": "system", "content": llm_system},
+                    {"role": "user", "content": prompt}],
                 "tax_match_small",
                 force_cloud=True,
                 retry_on_error=False,

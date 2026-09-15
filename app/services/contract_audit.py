@@ -16,6 +16,7 @@ from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
 from app.services.contract_audit_modules.result_assembler import attach_risk_locations
 from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip
+from app.services.prompt_binding import resolve_bound_prompt_text
 
 logger = structlog.get_logger(__name__)
 
@@ -137,23 +138,20 @@ def _build_classic_audit(
     clause_text = "\n\n".join(clause_lines) if clause_lines else str(
         text or "")[:max_clause_chars]
 
-    if norm_lang == "en":
-        system = "You are a senior contract audit lawyer. Output ONLY JSON."
-        user = (
-            "Use only the contract text and whitelist evidence below.\n"
-            "Do not output reasoning process.\n"
-            f"Whitelist:\n{whitelist_text}\n\n"
-            f"Contract Clauses:\n{clause_text}\n\n"
-            "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
-        )
-    else:
-        system = "你是资深合同审计律师。只输出JSON。"
-        user = (
-            "仅根据合同文本与白名单证据输出结果；不要输出推理过程。\n"
-            f"白名单:\n{whitelist_text}\n\n"
-            f"合同条款:\n{clause_text}\n\n"
-            "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}"
-        )
+    bound_prompt = resolve_bound_prompt_text(
+        "contract_audit.classic_json",
+        "",
+        {
+            "lang": norm_lang,
+            "whitelist_text": whitelist_text,
+            "contract_clauses": clause_text,
+            "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
+            "json_schema": "{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}",
+        },
+        cfg,
+    )
+    system = str(bound_prompt.get("rendered_system_text") or "")
+    user = str(bound_prompt.get("rendered_text") or "")
 
     trace_meta = {
         "module": "contract_audit",
@@ -161,6 +159,10 @@ def _build_classic_audit(
         "audit_id": audit_id,
         "lang": norm_lang,
         "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
+        "prompt_source": str(bound_prompt.get("source") or "system_default"),
+        "prompt_binding_scene": "contract_audit.classic_json",
+        "prompt_binding_id": str(bound_prompt.get("prompt_id") or ""),
+        "prompt_binding_name": str(bound_prompt.get("prompt_name") or ""),
     }
     result_text, _raw = _chat_with_task_profile(
         llm,
@@ -454,7 +456,8 @@ def audit_contract(
                 for it in evidence_items
                 if str(it.get("citation_id", "")).strip()
             ]
-            audit_duration_ms = int((time.perf_counter() - audit_started_at) * 1000)
+            audit_duration_ms = int(
+                (time.perf_counter() - audit_started_at) * 1000)
             output_meta = {
                 "language": "en" if str(lang or "").lower() == "en" else "zh",
                 "audit_id": audit_id,
@@ -518,9 +521,12 @@ def audit_contract(
                 "saved": False,
                 "reason": "memory_import_failed_fallback",
             }
-            output_meta["episode_saved"] = bool(episode_meta.get("saved", False))
-            output_meta["episode_id"] = str(episode_meta.get("episode_id") or "")
-            output_meta["episode_status"] = str(episode_meta.get("status") or "")
+            output_meta["episode_saved"] = bool(
+                episode_meta.get("saved", False))
+            output_meta["episode_id"] = str(
+                episode_meta.get("episode_id") or "")
+            output_meta["episode_status"] = str(
+                episode_meta.get("status") or "")
             return {
                 "audit": memory_result.get("audit"),
                 "meta": output_meta,

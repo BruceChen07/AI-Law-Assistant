@@ -3,6 +3,7 @@
 from typing import Any, Dict, List, Tuple
 import json
 import re
+from app.services.prompt_binding import render_prompt_messages
 
 
 def format_failure_patterns(patterns: List[Dict[str, Any]], lang: str) -> str:
@@ -102,47 +103,22 @@ def build_clause_prompt(
     clause_title: str,
     clause_text: str,
 ) -> Tuple[str, str]:
-    if norm_lang == "en":
-        system = "You are a senior contract audit lawyer. Please output ONLY in JSON format."
-        user = (
-            f"Language: {norm_lang}\n"
-            "Audit strictly based on the input; prioritize the whitelisted laws; output MUST be JSON.\n"
-            "Check whether this clause matches any known false-positive or false-negative pattern before finalizing.\n"
-            "Short memory and long-term hits are for factual reference only; do not directly reuse their historical conclusions.\n"
-            "For risk items, if a whitelist item can be matched, you MUST fill citation_id with an exact whitelist ID and MUST NOT invent any ID; only leave citation_id blank when no match can be determined, and still fill law_title and article_no for post-processing mapping and verification.\n"
-            "If outputting 'unclear/unspecified/unmentioned/missing' risks, refer to the short memory, long-term hits, and the current clause; suppress this risk ONLY if the same element has been covered by explicit and enforceable provisions.\n"
-            "Do NOT output reasoning processes, analysis processes, or extra explanations. ONLY output the final JSON.\n"
-            f"Whitelist:\n{evidence_whitelist_text}\n\n"
-            f"Short Memory:\n{short_memory}\n\n"
-            f"{case_memory_block}"
-            f"{failure_patterns_block}"
-            f"{workflow_memory_block}"
-            f"{global_context_block}"
-            f"{long_memory_block}"
-            f"Clause Title: {clause_title}\n"
-            f"Clause Text:\n{clause_text}\n\n"
-            "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
-        )
-        return system, user
-
-    system = "你是资深合同审计律师。请只输出JSON。"
-    user = (
-        f"语言:{norm_lang}\n"
-        "仅根据输入审计；优先参考白名单法条；输出必须是JSON。\n"
-        "Check whether this clause matches any known false-positive or false-negative pattern before finalizing.\n"
-        "短记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n"
-        "风险项如能匹配白名单，必须填写与白名单完全一致的 citation_id，且不得编造ID；仅在确实无法匹配时才可留空，并必须尽量填写 law_title 与 article_no 供后处理映射校验。\n"
-        "若要输出‘未明确/未约定/未提及/缺失’风险，可参考短记忆、长期命中与当前条款；仅在同一要素已被明确且可执行约定覆盖时才抑制该风险。\n"
-        "禁止输出推理过程、分析过程与额外解释，只输出最终JSON。\n"
-        f"白名单:\n{evidence_whitelist_text}\n\n"
-        f"短记忆:\n{short_memory}\n\n"
-        f"{case_memory_block}"
-        f"{failure_patterns_block}"
-        f"{workflow_memory_block}"
-        f"{global_context_block}"
-        f"{long_memory_block}"
-        f"条款标题:{clause_title}\n"
-        f"条款正文:\n{clause_text}\n\n"
-        "JSON: {\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
+    rendered = render_prompt_messages(
+        "memory_pipeline.clause_audit",
+        {
+            "norm_lang": norm_lang,
+            "evidence_whitelist_text": evidence_whitelist_text,
+            "short_memory": short_memory,
+            "case_memory_block": case_memory_block,
+            "failure_patterns_block": failure_patterns_block,
+            "workflow_memory_block": workflow_memory_block,
+            "global_context_block": global_context_block,
+            "long_memory_block": long_memory_block,
+            "clause_title": clause_title,
+            "clause_text": clause_text,
+        },
     )
-    return system, user
+    return (
+        str(rendered.get("rendered_system_text") or ""),
+        str(rendered.get("rendered_text") or ""),
+    )
