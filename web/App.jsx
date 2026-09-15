@@ -835,7 +835,7 @@ export default function App() {
   const canOpenAdmin = user.role === "admin" || user.username === "admin"
 
   if (view === "admin") {
-    return <Admin lang={uiLang} onBack={() => setView("main")} />
+    return <Admin lang={uiLang} onLangChange={onUiLanguageChange} onBack={() => setView("main")} />
   }
 
   return (

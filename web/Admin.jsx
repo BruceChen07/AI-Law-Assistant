@@ -49,7 +49,7 @@ const BUILTIN_PROMPT_LABELS = {
   }
 }
 
-export default function Admin({ onBack, lang }) {
+export default function Admin({ onBack, lang, onLangChange }) {
   const [tab, setTab] = useState("documents")
   const [documents, setDocuments] = useState([])
   const [users, setUsers] = useState([])
@@ -125,6 +125,14 @@ export default function Admin({ onBack, lang }) {
   const [promptBindings, setPromptBindings] = useState([])
   const [promptBindingUpdatingScene, setPromptBindingUpdatingScene] = useState("")
   const [promptEditingSource, setPromptEditingSource] = useState("custom")
+  const [promptViewingId, setPromptViewingId] = useState("")
+  const [promptViewDetail, setPromptViewDetail] = useState(null)
+  const [promptViewLoading, setPromptViewLoading] = useState(false)
+  const [promptViewError, setPromptViewError] = useState("")
+  const [promptViewPreviewSystem, setPromptViewPreviewSystem] = useState("")
+  const [promptViewPreviewUser, setPromptViewPreviewUser] = useState("")
+  const [promptViewPreviewError, setPromptViewPreviewError] = useState("")
+  const [promptViewPreviewLoading, setPromptViewPreviewLoading] = useState(false)
   
   const fileInputRef = useRef(null)
 
@@ -563,6 +571,54 @@ export default function Admin({ onBack, lang }) {
     }
   }
 
+  const closePromptView = () => {
+    setPromptViewingId("")
+    setPromptViewDetail(null)
+    setPromptViewLoading(false)
+    setPromptViewError("")
+    setPromptViewPreviewSystem("")
+    setPromptViewPreviewUser("")
+    setPromptViewPreviewError("")
+    setPromptViewPreviewLoading(false)
+  }
+
+  const openPromptView = async (promptId) => {
+    setPromptViewingId(promptId)
+    setPromptViewDetail(null)
+    setPromptViewLoading(true)
+    setPromptViewError("")
+    setPromptViewPreviewSystem("")
+    setPromptViewPreviewUser("")
+    setPromptViewPreviewError("")
+    setPromptViewPreviewLoading(false)
+    try {
+      const data = await adminGetPrompt(promptId, lang || "zh")
+      setPromptViewDetail(data)
+      setPromptViewPreviewLoading(true)
+      try {
+        const preview = await adminPreviewPrompt({
+          prompt_id: data.id || promptId,
+          prompt_key: data.prompt_key || "",
+          editor_lang: lang || "zh",
+          display_system_text: data.display_system_text || "",
+          display_focus_text: data.display_focus_text || "",
+          display_template_text: data.display_template_text || "",
+          sample_input_json: data.sample_input_json || "{}"
+        })
+        setPromptViewPreviewSystem(preview.rendered_system_text || "")
+        setPromptViewPreviewUser(preview.rendered_text || "")
+      } catch (previewErr) {
+        setPromptViewPreviewError(previewErr.message)
+      } finally {
+        setPromptViewPreviewLoading(false)
+      }
+    } catch (err) {
+      setPromptViewError(err.message)
+    } finally {
+      setPromptViewLoading(false)
+    }
+  }
+
   const savePrompt = async () => {
     setPromptMessage("")
     setPromptError("")
@@ -868,6 +924,10 @@ export default function Admin({ onBack, lang }) {
     prompt_key: promptForm.prompt_key,
     name: promptForm.name
   })
+  const promptViewStatus = promptViewDetail?.status || "enabled"
+  const promptViewSourceLabel = promptViewDetail?.source === "system" || promptViewDetail?.managed_scope === "system"
+    ? t.promptSourceSystem
+    : t.promptSourceCustom
   
   if (!admin) {
     return (
@@ -882,10 +942,17 @@ export default function Admin({ onBack, lang }) {
   
   return (
     <div className="page admin-shell">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="admin-topbar">
         <h1>{t.title}</h1>
-        <div>
-          <button onClick={onBack || (() => window.history.back())} style={{ marginRight: 8 }}>{t.back}</button>
+        <div className="admin-topbar-actions">
+          <label className="admin-toolbar-pill">
+            <span>{t.uiLanguage}</span>
+            <select value={lang || "zh"} onChange={e => onLangChange?.(e.target.value)}>
+              <option value="zh">{t.langOptionZh}</option>
+              <option value="en">{t.langOptionEn}</option>
+            </select>
+          </label>
+          <button onClick={onBack || (() => window.history.back())}>{t.back}</button>
           <span>{t.welcome}, {user?.username} </span>
           <button onClick={logout}>{t.logout}</button>
         </div>
@@ -1074,7 +1141,7 @@ export default function Admin({ onBack, lang }) {
                         const isSystemPrompt = prompt.source === "system" || prompt.managed_scope === "system"
                         const isCurrentPrompt = currentBindingPromptId === prompt.id
                         return (
-                          <tr key={prompt.id} className={promptEditingId === prompt.id || currentBindingPromptId === prompt.id ? "prompt-row-active" : ""}>
+                          <tr key={prompt.id} className={promptEditingId === prompt.id || currentBindingPromptId === prompt.id || promptViewingId === prompt.id ? "prompt-row-active" : ""}>
                             <td>
                               <div className="title">{getPromptDisplayName(prompt)}</div>
                               {isCurrentPrompt && (
@@ -1098,6 +1165,7 @@ export default function Admin({ onBack, lang }) {
                                 >
                                   {currentBindingPromptId === prompt.id ? t.promptBindingCurrentBadge : t.promptBindingSetActive}
                                 </button>
+                                <button type="button" onClick={() => openPromptView(prompt.id)}>{t.promptViewAction}</button>
                                 {!isSystemPrompt && (
                                   <>
                                     <button
@@ -1247,6 +1315,96 @@ export default function Admin({ onBack, lang }) {
               </div>
             </div>
           </div>
+
+          {promptViewingId && (
+            <div className="prompt-inspect-overlay" role="dialog" aria-modal="true">
+              <div className="prompt-inspect-modal">
+                <div className="prompt-inspect-header">
+                  <div className="prompt-inspect-title">
+                    <h3>{t.promptViewTitle}</h3>
+                    <p className="meta">{t.promptViewHint}</p>
+                  </div>
+                  <button type="button" onClick={closePromptView}>{t.promptViewClose}</button>
+                </div>
+
+                {promptViewError ? (
+                  <div className="prompt-banner error">{promptViewError}</div>
+                ) : promptViewLoading ? (
+                  <div className="prompt-empty">{t.loading}</div>
+                ) : promptViewDetail ? (
+                  <div className="prompt-inspect-body">
+                    <div className="prompt-inspect-summary">
+                      <div className="summary-item">
+                        <span className="meta">{t.promptName}</span>
+                        <strong>{getPromptDisplayName(promptViewDetail)}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span className="meta">{t.promptLanguageLabel}</span>
+                        <strong>{promptEditorLanguageLabel}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span className="meta">{t.promptStatus}</span>
+                        <span className={`prompt-status-badge ${promptViewStatus}`}>
+                          {getPromptStatusLabel(promptViewStatus)}
+                        </span>
+                      </div>
+                      <div className="summary-item">
+                        <span className="meta">{t.promptSource}</span>
+                        <strong>{promptViewSourceLabel}</strong>
+                      </div>
+                      {currentBindingPromptId === promptViewDetail.id && (
+                        <div className="summary-item">
+                          <span className="prompt-binding-chip">{t.promptBindingCurrentBadge}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="prompt-inspect-grid">
+                      <div className="prompt-inspect-section">
+                        <div className="meta">{t.promptRoleText}</div>
+                        <pre className="prompt-preview-content">{promptViewDetail.display_system_text || "-"}</pre>
+                      </div>
+
+                      <div className="prompt-inspect-section">
+                        <div className="meta">{t.promptFocusText}</div>
+                        <pre className="prompt-preview-content">{promptViewDetail.display_focus_text || "-"}</pre>
+                      </div>
+
+                      <div className="prompt-inspect-section prompt-inspect-section-wide">
+                        <div className="meta">{t.promptTaskText}</div>
+                        <pre className="prompt-preview-content">{promptViewDetail.display_template_text || "-"}</pre>
+                      </div>
+                    </div>
+
+                    <div className="prompt-preview-box">
+                      <div className="prompt-preview-header">
+                        <strong>{t.promptViewRenderedTitle}</strong>
+                        <span className="meta">
+                          {promptViewPreviewLoading ? t.loading : t.promptViewRenderedHint}
+                        </span>
+                      </div>
+                      {promptViewPreviewError ? (
+                        <div className="prompt-banner error">{t.promptPreviewFailed}: {promptViewPreviewError}</div>
+                      ) : (promptViewPreviewSystem || promptViewPreviewUser) ? (
+                        <div className="prompt-preview-stack">
+                          <div className="prompt-preview-section">
+                            <div className="meta">{t.promptPreviewSystem}</div>
+                            <pre className="prompt-preview-content">{promptViewPreviewSystem || "-"}</pre>
+                          </div>
+                          <div className="prompt-preview-section">
+                            <div className="meta">{t.promptPreviewUser}</div>
+                            <pre className="prompt-preview-content">{promptViewPreviewUser || "-"}</pre>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="prompt-empty">{t.promptPreviewEmpty}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
