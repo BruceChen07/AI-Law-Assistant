@@ -1157,6 +1157,19 @@ def _row_to_skill(row: Dict[str, Any]) -> Dict[str, Any]:
         item.pop("config_schema_json", "{}"), {})
     item["skill_card"] = _safe_json_loads(
         item.pop("skill_card_json", "{}"), {})
+    for key in (
+        "description",
+        "source_url",
+        "reference_summary",
+        "publisher_name",
+        "publisher_handle",
+        "install_command",
+        "skill_md_text",
+        "current_version",
+        "license_name",
+        "security_audit_status",
+    ):
+        item[key] = str(item.get(key) or "")
     item["downloads_30d"] = int(item.get("downloads_30d") or 0)
     item["downloads_all_time"] = int(item.get("downloads_all_time") or 0)
     return item
