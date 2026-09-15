@@ -20,6 +20,13 @@ from app.services.prompt_binding import resolve_bound_prompt_text
 
 logger = structlog.get_logger(__name__)
 
+CLASSIC_AUDIT_MAX_TOKENS = 900
+CLASSIC_AUDIT_RETRY_MAX_TOKENS = 1400
+CLASSIC_MULTIPASS_TRIGGER_CLAUSES = 10
+SKILL_AUDIT_MODES = {"skill", "skills", "advanced",
+                     "advanced_skill", "skill_orchestrated"}
+HybridSearcher = None
+
 
 def _build_preview_clauses(text: str):
     return build_preview_clauses(text)
@@ -72,7 +79,140 @@ def _get_memory_runtime_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "memory_module_enabled": bool(raw.get("memory_module_enabled", True)),
         "memory_mode_when_disabled": mode,
         "memory_disable_fallback_on_error": bool(raw.get("memory_disable_fallback_on_error", True)),
+        "memory_max_llm_calls_per_audit": max(1, int(raw.get("memory_max_llm_calls_per_audit") or 12)),
         "memory_max_prompt_chars_per_clause": max(300, int(raw.get("memory_max_prompt_chars_per_clause") or 2400)),
+    }
+
+
+def _requested_audit_mode(retrieval_options: Optional[Dict[str, Any]]) -> str:
+    if not isinstance(retrieval_options, dict):
+        return "rag"
+    return str(retrieval_options.get("audit_mode") or "rag").strip().lower()
+
+
+def _build_skill_basis(legal_basis: Dict[str, Any]) -> str:
+    if not isinstance(legal_basis, dict):
+        return ""
+    law_title = str(legal_basis.get("law_title") or "").strip()
+    article_no = str(legal_basis.get("article_no") or "").strip()
+    parts = [part for part in [law_title, article_no] if part]
+    return " ".join(parts).strip()
+
+
+def _normalize_skill_risk_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    legal_basis = item.get("legal_basis") if isinstance(
+        item.get("legal_basis"), dict) else {}
+    basis_text = _build_skill_basis(legal_basis)
+    return {
+        "level": str(item.get("risk_level") or "medium").strip().lower(),
+        "type": str(item.get("risk_category") or "").strip(),
+        "issue": str(item.get("issue") or "").strip(),
+        "evidence": str(item.get("original_clause_quote") or "").strip(),
+        "suggestion": str(item.get("detailed_suggestion") or item.get("amendment_suggestion") or "").strip(),
+        "law_reference": basis_text,
+        "basis": basis_text,
+        "law_title": str(legal_basis.get("law_title") or "").strip(),
+        "article_no": str(legal_basis.get("article_no") or "").strip(),
+        "citation_id": str(item.get("citation_id") or "").strip(),
+        "source_skills": list(item.get("source_skills") or []),
+        "cross_validated": bool(item.get("cross_validated")),
+        "cross_validation_note": str(item.get("cross_validation_note") or "").strip(),
+        "urgency": str(item.get("urgency") or "").strip(),
+        "estimated_impact": str(item.get("estimated_impact") or "").strip(),
+        "clause_location": str(item.get("clause_location") or "").strip(),
+    }
+
+
+def _build_skill_citations(risk_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    citations: List[Dict[str, Any]] = []
+    seen = set()
+    for idx, item in enumerate(list(risk_items or []), start=1):
+        if not isinstance(item, dict):
+            continue
+        legal_basis = item.get("legal_basis") if isinstance(
+            item.get("legal_basis"), dict) else {}
+        law_title = str(legal_basis.get("law_title") or "").strip()
+        article_no = str(legal_basis.get("article_no") or "").strip()
+        article_content = str(legal_basis.get("article_content") or "").strip()
+        if not law_title and not article_no and not article_content:
+            continue
+        key = (law_title, article_no, article_content)
+        if key in seen:
+            continue
+        seen.add(key)
+        citations.append(
+            _normalize_citation_item(
+                {
+                    "citation_id": f"skill-{idx}",
+                    "law_title": law_title,
+                    "title": law_title,
+                    "article_no": article_no,
+                    "excerpt": article_content[:240],
+                    "content": article_content,
+                }
+            )
+        )
+    return citations
+
+
+def _run_skill_orchestrated_audit(
+    cfg: Dict[str, Any],
+    llm,
+    file_path: str,
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    embedder,
+    progress_cb: Optional[Callable[[str, int, str], None]] = None,
+) -> Dict[str, Any]:
+    from app.contract_audit_skills.core.skill_orchestrator import SkillOrchestrator
+
+    orchestrator = SkillOrchestrator(llm_service=llm, embedder=embedder)
+    report = orchestrator.audit(
+        text, file_path=file_path, progress_cb=progress_cb)
+    raw_risk_items = list(getattr(report, "risk_items", []) or [])
+    normalized_risks = [_normalize_skill_risk_item(
+        item) for item in raw_risk_items if isinstance(item, dict)]
+    audit = {
+        "summary": str(getattr(report, "executive_summary", "") or "").strip(),
+        "executive_opinion": [],
+        "risk_summary": {
+            "high": sum(1 for item in normalized_risks if item.get("level") == "high"),
+            "medium": sum(1 for item in normalized_risks if item.get("level") == "medium"),
+            "low": sum(1 for item in normalized_risks if item.get("level") == "low"),
+        },
+        "risks": normalized_risks,
+        "citations": _build_skill_citations(raw_risk_items),
+        "legal_validation": {"ok": True, "issues": []},
+    }
+    audit = attach_risk_locations(audit, preview_clauses)
+    audit["cross_validation_notes"] = list(
+        getattr(report, "cross_validation_notes", []) or [])
+    skill_results = getattr(report, "skill_results", {}) or {}
+    total_skill_calls = len(
+        [key for key in skill_results.keys() if key != "skill_risk_summary"])
+    audit_metadata = getattr(report, "audit_metadata", {}) or {}
+    meta = {
+        "memory_mode": False,
+        "memory_mode_enabled": False,
+        "execution_path": "skill_orchestrated",
+        "memory_llm_call_count": max(1, total_skill_calls),
+        "memory_report_risk_count": len(normalized_risks),
+        "memory_validation_ok": True,
+        "skill_cross_validation_enabled": bool(audit_metadata.get("cross_validation_enabled", True)),
+        "skill_report_id": str(getattr(report, "report_id", "") or ""),
+        "skill_contract_type": str((getattr(report, "contract_info", {}) or {}).get("contract_type") or ""),
+        "skill_total_time_ms": int(audit_metadata.get("total_time_ms") or 0),
+        "skill_total_token_usage": int(audit_metadata.get("total_token_usage") or 0),
+        "skill_risk_items": len(raw_risk_items),
+    }
+    return {
+        "audit": audit,
+        "meta": meta,
+        "raw": {
+            "mode": "skill_orchestrated",
+            "report_id": str(getattr(report, "report_id", "") or ""),
+        },
     }
 
 
@@ -100,6 +240,166 @@ def _load_llm_json_object(raw_text: str) -> Dict[str, Any]:
         except Exception:
             continue
     return {}
+
+
+def _extract_finish_reason(raw: Dict[str, Any]) -> str:
+    if not isinstance(raw, dict):
+        return ""
+    choices = raw.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0] if isinstance(choices[0], dict) else {}
+        return str(first.get("finish_reason") or "").strip().lower()
+    return str(raw.get("done_reason") or "").strip().lower()
+
+
+def _extract_usage(raw: Dict[str, Any]) -> Dict[str, int]:
+    usage = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+    prompt_tokens = _safe_int(usage.get("prompt_tokens", 0), 0)
+    completion_tokens = _safe_int(usage.get("completion_tokens", 0), 0)
+    total_tokens = _safe_int(
+        usage.get("total_tokens", prompt_tokens + completion_tokens),
+        prompt_tokens + completion_tokens,
+    )
+    return {
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+    }
+
+
+def _merge_citations(primary: List[Dict[str, Any]], extra: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+    seen = set()
+    for item in list(primary or []) + list(extra or []):
+        if not isinstance(item, dict):
+            continue
+        key = (
+            str(item.get("citation_id") or "").strip(),
+            str(item.get("law_title") or item.get("title") or "").strip(),
+            str(item.get("article_no") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+    return merged
+
+
+def _chunk_preview_clauses(
+    preview_clauses: List[Dict[str, Any]],
+    max_calls: int,
+) -> List[List[Dict[str, Any]]]:
+    clauses = [item for item in list(
+        preview_clauses or []) if isinstance(item, dict)]
+    if not clauses:
+        return []
+    if len(clauses) <= CLASSIC_MULTIPASS_TRIGGER_CLAUSES:
+        return [clauses]
+    bounded_calls = max(1, int(max_calls or 1))
+    chunk_size = max(
+        1,
+        (len(clauses) + bounded_calls - 1) // bounded_calls,
+    )
+    return [
+        clauses[idx: idx + chunk_size]
+        for idx in range(0, len(clauses), chunk_size)
+    ]
+
+
+def _aggregate_classic_results(
+    results: List[Dict[str, Any]],
+    lang: str,
+) -> Dict[str, Any]:
+    norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
+    merged_risks: List[Dict[str, Any]] = []
+    merged_citations: List[Dict[str, Any]] = []
+    legal_issues: List[Dict[str, Any]] = []
+    seen_risks = set()
+    total_llm_calls = 0
+    validation_ok = True
+    parse_failed_chunks = 0
+    completion_tokens = 0
+    max_output_tokens = 0
+    for chunk_result in list(results or []):
+        audit = chunk_result.get("audit") if isinstance(
+            chunk_result.get("audit"), dict) else {}
+        meta = chunk_result.get("meta") if isinstance(
+            chunk_result.get("meta"), dict) else {}
+        total_llm_calls += max(1,
+                               _safe_int(meta.get("memory_llm_call_count", 1), 1))
+        completion_tokens += _safe_int(
+            meta.get("classic_completion_tokens", 0), 0)
+        max_output_tokens = max(
+            max_output_tokens,
+            _safe_int(meta.get("classic_max_tokens", 0), 0),
+        )
+        if bool(meta.get("classic_parse_failed")):
+            parse_failed_chunks += 1
+        validation_ok = validation_ok and bool(
+            meta.get("memory_validation_ok", False))
+        merged_citations = _merge_citations(
+            merged_citations,
+            audit.get("citations") if isinstance(
+                audit.get("citations"), list) else [],
+        )
+        for item in list(audit.get("risks") or []):
+            if not isinstance(item, dict):
+                continue
+            location = item.get("location") if isinstance(
+                item.get("location"), dict) else {}
+            key = (
+                str(item.get("level") or "").strip().lower(),
+                str(item.get("issue") or "").strip(),
+                str(item.get("law_reference") or item.get("basis") or "").strip(),
+                str(location.get("clause_id") or "").strip(),
+            )
+            if key in seen_risks:
+                continue
+            seen_risks.add(key)
+            merged_risks.append(item)
+        legal_validation = audit.get("legal_validation") if isinstance(
+            audit.get("legal_validation"), dict) else {}
+        for issue in list(legal_validation.get("issues") or []):
+            if isinstance(issue, dict):
+                legal_issues.append(issue)
+    risk_summary = {"high": 0, "medium": 0, "low": 0}
+    for item in merged_risks:
+        level = str(item.get("level") or "low").strip().lower()
+        if level not in risk_summary:
+            level = "low"
+        risk_summary[level] += 1
+    summary = (
+        f"Classic multipass audit completed, found {len(merged_risks)} risks across {len(results)} chunk(s)"
+        if norm_lang == "en"
+        else f"分块经典审计完成，共在 {len(results)} 个片段中识别 {len(merged_risks)} 项风险"
+    )
+    return {
+        "audit": {
+            "summary": summary,
+            "executive_opinion": [],
+            "risk_summary": risk_summary,
+            "risks": merged_risks,
+            "citations": merged_citations,
+            "legal_validation": {
+                "ok": validation_ok and not legal_issues,
+                "issues": legal_issues,
+            },
+        },
+        "meta": {
+            "memory_mode": False,
+            "memory_mode_enabled": False,
+            "execution_path": "classic_multipass",
+            "memory_llm_call_count": total_llm_calls,
+            "memory_report_risk_count": len(merged_risks),
+            "memory_validation_ok": validation_ok and not legal_issues,
+            "classic_parse_failed": parse_failed_chunks > 0,
+            "classic_completion_tokens": completion_tokens,
+            "classic_max_tokens": max_output_tokens,
+            "parse_failed_clauses": parse_failed_chunks,
+            "classic_chunk_count": len(results),
+        },
+        "raw": {"mode": "classic_multipass"},
+    }
 
 
 def _build_classic_audit(
@@ -138,18 +438,42 @@ def _build_classic_audit(
     clause_text = "\n\n".join(clause_lines) if clause_lines else str(
         text or "")[:max_clause_chars]
 
-    bound_prompt = resolve_bound_prompt_text(
-        "contract_audit.classic_json",
-        "",
-        {
-            "lang": norm_lang,
-            "whitelist_text": whitelist_text,
-            "contract_clauses": clause_text,
-            "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
-            "json_schema": "{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}",
-        },
-        cfg,
-    )
+    prompt_context = {
+        "lang": norm_lang,
+        "whitelist_text": whitelist_text,
+        "contract_clauses": clause_text,
+        "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
+        "json_schema": "{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}",
+    }
+    try:
+        bound_prompt = resolve_bound_prompt_text(
+            "contract_audit.classic_json",
+            "",
+            prompt_context,
+            cfg,
+        )
+    except KeyError:
+        bound_prompt = {
+            "rendered_system_text": (
+                "You are a contract audit assistant. Output strict JSON only."
+                if norm_lang == "en"
+                else "你是合同审计助手，仅输出严格JSON。"
+            ),
+            "rendered_text": (
+                (
+                    "Review the contract clauses with the regulation whitelist and return strict JSON. "
+                    f"Regulation whitelist:\n{whitelist_text}\nContract clauses:\n{clause_text}"
+                )
+                if norm_lang == "en"
+                else (
+                    "请结合法规白名单审查合同条款，并返回严格 JSON。"
+                    f"\n法规白名单：\n{whitelist_text}\n合同条款：\n{clause_text}"
+                )
+            ),
+            "source": "inline_fallback",
+            "prompt_id": "contract_audit.classic_json",
+            "prompt_name": "contract_audit.classic_json",
+        }
     system = str(bound_prompt.get("rendered_system_text") or "")
     user = str(bound_prompt.get("rendered_text") or "")
 
@@ -164,15 +488,53 @@ def _build_classic_audit(
         "prompt_binding_id": str(bound_prompt.get("prompt_id") or ""),
         "prompt_binding_name": str(bound_prompt.get("prompt_name") or ""),
     }
-    result_text, _raw = _chat_with_task_profile(
-        llm,
-        [{"role": "system", "content": system},
-         {"role": "user", "content": user}],
-        "contract_audit_main",
-        overrides={"max_tokens": 900, "enable_thinking": False, "reasoning_effort": "low",
-                   "thinking_budget_tokens": 0, "_trace_meta": trace_meta},
-    )
-    parsed = _load_llm_json_object(result_text)
+
+    def _run_once(max_tokens: int) -> Dict[str, Any]:
+        result_text, raw = _chat_with_task_profile(
+            llm,
+            [{"role": "system", "content": system},
+             {"role": "user", "content": user}],
+            "contract_audit_main",
+            overrides={"max_tokens": max_tokens, "enable_thinking": False, "reasoning_effort": "low",
+                       "thinking_budget_tokens": 0, "_trace_meta": trace_meta},
+        )
+        parsed = _load_llm_json_object(result_text)
+        usage = _extract_usage(raw if isinstance(raw, dict) else {})
+        finish_reason = _extract_finish_reason(
+            raw if isinstance(raw, dict) else {})
+        response_empty = not str(result_text or "").strip()
+        parse_failed = not bool(parsed)
+        response_truncated = finish_reason == "length"
+        return {
+            "result_text": str(result_text or ""),
+            "raw": raw if isinstance(raw, dict) else {},
+            "parsed": parsed,
+            "usage": usage,
+            "parse_failed": parse_failed,
+            "response_empty": response_empty,
+            "response_truncated": response_truncated,
+            "finish_reason": finish_reason,
+            "max_tokens": int(max_tokens),
+        }
+
+    attempt = _run_once(CLASSIC_AUDIT_MAX_TOKENS)
+    retry_used = False
+    if attempt["parse_failed"] or attempt["response_empty"]:
+        retry_attempt = _run_once(CLASSIC_AUDIT_RETRY_MAX_TOKENS)
+        if (not retry_attempt["parse_failed"]) or (
+            retry_attempt["usage"]["completion_tokens"] >= attempt["usage"]["completion_tokens"]
+        ):
+            attempt = retry_attempt
+            retry_used = True
+
+    result_text = str(attempt["result_text"] or "")
+    parsed = attempt["parsed"] if isinstance(attempt["parsed"], dict) else {}
+    usage = attempt["usage"] if isinstance(attempt["usage"], dict) else {}
+    completion_tokens = _safe_int(usage.get("completion_tokens", 0), 0)
+    prompt_tokens = _safe_int(usage.get("prompt_tokens", 0), 0)
+    parse_failed = bool(attempt.get("parse_failed"))
+    response_empty = bool(attempt.get("response_empty"))
+    response_truncated = bool(attempt.get("response_truncated"))
     risks = parsed.get("risks") if isinstance(
         parsed.get("risks"), list) else []
     clause_map = {str(c.get("clause_id") or ""): c for c in preview_clauses}
@@ -218,17 +580,52 @@ def _build_classic_audit(
     risk_summary = {"high": 0, "medium": 0, "low": 0}
     for item in normalized_risks:
         risk_summary[str(item.get("level") or "low")] += 1
-    summary = str(parsed.get("summary") or "").strip() or (
-        f"经典审计完成，共发现 {len(normalized_risks)} 项风险" if norm_lang != "en" else
-        f"Classic audit completed, found {len(normalized_risks)} risks"
-    )
+    summary = str(parsed.get("summary") or "").strip()
+    if not summary:
+        summary = (
+            f"经典审计完成，共发现 {len(normalized_risks)} 项风险"
+            if norm_lang != "en"
+            else f"Classic audit completed, found {len(normalized_risks)} risks"
+        )
+        if parse_failed or response_empty:
+            summary = (
+                "经典审计未返回可解析 JSON，结果可能不完整"
+                if norm_lang != "en"
+                else "Classic audit did not return parseable JSON and may be incomplete"
+            )
+    legal_issues: List[Dict[str, Any]] = []
+    if parse_failed or response_empty:
+        legal_issues.append(
+            {
+                "risk_id": "classic_parse",
+                "message": (
+                    f"LLM 未返回可解析 JSON（completion_tokens={completion_tokens}/{attempt['max_tokens']}），审计结果可能不完整"
+                    if norm_lang != "en"
+                    else f"LLM did not return parseable JSON (completion_tokens={completion_tokens}/{attempt['max_tokens']}), audit result may be incomplete"
+                ),
+            }
+        )
+    if response_truncated:
+        legal_issues.append(
+            {
+                "risk_id": "classic_truncation",
+                "message": (
+                    f"LLM 响应被 max_tokens={attempt['max_tokens']} 截断，部分风险可能丢失"
+                    if norm_lang != "en"
+                    else f"LLM response was truncated at max_tokens={attempt['max_tokens']}, some risks may be missing"
+                ),
+            }
+        )
     audit = {
         "summary": summary,
         "executive_opinion": [],
         "risk_summary": risk_summary,
         "risks": normalized_risks,
         "citations": _enrich_citations(evidence_items, evidence_items),
-        "legal_validation": {"ok": True, "issues": []},
+        "legal_validation": {
+            "ok": len(legal_issues) == 0,
+            "issues": legal_issues,
+        },
     }
     return {
         "audit": audit,
@@ -236,9 +633,16 @@ def _build_classic_audit(
             "memory_mode": False,
             "memory_mode_enabled": False,
             "execution_path": "classic",
-            "memory_llm_call_count": 1,
+            "memory_llm_call_count": 1 + (1 if retry_used else 0),
             "memory_report_risk_count": len(normalized_risks),
-            "memory_validation_ok": True,
+            "memory_validation_ok": len(legal_issues) == 0,
+            "classic_parse_failed": parse_failed,
+            "classic_response_truncated": response_truncated,
+            "classic_completion_tokens": completion_tokens,
+            "classic_prompt_tokens": prompt_tokens,
+            "classic_max_tokens": int(attempt["max_tokens"]),
+            "classic_retry_used": retry_used,
+            "parse_failed_clauses": 1 if parse_failed else 0,
         },
         "raw": {"mode": "classic"},
     }
@@ -317,6 +721,49 @@ def get_regulation_pack_fingerprint(
     }
 
 
+def _run_classic_multipass_audit(
+    cfg: Dict[str, Any],
+    llm,
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    evidence_items: List[Dict[str, Any]],
+    retrieval_opts: Dict[str, Any],
+    audit_id: str,
+) -> Dict[str, Any]:
+    runtime_cfg = _get_memory_runtime_config(cfg)
+    max_calls = max(1, int(runtime_cfg.get(
+        "memory_max_llm_calls_per_audit") or 12))
+    clause_chunks = _chunk_preview_clauses(
+        preview_clauses, max_calls=max_calls)
+    if len(clause_chunks) <= 1:
+        return _build_classic_audit(
+            cfg=cfg,
+            llm=llm,
+            text=text,
+            lang=lang,
+            preview_clauses=preview_clauses,
+            evidence_items=evidence_items,
+            retrieval_opts=retrieval_opts,
+            audit_id=audit_id,
+        )
+    chunk_results: List[Dict[str, Any]] = []
+    for index, clause_chunk in enumerate(clause_chunks, start=1):
+        chunk_results.append(
+            _build_classic_audit(
+                cfg=cfg,
+                llm=llm,
+                text=text,
+                lang=lang,
+                preview_clauses=clause_chunk,
+                evidence_items=evidence_items,
+                retrieval_opts=retrieval_opts,
+                audit_id=f"{audit_id}_chunk_{index}",
+            )
+        )
+    return _aggregate_classic_results(chunk_results, lang=lang)
+
+
 def audit_contract(
     cfg: Dict[str, Any],
     llm,
@@ -357,6 +804,50 @@ def audit_contract(
         page_count=meta.get("page_count")
     )
     _report("extract_done", 30, "extract complete")
+    requested_mode = _requested_audit_mode(retrieval_options)
+    if requested_mode in SKILL_AUDIT_MODES:
+        logger.info(
+            "audit_skill_orchestrated_start",
+            file=file_path,
+            audit_id=audit_id,
+            requested_mode=requested_mode,
+            clause_count=len(preview_clauses),
+        )
+        _report("auditing", 45, "running skill orchestrated audit")
+        skill_embedder = embedder
+        if skill_embedder is None:
+            try:
+                skill_embedder = _get_memory_embedder(lang, cfg)
+            except TypeError:
+                skill_embedder = _get_memory_embedder()
+        result = _run_skill_orchestrated_audit(
+            cfg=cfg,
+            llm=llm,
+            file_path=file_path,
+            text=text,
+            lang=lang,
+            preview_clauses=preview_clauses,
+            embedder=skill_embedder,
+            progress_cb=progress_cb,
+        )
+        result_meta = result.get("meta") if isinstance(
+            result.get("meta"), dict) else {}
+        result_meta.update(
+            {
+                "retrieval_mode": requested_mode,
+                "ocr_used": bool(meta.get("ocr_used")),
+                "ocr_engine": str(meta.get("ocr_engine") or ""),
+                "page_count": _safe_int(meta.get("page_count"), 0),
+                "llm_model": (cfg.get("llm_config") or {}).get("model", ""),
+                "preview_clause_total": len(preview_clauses),
+                "evidence_count": len((result.get("audit") or {}).get("citations") or []),
+                "retrieval_queries": 0,
+                "audit_elapsed_ms": int((time.perf_counter() - audit_started_at) * 1000),
+            }
+        )
+        result["meta"] = result_meta
+        _report("done", 100, "skill audit complete")
+        return result
     opts = _normalize_retrieval_options(retrieval_options)
     _report("retrieval", 40, "retrieving evidence")
     retrieval_embedder = embedder
@@ -425,6 +916,41 @@ def audit_contract(
         "memory_disable_fallback_on_error", True))
     execution_path = "memory"
     memory_result: Dict[str, Any] = {}
+    use_classic_multipass = len(
+        preview_clauses) > CLASSIC_MULTIPASS_TRIGGER_CLAUSES
+
+    def _run_classic_path(path_name: str) -> Dict[str, Any]:
+        if use_classic_multipass:
+            result = _run_classic_multipass_audit(
+                cfg=cfg,
+                llm=llm,
+                text=text,
+                lang=lang,
+                preview_clauses=preview_clauses,
+                evidence_items=evidence_items,
+                retrieval_opts=opts,
+                audit_id=audit_id,
+            )
+        else:
+            result = _build_classic_audit(
+                cfg=cfg,
+                llm=llm,
+                text=text,
+                lang=lang,
+                preview_clauses=preview_clauses,
+                evidence_items=evidence_items,
+                retrieval_opts=opts,
+                audit_id=audit_id,
+            )
+        result_meta = result.get("meta") if isinstance(
+            result.get("meta"), dict) else {}
+        result_meta["execution_path"] = path_name
+        result["meta"] = result_meta
+        raw = result.get("raw") if isinstance(result.get("raw"), dict) else {}
+        raw["mode"] = path_name
+        result["raw"] = raw
+        return result
+
     _report("auditing", 70, "auditing clauses")
     if memory_enabled:
         logger.info("audit_memory_enabled", file=file_path,
@@ -437,17 +963,8 @@ def audit_contract(
                 raise
             logger.warning("memory_audit_import_failed_fallback_to_classic",
                            audit_id=audit_id, error=str(e))
-            memory_result = _build_classic_audit(
-                cfg=cfg,
-                llm=llm,
-                text=text,
-                lang=lang,
-                preview_clauses=preview_clauses,
-                evidence_items=evidence_items,
-                retrieval_opts=opts,
-                audit_id=audit_id,
-            )
-            execution_path = "classic_fallback"
+            execution_path = "classic_multipass_fallback" if use_classic_multipass else "classic_fallback"
+            memory_result = _run_classic_path(execution_path)
             _report("audit_done", 90, "audit complete")
             memory_meta = memory_result.get("meta") if isinstance(
                 memory_result.get("meta"), dict) else {}
@@ -579,31 +1096,13 @@ def audit_contract(
                 raise
             logger.warning("memory_audit_failed_fallback_to_classic",
                            audit_id=audit_id, error=str(e))
-            memory_result = _build_classic_audit(
-                cfg=cfg,
-                llm=llm,
-                text=text,
-                lang=lang,
-                preview_clauses=preview_clauses,
-                evidence_items=evidence_items,
-                retrieval_opts=opts,
-                audit_id=audit_id,
-            )
-            execution_path = "classic_fallback"
+            execution_path = "classic_multipass_fallback" if use_classic_multipass else "classic_fallback"
+            memory_result = _run_classic_path(execution_path)
     else:
         logger.info("audit_memory_disabled_use_classic",
                     audit_id=audit_id, file=file_path)
-        memory_result = _build_classic_audit(
-            cfg=cfg,
-            llm=llm,
-            text=text,
-            lang=lang,
-            preview_clauses=preview_clauses,
-            evidence_items=evidence_items,
-            retrieval_opts=opts,
-            audit_id=audit_id,
-        )
-        execution_path = "classic"
+        execution_path = "classic_multipass" if use_classic_multipass else "classic"
+        memory_result = _run_classic_path(execution_path)
     _report("audit_done", 90, "audit complete")
     memory_meta = memory_result.get("meta") if isinstance(
         memory_result.get("meta"), dict) else {}

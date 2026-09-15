@@ -108,6 +108,72 @@ class FakeLLMArticleFormatVariant:
         )
 
 
+class FakeLLMInvalidJson:
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, overrides=None):
+        self.calls += 1
+        max_tokens = int((overrides or {}).get("max_tokens") or 0)
+        return (
+            "reasoning only with no json body",
+            {
+                "model": "fake",
+                "usage": {
+                    "prompt_tokens": 120,
+                    "completion_tokens": max_tokens or 64,
+                    "total_tokens": 120 + (max_tokens or 64),
+                },
+                "choices": [{"finish_reason": "length"}],
+            },
+        )
+
+
+class FakeLLMMultipass:
+    def __init__(self):
+        self.audit_prompts = []
+
+    def chat(self, messages, overrides=None):
+        user = messages[-1]["content"] if messages else ""
+        self.audit_prompts.append(user)
+        clause_id = "c-unknown"
+        for token in user.split():
+            if token.startswith("[c"):
+                clause_id = token.strip("[]")
+                break
+        suffix = clause_id.replace("c", "")
+        return (
+            json.dumps(
+                {
+                    "summary": f"chunk {clause_id}",
+                    "risks": [
+                        {
+                            "level": "medium",
+                            "issue": f"risk-{suffix}",
+                            "suggestion": "clarify clause",
+                            "citation_id": "c1",
+                            "law_title": "中华人民共和国民法典",
+                            "article_no": "第五百条",
+                            "evidence": f"evidence-{suffix}",
+                            "confidence": 0.8,
+                            "clause_id": clause_id,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+            {
+                "model": "fake",
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 80,
+                    "total_tokens": 180,
+                },
+                "choices": [{"finish_reason": "stop"}],
+            },
+        )
+
+
 def test_audit_contract_memory_mode(monkeypatch, tmp_path: Path):
     def fake_extract(_cfg, _file_path):
         text = "第一条 甲方应在10日内开具发票。\nArticle 2 supplier shall issue invoice."
@@ -1209,3 +1275,245 @@ def test_memory_llm_budget_prioritizes_high_risk_clause(monkeypatch, tmp_path: P
                ["memory_llm_guard_skipped_low_priority_calls"]) >= 0
     assert int(result["meta"]["memory_llm_called_high_priority_clauses"]) >= 0
     assert len(llm.audit_prompts) <= 1
+
+
+def test_classic_audit_marks_invalid_json_as_failed(monkeypatch, tmp_path: Path):
+    def fake_extract(_cfg, _file_path):
+        return "第一条 甲方应在10日内开具发票。", {"ocr_used": False, "ocr_engine": "", "page_count": 1}
+
+    def fake_retrieve(_cfg, _text, _lang, _opts, embedder=None, reranker=None):
+        return {
+            "used": True,
+            "queries": ["发票"],
+            "query_success": 1,
+            "query_failed": 0,
+            "chunk_total": 1,
+            "failed_chunks": [],
+            "items": [
+                {
+                    "citation_id": "c1",
+                    "law_title": "中华人民共和国增值税暂行条例",
+                    "title": "中华人民共和国增值税暂行条例",
+                    "article_no": "第十九条",
+                    "excerpt": "纳税义务发生时间",
+                    "content": "纳税义务发生时间",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(ca, "extract_text_with_config", fake_extract)
+    monkeypatch.setattr(ca, "_retrieve_regulation_evidence", fake_retrieve)
+    monkeypatch.setattr(ca, "_get_memory_embedder", lambda: FakeEmbedder())
+
+    cfg = {
+        "data_dir": str(tmp_path / "data"),
+        "memory_dir": str(tmp_path / "memory"),
+        "llm_config": {"model": "fake", "timeout": 8},
+        "memory_runtime_config": {
+            "memory_module_enabled": False,
+            "memory_mode_when_disabled": "classic",
+            "memory_disable_fallback_on_error": True,
+        },
+    }
+    f = tmp_path / "dummy.docx"
+    f.write_text("x", encoding="utf-8")
+    llm = FakeLLMInvalidJson()
+    result = ca.audit_contract(
+        cfg=cfg,
+        llm=llm,
+        file_path=str(f),
+        lang="zh",
+        retrieval_options={"audit_mode": "rag"},
+    )
+
+    assert result["meta"]["execution_path"] == "classic"
+    assert result["meta"]["memory_validation_ok"] is False
+    assert result["meta"]["classic_parse_failed"] is True
+    assert result["audit"]["legal_validation"]["ok"] is False
+    assert result["audit"]["legal_validation"]["issues"]
+    assert llm.calls == 2
+
+
+def test_classic_audit_uses_multipass_for_long_contract(monkeypatch, tmp_path: Path):
+    def fake_extract(_cfg, _file_path):
+        return "dummy text", {"ocr_used": False, "ocr_engine": "", "page_count": 3}
+
+    def fake_retrieve(_cfg, _text, _lang, _opts, embedder=None, reranker=None):
+        return {
+            "used": True,
+            "queries": ["付款", "违约"],
+            "query_success": 2,
+            "query_failed": 0,
+            "chunk_total": 2,
+            "failed_chunks": [],
+            "items": [
+                {
+                    "citation_id": "c1",
+                    "law_title": "中华人民共和国民法典",
+                    "title": "中华人民共和国民法典",
+                    "article_no": "第五百条",
+                    "excerpt": "违约责任",
+                    "content": "违约责任",
+                }
+            ],
+        }
+
+    preview_clauses = [
+        {
+            "clause_id": f"c{i}",
+            "title": f"条款{i}",
+            "clause_path": f"第{i}条",
+            "clause_text": f"这是第{i}条的内容，包含付款和违约责任。",
+            "page_no": (i // 4) + 1,
+            "paragraph_no": str(i),
+            "anchor_id": f"a{i}",
+        }
+        for i in range(1, 13)
+    ]
+
+    monkeypatch.setattr(ca, "extract_text_with_config", fake_extract)
+    monkeypatch.setattr(ca, "_retrieve_regulation_evidence", fake_retrieve)
+    monkeypatch.setattr(ca, "_get_memory_embedder", lambda: FakeEmbedder())
+    monkeypatch.setattr(ca, "build_preview_clauses",
+                        lambda _text: preview_clauses)
+
+    cfg = {
+        "data_dir": str(tmp_path / "data"),
+        "memory_dir": str(tmp_path / "memory"),
+        "llm_config": {"model": "fake", "timeout": 8},
+        "memory_runtime_config": {
+            "memory_module_enabled": False,
+            "memory_mode_when_disabled": "classic",
+            "memory_disable_fallback_on_error": True,
+            "memory_max_llm_calls_per_audit": 3,
+        },
+    }
+    f = tmp_path / "dummy.docx"
+    f.write_text("x", encoding="utf-8")
+    llm = FakeLLMMultipass()
+    result = ca.audit_contract(
+        cfg=cfg,
+        llm=llm,
+        file_path=str(f),
+        lang="zh",
+        retrieval_options={"audit_mode": "rag"},
+    )
+
+    assert result["meta"]["execution_path"] == "classic_multipass"
+    assert result["raw"]["mode"] == "classic_multipass"
+    assert result["meta"]["memory_llm_call_count"] == 3
+    assert len(result["audit"]["risks"]) == 3
+    assert result["audit"]["risk_summary"]["medium"] == 3
+
+
+def test_normalize_skill_risk_item_maps_to_current_ui_fields():
+    item = {
+        "risk_category": "法律合规",
+        "risk_level": "high",
+        "issue": "违约责任明显失衡",
+        "original_clause_quote": "乙方承担全部损失",
+        "amendment_suggestion": "补充双方责任边界",
+        "legal_basis": {
+            "law_title": "中华人民共和国民法典",
+            "article_no": "第五百七十七条",
+            "article_content": "当事人一方不履行合同义务...",
+        },
+        "source_skills": ["skill_law_compliance"],
+        "cross_validated": True,
+        "clause_location": "第5条",
+    }
+
+    normalized = ca._normalize_skill_risk_item(item)
+
+    assert normalized["level"] == "high"
+    assert normalized["type"] == "法律合规"
+    assert normalized["issue"] == "违约责任明显失衡"
+    assert normalized["evidence"] == "乙方承担全部损失"
+    assert normalized["suggestion"] == "补充双方责任边界"
+    assert normalized["basis"] == "中华人民共和国民法典 第五百七十七条"
+    assert normalized["law_title"] == "中华人民共和国民法典"
+    assert normalized["article_no"] == "第五百七十七条"
+    assert normalized["source_skills"] == ["skill_law_compliance"]
+    assert normalized["cross_validated"] is True
+
+
+def test_audit_contract_routes_to_skill_orchestrated_mode(monkeypatch, tmp_path: Path):
+    def fake_extract(_cfg, _file_path):
+        return "第一条 乙方承担全部损失。", {"ocr_used": False, "ocr_engine": "", "page_count": 1}
+
+    preview_clauses = [
+        {
+            "clause_id": "c1",
+            "title": "违约责任",
+            "clause_path": "第1条",
+            "clause_text": "乙方承担全部损失。",
+            "page_no": 1,
+            "paragraph_no": "1",
+            "anchor_id": "a1",
+        }
+    ]
+
+    def fake_skill_audit(**kwargs):
+        return {
+            "audit": {
+                "summary": "高级技能审计完成",
+                "executive_opinion": [],
+                "risk_summary": {"high": 1, "medium": 0, "low": 0},
+                "risks": [
+                    {
+                        "level": "high",
+                        "type": "法律合规",
+                        "issue": "违约责任明显失衡",
+                        "evidence": "乙方承担全部损失。",
+                        "suggestion": "补充责任边界",
+                        "basis": "中华人民共和国民法典 第五百七十七条",
+                        "law_reference": "中华人民共和国民法典 第五百七十七条",
+                        "location": {
+                            "risk_id": "r1",
+                            "clause_id": "c1",
+                            "anchor_id": "a1",
+                            "page_no": 1,
+                            "paragraph_no": "1",
+                            "clause_path": "第1条",
+                            "quote": "乙方承担全部损失。",
+                            "score": 1.0,
+                        },
+                    }
+                ],
+                "citations": [],
+            },
+            "meta": {
+                "execution_path": "skill_orchestrated",
+                "memory_llm_call_count": 4,
+                "memory_report_risk_count": 1,
+                "memory_validation_ok": True,
+            },
+            "raw": {"mode": "skill_orchestrated", "report_id": "RPT-TEST"},
+        }
+
+    monkeypatch.setattr(ca, "extract_text_with_config", fake_extract)
+    monkeypatch.setattr(ca, "build_preview_clauses",
+                        lambda _text: preview_clauses)
+    monkeypatch.setattr(ca, "_run_skill_orchestrated_audit", fake_skill_audit)
+
+    cfg = {
+        "data_dir": str(tmp_path / "data"),
+        "memory_dir": str(tmp_path / "memory"),
+        "llm_config": {"model": "fake-skill-model", "timeout": 8},
+    }
+    f = tmp_path / "dummy.docx"
+    f.write_text("x", encoding="utf-8")
+
+    result = ca.audit_contract(
+        cfg=cfg,
+        llm=object(),
+        file_path=str(f),
+        lang="zh",
+        retrieval_options={"audit_mode": "skill_orchestrated"},
+    )
+
+    assert result["meta"]["execution_path"] == "skill_orchestrated"
+    assert result["meta"]["retrieval_mode"] == "skill_orchestrated"
+    assert result["meta"]["preview_clause_total"] == 1
+    assert result["audit"]["risk_summary"]["high"] == 1
+    assert result["raw"]["mode"] == "skill_orchestrated"

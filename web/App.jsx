@@ -887,6 +887,7 @@ export default function App() {
               >
                 <option value="rag">{t.modeRag}</option>
                 <option value="baseline">{t.modeBaseline}</option>
+                <option value="skill_orchestrated">{t.modeSkillOrchestrated}</option>
               </select>
             </label>
             <label>

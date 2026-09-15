@@ -9,7 +9,6 @@ import json
 import structlog
 from datetime import datetime
 from typing import Dict, Any, Tuple
-from app.services.contract_audit_modules.memory_pipeline.cleanup import cleanup_debug_tree
 
 logger = structlog.get_logger(__name__)
 
@@ -93,6 +92,7 @@ def _audit_file_tag(v: Any) -> str:
 
 
 def write_round_trace(cfg: Dict[str, Any], round_no: int, action: str, payload: Dict[str, Any], memory_dir: str = "") -> None:
+    from app.services.contract_audit_modules.memory_pipeline.cleanup import cleanup_debug_tree
     opts = round_trace_options(cfg, memory_dir)
     if not opts["enabled"]:
         return
@@ -121,6 +121,7 @@ def write_round_trace(cfg: Dict[str, Any], round_no: int, action: str, payload: 
 
 def write_audit_trace(cfg: Dict[str, Any], event: str, payload: Dict[str, Any], memory_dir: str = "") -> None:
     """写入单条审计追踪日志到独立文件。"""
+    from app.services.contract_audit_modules.memory_pipeline.cleanup import cleanup_debug_tree
     opts = audit_trace_options(cfg, memory_dir)
     if not opts["enabled"]:
         return

@@ -1,0 +1,244 @@
+# ============================================================================
+# 合同审计Skill体系全局配置文件
+# Contract Audit Skill System - Global Configuration
+# 每个Skill独立开关、绑定工具列表、RAG库路径、Prompt模板路径、执行优先级
+# ============================================================================
+
+# --- 系统级配置 ---
+system:
+  name: "contract-audit-skill-system"
+  version: "1.0.0"
+  # llama.cpp端侧大模型推理参数默认值
+  llm_defaults:
+    provider: "llama_cpp"          # 底层推理provider（兼容现有llm.py的provider路由）
+    temperature: 0.1               # 低温度减少幻觉
+    max_tokens: 2048               # 单次推理最大token数
+    context_window: 8192           # 上下文窗口大小（n_ctx）
+    top_p: 0.85
+    enable_thinking: false         # 端侧量化模型关闭思考链以加速
+  # 合同文本分块配置（防止llama.cpp上下文溢出）
+  text_chunking:
+    max_chunk_chars: 3000          # 单块最大字符数
+    overlap_chars: 400             # 块间重叠字符数
+    max_chunks_per_skill: 8        # 每个Skill最多送入的文本块数
+  # 交叉校验配置
+  cross_validation:
+    enabled: true                  # 是否开启双Skill交叉校验
+    min_agreement_skills: 2        # 至少2个Skill同意才标记为正式风险
+    auto_downgrade_single: true    # 单一Skill发现的风险自动降级为人工复核
+
+# --- Skill定义（按执行优先级排序） ---
+skills:
+  # Skill 0: 前置文本解析（必跑前置流水线）
+  - id: "skill_text_parser"
+    name: "前置文本解析"
+    name_en: "Text Parser"
+    enabled: true
+    priority: 0                    # 最高优先级，最先执行
+    description: "清洗格式、拆分主合同/附件、抽取结构化要素（甲乙主体、标的、金额、期限、付款节点、违约条款位置索引）"
+    prompt_template: "templates/skill_text_parser.j2"
+    rag_store: null                # 纯文本处理，不检索知识库
+    bound_tools:
+      - "ocr_text_extract"         # OCR工具
+      - "regex_amount_extract"     # 正则金额提取
+      - "text_chunk_splitter"      # 文本分块工具
+    output_schema:
+      type: "structured_contract_metadata"
+      required_fields:
+        - "contract_type"          # 合同类型：purchase/sales/lease/labor/engineering
+        - "parties"                # 甲乙主体信息
+        - "subject_matter"         # 标的
+        - "total_amount"           # 总金额
+        - "currency"               # 币种
+        - "effective_date"         # 生效日期
+        - "expiry_date"            # 到期日期
+        - "payment_terms"          # 付款节点列表
+        - "breach_clause_index"    # 违约条款位置索引
+        - "chapters"               # 章节结构
+
+  # Skill 1: 法律合规审查
+  - id: "skill_law_compliance"
+    name: "法律合规审查"
+    name_en: "Law Compliance"
+    enabled: true
+    priority: 1
+    description: "民法典/行业法规校验、无效条款、资质风险、知识产权、保密竞业、强制性法条冲突识别"
+    prompt_template: "templates/skill_law_compliance.j2"
+    rag_store: "rag_store/law_compliance"
+    rag_config:
+      collection_name: "law_compliance"
+      top_k: 8                     # 检索返回条数
+      similarity_threshold: 0.55   # 相似度阈值
+    bound_tools:
+      - "business_entity_verify"   # 工商主体核验
+      - "legal_keyword_matcher"    # 法条关键词匹配
+    cross_validate_with:           # 与哪些Skill交叉校验
+      - "skill_dispute_breach"
+    output_schema:
+      type: "risk_assessment"
+      required_fields:
+        - "risks"                  # 风险列表
+        - "original_clause_quote"  # 原文定位
+        - "legal_basis"            # 对应法条
+        - "risk_level"             # high/medium/low/pending
+        - "amendment_suggestion"   # 修改建议
+
+  # Skill 2: 商务权责审计
+  - id: "skill_business_clause"
+    name: "商务权责审计"
+    name_en: "Business Clause Audit"
+    enabled: true
+    priority: 2
+    description: "付款节点、验收标准、保证金、调价机制、履约边界模糊条款识别"
+    prompt_template: "templates/skill_business.j2"
+    rag_store: "rag_store/business_clause"
+    rag_config:
+      collection_name: "business_clause"
+      top_k: 6
+      similarity_threshold: 0.55
+    bound_tools:
+      - "amount_case_compare"      # 金额大小写比对
+      - "payment_schedule_calc"    # 账期计算器
+    cross_validate_with:
+      - "skill_tax_finance"
+    output_schema:
+      type: "risk_assessment"
+      required_fields:
+        - "risks"
+        - "original_clause_quote"
+        - "business_impact"        # 商务影响分析
+        - "risk_level"
+        - "amendment_suggestion"
+
+  # Skill 3: 财税票据审计
+  - id: "skill_tax_finance"
+    name: "财税票据审计"
+    name_en: "Tax & Finance Audit"
+    enabled: true
+    priority: 3
+    description: "发票约定、含税/不含税、税费承担、印花税、抵扣风险"
+    prompt_template: "templates/skill_tax_finance.j2"
+    rag_store: "rag_store/tax_finance"
+    rag_config:
+      collection_name: "tax_finance"
+      top_k: 8
+      similarity_threshold: 0.55
+    bound_tools:
+      - "tax_rate_calculator"      # 税率计算
+      - "stamp_duty_estimator"     # 印花税测算
+    cross_validate_with:
+      - "skill_business_clause"
+    output_schema:
+      type: "risk_assessment"
+      required_fields:
+        - "risks"
+        - "original_clause_quote"
+        - "tax_basis"              # 税法依据
+        - "risk_level"
+        - "amendment_suggestion"
+
+  # Skill 4: 违约&争议解决
+  - id: "skill_dispute_breach"
+    name: "违约&争议解决"
+    name_en: "Dispute & Breach"
+    enabled: true
+    priority: 4
+    description: "仲裁/管辖有效性、违约金过高/过低、单方解除权、损失追偿缺失"
+    prompt_template: "templates/skill_dispute_breach.j2"
+    rag_store: "rag_store/dispute_break"
+    rag_config:
+      collection_name: "dispute_breach"
+      top_k: 8
+      similarity_threshold: 0.55
+    bound_tools:
+      - "statute_limitation_calc"  # 诉讼时效计算器
+      - "penalty_cap_estimator"    # 违约金上限测算
+    cross_validate_with:
+      - "skill_law_compliance"
+    output_schema:
+      type: "risk_assessment"
+      required_fields:
+        - "risks"
+        - "original_clause_quote"
+        - "legal_basis"
+        - "risk_level"
+        - "amendment_suggestion"
+
+  # Skill 5: 风险汇总分级（后置汇总）
+  - id: "skill_risk_summary"
+    name: "风险汇总分级"
+    name_en: "Risk Summary & Grading"
+    enabled: true
+    priority: 99                   # 最低优先级，最后执行
+    description: "合并所有上游Skill风险、去重、分级排序、生成标准化审计报告、交叉校验冲突风险"
+    prompt_template: "templates/skill_risk_summary.j2"
+    rag_store: "rag_store/risk_history"
+    rag_config:
+      collection_name: "risk_history"
+      top_k: 5
+      similarity_threshold: 0.45
+    bound_tools:
+      - "risk_ledger_writer"       # 风险台账写入工具
+      - "report_exporter"          # 报告导出工具
+    is_summary_skill: true         # 标记为汇总Skill
+    output_schema:
+      type: "audit_report"
+      required_fields:
+        - "report_id"
+        - "contract_info"
+        - "risk_summary"           # 风险汇总统计
+        - "risk_items"             # 去重后的风险列表
+        - "cross_validation_notes" # 交叉校验备注
+        - "overall_risk_level"     # 综合风险等级
+        - "executive_summary"      # 审计摘要
+        - "detailed_suggestions"   # 详细修改建议
+
+# --- 合同类型 → Skill路由映射 ---
+# 根据Skill0输出的合同类型，自动加载对应Skill组合
+contract_type_routing:
+  purchase:    # 采购合同
+    skills: ["skill_law_compliance", "skill_business_clause", "skill_tax_finance", "skill_dispute_breach"]
+    high_risk_review: true         # 高风险项开启二次复核
+  sales:       # 销售合同
+    skills: ["skill_law_compliance", "skill_business_clause", "skill_tax_finance", "skill_dispute_breach"]
+    high_risk_review: true
+  lease:       # 租赁合同
+    skills: ["skill_law_compliance", "skill_business_clause", "skill_tax_finance"]
+    high_risk_review: false
+  labor:       # 劳务合同
+    skills: ["skill_law_compliance", "skill_business_clause"]
+    high_risk_review: false
+  engineering: # 工程合同
+    skills: ["skill_law_compliance", "skill_business_clause", "skill_tax_finance", "skill_dispute_breach"]
+    high_risk_review: true
+  default:     # 未识别类型默认加载全部
+    skills: ["skill_law_compliance", "skill_business_clause", "skill_tax_finance", "skill_dispute_breach"]
+    high_risk_review: true
+
+# --- 幻觉抑制配置 ---
+hallucination_guard:
+  # 所有Skill Prompt强制增加的端侧大模型专属约束
+  mandatory_constraints:
+    - "你当前运行在本地llama.cpp，模型为端侧大模型量化版，上下文长度有限，仅聚焦当前分配的审计子任务，不要拓展无关法律内容"
+    - "所有风险判断必须附带合同原文精确片段作为证据，无原文支撑不得标记风险"
+    - "输出严格使用指定JSON格式，禁止额外解释、前言、总结类冗余自然语言"
+    - "若合同信息不足无法判定风险，统一输出风险等级：pending，等待人工复核，禁止主观猜测"
+    - "引用法规仅使用当前Skill专属RAG检索到的内容，不得记忆内部过时法条"
+  # 自检指令：输出风险后自动反向核验
+  self_check_instructions:
+    - "逐条检查：该风险是否有合同原文片段作为支撑？"
+    - "逐条检查：引用的法规是否来自本次RAG检索结果？"
+    - "若无原文依据或法条支撑，必须将risk_level降级为pending"
+
+# --- RAG全局配置 ---
+rag:
+  base_path: "rag_store"           # 各Skill RAG库根目录（相对于本配置文件所在目录）
+  embedding_model: "default"       # 使用项目全局embedding模型
+  chunk_size: 800                  # RAG入库文本分块大小
+  chunk_overlap: 150               # 分块重叠
+
+# --- 工具注册中心配置 ---
+tools:
+  registry_module: "tools.registry"  # 工具注册模块路径
+  strict_json_io: true             # 严格JSON入参出参
+  function_call_prefix: "FUNC_CALL:" # 端侧大模型工具调用标记前缀（非标准function calling，使用文本标记）
