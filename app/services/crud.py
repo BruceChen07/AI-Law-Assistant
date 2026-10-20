@@ -134,13 +134,13 @@ def create_document_digitization_record(cfg, payload):
     cur.execute(
         """
         INSERT INTO document_digitization(
-            id, document_id, version_no, status, source_file_path, source_ext,
+            id, document_id, version_no, status, source_file_path, source_sha256, source_ext,
             digitized_docx_path, artifact_dir, md_path, middle_path, content_list_path,
             ocr_engine, ocr_used, layout_retained, source_text_length, digitized_text_length,
             text_match_ratio, paragraph_count, table_count, image_count, page_count, note,
             created_at, updated_at
         )
-        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         (
             data.get("id"),
@@ -148,6 +148,7 @@ def create_document_digitization_record(cfg, payload):
             int(data.get("version_no") or 0),
             str(data.get("status") or "done"),
             str(data.get("source_file_path") or ""),
+            str(data.get("source_sha256") or ""),
             str(data.get("source_ext") or ""),
             str(data.get("digitized_docx_path") or ""),
             str(data.get("artifact_dir") or ""),
@@ -203,6 +204,27 @@ def get_latest_successful_document_digitization_by_document(cfg, document_id):
         LIMIT 1
         """,
         (document_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_latest_successful_document_digitization_by_source_hash(cfg, source_sha256):
+    digest = str(source_sha256 or "").strip().lower()
+    if not digest:
+        return None
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT *
+        FROM document_digitization
+        WHERE source_sha256=? AND status='done'
+        ORDER BY created_at DESC, version_no DESC
+        LIMIT 1
+        """,
+        (digest,),
     )
     row = cur.fetchone()
     conn.close()

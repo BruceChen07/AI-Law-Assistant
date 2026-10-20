@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import hashlib
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -18,6 +19,7 @@ from app.core.utils import extract_text_with_config
 from app.services.crud import (
     create_document_digitization_record,
     get_latest_successful_document_digitization_by_document,
+    get_latest_successful_document_digitization_by_source_hash,
     get_next_document_digitization_version,
 )
 
@@ -391,6 +393,74 @@ def _digitized_docx_name(source_file_path: str) -> str:
     return f"{stem}_digitized.docx"
 
 
+def _compute_file_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _is_reusable_digitization_record(record: Optional[Dict[str, Any]], *, source_file_path: str, source_sha256: str) -> bool:
+    row = record if isinstance(record, dict) else {}
+    cached_docx = str(row.get("digitized_docx_path") or "")
+    if not cached_docx or not os.path.exists(cached_docx):
+        return False
+    cached_sha256 = str(row.get("source_sha256") or "").strip().lower()
+    if cached_sha256 and cached_sha256 == str(source_sha256 or "").strip().lower():
+        return True
+    cached_source = str(row.get("source_file_path") or "")
+    return bool(cached_source) and cached_source == source_file_path
+
+
+def _build_reused_digitization_record(
+    *,
+    cfg: Dict[str, Any],
+    document_id: str,
+    source_file_path: str,
+    source_sha256: str,
+    shared_record: Dict[str, Any],
+) -> Dict[str, Any]:
+    version_no = get_next_document_digitization_version(cfg, document_id)
+    now = _utc_now_iso()
+    reused_record = {
+        "id": f"{document_id}::digitize::{version_no}",
+        "document_id": document_id,
+        "version_no": version_no,
+        "status": "done",
+        "source_file_path": source_file_path,
+        "source_sha256": source_sha256,
+        "source_ext": str(shared_record.get("source_ext") or ".pdf"),
+        "digitized_docx_path": str(shared_record.get("digitized_docx_path") or ""),
+        "artifact_dir": str(shared_record.get("artifact_dir") or ""),
+        "md_path": str(shared_record.get("md_path") or ""),
+        "middle_path": str(shared_record.get("middle_path") or ""),
+        "content_list_path": str(shared_record.get("content_list_path") or ""),
+        "ocr_engine": str(shared_record.get("ocr_engine") or "mineru"),
+        "ocr_used": int(shared_record.get("ocr_used") or 1),
+        "layout_retained": int(shared_record.get("layout_retained") or 1),
+        "source_text_length": int(shared_record.get("source_text_length") or 0),
+        "digitized_text_length": int(shared_record.get("digitized_text_length") or 0),
+        "text_match_ratio": float(shared_record.get("text_match_ratio") or 0),
+        "paragraph_count": int(shared_record.get("paragraph_count") or 0),
+        "table_count": int(shared_record.get("table_count") or 0),
+        "image_count": int(shared_record.get("image_count") or 0),
+        "page_count": int(shared_record.get("page_count") or 0),
+        "note": f"reused_from_document_id={shared_record.get('document_id') or ''};source_sha256={source_sha256}",
+        "created_at": now,
+        "updated_at": now,
+    }
+    create_document_digitization_record(cfg, reused_record)
+    reused_record["digitization_used"] = True
+    reused_record["reused"] = True
+    reused_record["reused_from_document_id"] = str(shared_record.get("document_id") or "")
+    reused_record["reused_from_version_no"] = int(shared_record.get("version_no") or 0)
+    return reused_record
+
+
 def ensure_digitized_docx(
     cfg: Dict[str, Any],
     *,
@@ -404,6 +474,7 @@ def ensure_digitized_docx(
             "status": "skipped",
             "document_id": document_id,
             "source_file_path": source_file_path,
+            "source_sha256": "",
             "source_ext": ext,
             "digitized_docx_path": source_file_path,
             "digitization_used": False,
@@ -411,15 +482,32 @@ def ensure_digitized_docx(
             "version_no": 0,
         }
 
+    source_sha256 = _compute_file_sha256(source_file_path)
     cached = get_latest_successful_document_digitization_by_document(cfg, document_id)
-    if cached:
-        cached_docx = str(cached.get("digitized_docx_path") or "")
-        cached_source = str(cached.get("source_file_path") or "")
-        if cached_docx and os.path.exists(cached_docx) and cached_source == source_file_path:
-            out = dict(cached)
-            out["digitization_used"] = True
-            out["reused"] = True
-            return out
+    if _is_reusable_digitization_record(cached, source_file_path=source_file_path, source_sha256=source_sha256):
+        out = dict(cached)
+        out["digitization_used"] = True
+        out["reused"] = True
+        out["source_sha256"] = source_sha256
+        return out
+
+    shared_cached = get_latest_successful_document_digitization_by_source_hash(cfg, source_sha256)
+    if _is_reusable_digitization_record(shared_cached, source_file_path=source_file_path, source_sha256=source_sha256):
+        reused_record = _build_reused_digitization_record(
+            cfg=cfg,
+            document_id=document_id,
+            source_file_path=source_file_path,
+            source_sha256=source_sha256,
+            shared_record=shared_cached,
+        )
+        logger.info(
+            "digitize_pdf_reused document_id=%s source_sha256=%s reused_from_document_id=%s reused_from_version=%s",
+            document_id,
+            source_sha256[:16],
+            reused_record.get("reused_from_document_id"),
+            reused_record.get("reused_from_version_no"),
+        )
+        return reused_record
 
     capabilities = probe_mineru_capabilities(force_refresh=True)
     if not capabilities.get("mineru_cli_found"):
@@ -461,6 +549,7 @@ def ensure_digitized_docx(
             "version_no": version_no,
             "status": "done",
             "source_file_path": source_file_path,
+            "source_sha256": source_sha256,
             "source_ext": ext,
             "digitized_docx_path": docx_path,
             "artifact_dir": output_dir,
@@ -483,9 +572,10 @@ def ensure_digitized_docx(
         }
         create_document_digitization_record(cfg, record)
         logger.info(
-            "digitize_pdf_done document_id=%s version=%s docx=%s text_ratio=%s paragraphs=%s tables=%s images=%s",
+            "digitize_pdf_done document_id=%s version=%s source_sha256=%s docx=%s text_ratio=%s paragraphs=%s tables=%s images=%s",
             document_id,
             version_no,
+            source_sha256[:16],
             docx_path,
             text_ratio,
             record["paragraph_count"],
@@ -504,6 +594,7 @@ def ensure_digitized_docx(
                 "version_no": version_no,
                 "status": "failed",
                 "source_file_path": source_file_path,
+                "source_sha256": source_sha256,
                 "source_ext": ext,
                 "digitized_docx_path": "",
                 "artifact_dir": output_dir,

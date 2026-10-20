@@ -223,6 +223,7 @@ def init_db(cfg):
         version_no INTEGER NOT NULL,
         status TEXT NOT NULL,
         source_file_path TEXT NOT NULL,
+        source_sha256 TEXT,
         source_ext TEXT NOT NULL,
         digitized_docx_path TEXT,
         artifact_dir TEXT,
@@ -251,6 +252,12 @@ def init_db(cfg):
         "CREATE INDEX IF NOT EXISTS idx_document_digitization_document_status ON document_digitization(document_id, status)")
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_document_digitization_created_at ON document_digitization(created_at)")
+    cur.execute("PRAGMA table_info(document_digitization)")
+    digitization_cols = {str(row[1]) for row in cur.fetchall()}
+    if "source_sha256" not in digitization_cols:
+        cur.execute("ALTER TABLE document_digitization ADD COLUMN source_sha256 TEXT")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_document_digitization_source_sha256_status ON document_digitization(source_sha256, status)")
 
     # Existing tables
     cur.execute("""

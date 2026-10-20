@@ -33,6 +33,7 @@ def _init_digitization_table(db_path: str):
                 version_no INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 source_file_path TEXT NOT NULL,
+                source_sha256 TEXT,
                 source_ext TEXT NOT NULL,
                 digitized_docx_path TEXT,
                 artifact_dir TEXT,
@@ -203,4 +204,74 @@ def test_ensure_digitized_docx_reuses_cached_success_record(tmp_path, monkeypatc
     assert Path(first["digitized_docx_path"]).exists()
     assert second["reused"] is True
     assert second["digitization_used"] is True
+    assert calls["extract"] == 1
+
+
+def test_ensure_digitized_docx_reuses_same_pdf_across_different_documents(tmp_path, monkeypatch):
+    cfg = _base_cfg(tmp_path)
+    Path(cfg["files_dir"]).mkdir(parents=True, exist_ok=True)
+    _init_digitization_table(cfg["db_path"])
+
+    shared_bytes = b"%PDF-1.7 same-contract"
+    source_pdf_a = tmp_path / "source-a.pdf"
+    source_pdf_b = tmp_path / "source-b.pdf"
+    source_pdf_a.write_bytes(shared_bytes)
+    source_pdf_b.write_bytes(shared_bytes)
+    calls = {"extract": 0}
+
+    def fake_probe_mineru_capabilities(force_refresh=True):
+        return {"mineru_cli_found": True}
+
+    def fake_run_mineru_extract(_source_file_path, output_dir):
+        calls["extract"] += 1
+        output = Path(output_dir)
+        output.mkdir(parents=True, exist_ok=True)
+        content_list_path = output / "content_list.json"
+        middle_path = output / "middle.json"
+        md_path = output / "result.md"
+        content_list_path.write_text("[]", encoding="utf-8")
+        middle_path.write_text("{}", encoding="utf-8")
+        md_path.write_text("# result", encoding="utf-8")
+        return {
+            "content_list_path": str(content_list_path),
+            "middle_path": str(middle_path),
+            "md_path": str(md_path),
+            "text": "Digitized text",
+        }
+
+    def fake_rebuild_docx_from_mineru_artifacts(*, output_docx_path, **_kwargs):
+        doc = Document()
+        doc.add_paragraph("Digitized text")
+        doc.save(output_docx_path)
+        return {
+            "paragraph_count": 1,
+            "table_count": 0,
+            "image_count": 0,
+            "page_count": 1,
+        }
+
+    monkeypatch.setattr(dd, "probe_mineru_capabilities", fake_probe_mineru_capabilities)
+    monkeypatch.setattr(dd, "run_mineru_extract", fake_run_mineru_extract)
+    monkeypatch.setattr(dd, "rebuild_docx_from_mineru_artifacts", fake_rebuild_docx_from_mineru_artifacts)
+    monkeypatch.setattr(dd, "extract_text_with_config", lambda _cfg, _path: ("Digitized text", {"ext": ".docx"}))
+
+    first = dd.ensure_digitized_docx(
+        cfg,
+        document_id="doc-a",
+        source_file_path=str(source_pdf_a),
+        original_filename="source-a.pdf",
+    )
+    second = dd.ensure_digitized_docx(
+        cfg,
+        document_id="doc-b",
+        source_file_path=str(source_pdf_b),
+        original_filename="source-b.pdf",
+    )
+
+    assert first["reused"] is False
+    assert second["reused"] is True
+    assert second["document_id"] == "doc-b"
+    assert second["reused_from_document_id"] == "doc-a"
+    assert second["digitized_docx_path"] == first["digitized_docx_path"]
+    assert second["source_sha256"] == first["source_sha256"]
     assert calls["extract"] == 1

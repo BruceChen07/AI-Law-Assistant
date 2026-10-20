@@ -456,8 +456,10 @@ def _build_digitization_meta(record: Optional[Dict[str, Any]]) -> Dict[str, Any]
     row = record if isinstance(record, dict) else {}
     return {
         "digitization_used": bool(row.get("digitization_used")),
+        "digitization_reused": bool(row.get("reused")),
         "digitization_status": str(row.get("status") or ""),
         "digitization_version": int(row.get("version_no") or 0),
+        "digitization_source_sha256": str(row.get("source_sha256") or ""),
         "digitized_docx_available": bool(str(row.get("digitized_docx_path") or "").strip()),
         "digitized_docx_path": str(row.get("digitized_docx_path") or ""),
         "digitization_text_match_ratio": float(row.get("text_match_ratio") or 0),
