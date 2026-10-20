@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, exportContractReport, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { auditContract, downloadContractSource, exportContractReport, getAuditProgress, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getContractSummary, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { ApiError } from "./api/base"
+import { CONTRACT_AUDIT_ERROR_CODES, normalizeContractAuditError } from "./api/errorCatalog"
+import { buildAuditSnapshot, clearCurrentAuditPointer, createAuditTaskId, getAuditFileMeta, getAuditUserScope, listAuditSnapshots, loadAuditSnapshotByTaskId, loadCurrentAuditSnapshot, saveCurrentAuditSnapshot } from "./auditPersistence"
 import Login from "./Login"
 import Admin from "./Admin"
+import ContractPreviewPanel from "./ContractPreviewPanel"
+import AuditSnapshotHistoryPanel from "./AuditSnapshotHistoryPanel"
 import { appI18n } from "./i18n/appI18n"
 
 const THEME_STORAGE_KEY = "ui_theme"
 const APP_LANG_STORAGE_KEY = "ui_lang"
+const AUDIT_PROGRESS_STARTUP_GRACE_MS = 6000
+const RISK_LOCATE_STRONG_CONFIDENCE = 0.78
+const RISK_LOCATE_OVERRIDE_DELTA = 0.12
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
@@ -20,9 +28,76 @@ const getStoredAppLang = () => {
   return v === "en" || v === "zh" ? v : "zh"
 }
 
+const getFileExtension = (name) => {
+  const text = String(name || "").trim().toLowerCase()
+  const idx = text.lastIndexOf(".")
+  return idx >= 0 ? text.slice(idx) : ""
+}
+
+const createDefaultContract = (lang = getStoredAppLang()) => ({
+  title: "",
+  language: normalizeAppLang(lang),
+  auditMode: "rag",
+  region: "",
+  date: "",
+  industry: "",
+  taxFocus: true
+})
+
+export function resolveRiskLocateTarget({ risk, previewPages, pickHighlight }) {
+  const requestedPageNo = Number(risk?.location?.page_no || 0)
+  const availablePages = Array.isArray(previewPages) ? previewPages : []
+  const available = availablePages
+    .map((page) => Number(page?.page_no || 0))
+    .filter((pageNo) => pageNo > 0)
+  const availableSet = new Set(available)
+  const fallbackPageNo = availableSet.has(requestedPageNo) ? requestedPageNo : (available[0] || 0)
+  const candidates = available
+    .map((pageNo) => {
+      const page = availablePages.find((item) => Number(item?.page_no || 0) === pageNo)
+      const blocks = Array.isArray(page?.blocks) ? page.blocks : []
+      const picked = typeof pickHighlight === "function" ? pickHighlight(risk, blocks, pageNo) : null
+      if (!picked) return null
+      return {
+        pageNo,
+        picked,
+        confidence: Math.max(0, Math.min(1, Number(picked.confidence || 0))),
+        strategy: String(picked.strategy || "semantic"),
+      }
+    })
+    .filter(Boolean)
+  const requestedCandidate = candidates.find((item) => item.pageNo === requestedPageNo) || null
+  let globalBest = null
+  candidates.forEach((item) => {
+    if (!globalBest || item.confidence > globalBest.confidence) {
+      globalBest = item
+    }
+  })
+  let resolved = requestedCandidate || globalBest || null
+  if (requestedCandidate && globalBest && globalBest.pageNo !== requestedCandidate.pageNo) {
+    const requestedStrong = requestedCandidate.strategy !== "semantic"
+      || requestedCandidate.confidence >= RISK_LOCATE_STRONG_CONFIDENCE
+    const globalWinsClearly = globalBest.strategy !== "semantic"
+      || globalBest.confidence >= requestedCandidate.confidence + RISK_LOCATE_OVERRIDE_DELTA
+    resolved = (!requestedStrong && globalWinsClearly) ? globalBest : requestedCandidate
+  }
+  return {
+    requestedPageNo,
+    fallbackPageNo,
+    pageNo: Number(resolved?.pageNo || fallbackPageNo || 0),
+    picked: resolved?.picked || null,
+    confidence: Number(resolved?.confidence || (fallbackPageNo > 0 ? 0.35 : 0)),
+    strategy: String(resolved?.strategy || "clause_fallback"),
+    corrected: !!resolved && requestedPageNo > 0 && resolved.pageNo !== requestedPageNo,
+  }
+}
+
 export default function App() {
+  const initialUserRef = useRef(getCurrentUser())
+  const restoredAuditRef = useRef(loadCurrentAuditSnapshot(initialUserRef.current))
+  const restoredAudit = restoredAuditRef.current.snapshot
   const [view, setView] = useState("main")
-  const [user, setUser] = useState(getCurrentUser())
+  const [user, setUser] = useState(initialUserRef.current)
 
   useEffect(() => {
     const syncUser = async () => {
@@ -41,54 +116,73 @@ export default function App() {
   }, [])
   const [uiLang, setUiLang] = useState(() => getStoredAppLang())
   const [theme, setTheme] = useState("dark")
-  const [contract, setContract] = useState(() => ({
-    title: "",
-    language: getStoredAppLang(),
-    auditMode: "rag",
-    region: "",
-    date: "",
-    industry: "",
-    taxFocus: true
-  }))
+  const [currentTaskId, setCurrentTaskId] = useState(() => restoredAudit?.taskId || createAuditTaskId())
+  const [currentAuditId, setCurrentAuditId] = useState(() => restoredAudit?.auditId || "")
+  const [snapshotHistory, setSnapshotHistory] = useState(() => listAuditSnapshots(initialUserRef.current))
+  const [snapshotCompareSelection, setSnapshotCompareSelection] = useState([])
+  const [persistenceNoticeCode, setPersistenceNoticeCode] = useState(() => restoredAudit ? "restore_recovered" : restoredAuditRef.current.noticeCode || "")
+  const [contract, setContract] = useState(() => restoredAudit?.contract ? { ...createDefaultContract(restoredAudit.contract.language), ...restoredAudit.contract } : createDefaultContract(getStoredAppLang()))
   const [contractFile, setContractFile] = useState(null)
-  const [contractError, setContractError] = useState("")
-  const [contractLoading, setContractLoading] = useState(false)
-  const [contractResult, setContractResult] = useState(null)
-  const [contractMeta, setContractMeta] = useState(null)
-  const [documentId, setDocumentId] = useState("")
-  const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: true })
-  const [previewLoading, setPreviewLoading] = useState(false)
-  const [previewError, setPreviewError] = useState("")
-  const [previewText, setPreviewText] = useState("")
-  const [previewMeta, setPreviewMeta] = useState(null)
-  const [previewMode, setPreviewMode] = useState("text")
-  const [previewContinuous, setPreviewContinuous] = useState(true)
-  const [previewPages, setPreviewPages] = useState([])
+  const [restoredFileMeta, setRestoredFileMeta] = useState(() => restoredAudit?.fileMeta || null)
+  const [contractError, setContractError] = useState(() => restoredAudit?.contractError || null)
+  const [contractLoading, setContractLoading] = useState(() => !!restoredAudit?.contractLoading)
+  const [contractResult, setContractResult] = useState(() => restoredAudit?.contractResult || null)
+  const [contractMeta, setContractMeta] = useState(() => restoredAudit?.contractMeta || null)
+  const [documentId, setDocumentId] = useState(() => restoredAudit?.documentId || "")
+  const [uiConfig, setUiConfig] = useState(() => restoredAudit?.uiConfig || { showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: true })
+  const [previewLoading, setPreviewLoading] = useState(() => !!restoredAudit?.previewLoading)
+  const [previewError, setPreviewError] = useState(() => restoredAudit?.previewError || "")
+  const [previewText, setPreviewText] = useState(() => restoredAudit?.previewText || "")
+  const [previewMeta, setPreviewMeta] = useState(() => restoredAudit?.previewMeta || null)
+  const [previewMode, setPreviewMode] = useState(() => restoredAudit?.previewMode || "text")
+  const [previewContinuous, setPreviewContinuous] = useState(() => typeof restoredAudit?.previewContinuous === "boolean" ? restoredAudit.previewContinuous : true)
+  const [previewThumbsOpen, setPreviewThumbsOpen] = useState(() => !!restoredAudit?.previewThumbsOpen)
+  const [previewPages, setPreviewPages] = useState(() => Array.isArray(restoredAudit?.previewPages) ? restoredAudit.previewPages : [])
   const [previewPageUrls, setPreviewPageUrls] = useState({})
   const [streamVisiblePages, setStreamVisiblePages] = useState({})
-  const [previewZoom, setPreviewZoom] = useState(1)
-  const [previewScrollPercent, setPreviewScrollPercent] = useState(0)
-  const [activePreviewPage, setActivePreviewPage] = useState(1)
-  const [activePreviewHighlight, setActivePreviewHighlight] = useState(null)
-  const [riskLocateMeta, setRiskLocateMeta] = useState({})
-  const [activeRiskIndex, setActiveRiskIndex] = useState(-1)
-  const [riskFilter, setRiskFilter] = useState("all")
-  const [expandedEvidence, setExpandedEvidence] = useState({})
-  const [contractProgress, setContractProgress] = useState(0)
-  const [contractProgressStage, setContractProgressStage] = useState("working")
-  const [exportingFormat, setExportingFormat] = useState("")
-  const [exportError, setExportError] = useState("")
+  const [previewZoom, setPreviewZoom] = useState(() => Number(restoredAudit?.previewZoom || 1) || 1)
+  const [previewScrollPercent, setPreviewScrollPercent] = useState(() => Number(restoredAudit?.previewScrollPercent || 0) || 0)
+  const [activePreviewPage, setActivePreviewPage] = useState(() => Number(restoredAudit?.activePreviewPage || 1) || 1)
+  const [activePreviewHighlight, setActivePreviewHighlight] = useState(() => restoredAudit?.activePreviewHighlight || null)
+  const [riskLocateMeta, setRiskLocateMeta] = useState(() => restoredAudit?.riskLocateMeta || {})
+  const [activeRiskIndex, setActiveRiskIndex] = useState(() => Number.isFinite(Number(restoredAudit?.activeRiskIndex)) ? Number(restoredAudit.activeRiskIndex) : -1)
+  const [riskFilter, setRiskFilter] = useState(() => restoredAudit?.riskFilter || "all")
+  const [expandedEvidence, setExpandedEvidence] = useState(() => restoredAudit?.expandedEvidence || {})
+  const [contractProgress, setContractProgress] = useState(() => Number(restoredAudit?.contractProgress || 0) || 0)
+  const [contractProgressStage, setContractProgressStage] = useState(() => restoredAudit?.contractProgressStage || "working")
+  const [exportingFormat, setExportingFormat] = useState(() => restoredAudit?.exportingFormat || "")
+  const [sourceDownloading, setSourceDownloading] = useState(() => !!restoredAudit?.sourceDownloading)
+  const [exportError, setExportError] = useState(() => restoredAudit?.exportError || "")
+  const activeUserScope = getAuditUserScope(user)
+  const lastUserScopeRef = useRef(activeUserScope)
   const previewScrollRef = useRef(null)
   const previewMainRef = useRef(null)
   const previewThumbRefs = useRef({})
   const previewPageRefs = useRef({})
   const previewPageUrlsRef = useRef({})
   const previewPageObserverRef = useRef(null)
+  const progressAbortRef = useRef(null)
+  const progressStartupGraceRef = useRef({ auditId: "", startedAt: 0 })
+  const previewLoadedDocumentIdRef = useRef(
+    restoredAudit?.documentId && (restoredAudit?.previewText || restoredAudit?.previewPages?.length > 0 || restoredAudit?.previewError)
+      ? restoredAudit.documentId
+      : ""
+  )
   const previewScrollRatioRef = useRef(0)
   const previewLocateSeqRef = useRef(0)
   const previewLastBlockByPageRef = useRef({})
   const previewFailedPagesRef = useRef({})
   const previewLoadingPagesRef = useRef({})
+  const previewRequestSeqRef = useRef(0)
+  const summaryRequestSeqRef = useRef(0)
+  const summaryLoadedDocumentIdRef = useRef(
+    restoredAudit?.documentId && (
+      String(restoredAudit?.contractResult?.contract_summary || "").trim()
+      || String(restoredAudit?.contractMeta?.contract_summary_status || "").trim()
+    )
+      ? restoredAudit.documentId
+      : ""
+  )
 
   const t = appI18n[uiLang] || appI18n.zh
   const fileInputRef = useRef(null)
@@ -161,7 +255,56 @@ export default function App() {
     if (riskFilter === "all") return riskList
     return riskList.filter((risk) => String(risk?.level || "").toLowerCase() === riskFilter)
   }, [riskList, riskFilter])
+  const contractSummaryText = String(contractResult?.contract_summary || "").trim()
+  const contractSummaryEnabled = Boolean(contractMeta?.contract_summary_enabled)
+  const contractSummaryStatus = String(contractMeta?.contract_summary_status || "").trim().toLowerCase()
+  const contractSummaryLanguage = normalizeAppLang(contractMeta?.contract_summary_language || uiLang)
+  const showContractSummary = contractSummaryEnabled || Boolean(contractSummaryText)
+  const contractSummaryStatusLabel = useMemo(() => {
+    if (contractSummaryStatus === "ok") return t.contractSummaryStatusOk
+    if (contractSummaryStatus === "empty") return t.contractSummaryStatusEmpty
+    if (contractSummaryStatus === "error") return t.contractSummaryStatusError
+    if (contractSummaryStatus === "empty_input") return t.contractSummaryStatusEmptyInput
+    if (contractSummaryStatus === "disabled") return t.contractSummaryStatusDisabled
+    return contractSummaryEnabled ? t.progressWorking : t.contractSummaryStatusDisabled
+  }, [contractSummaryEnabled, contractSummaryStatus, t.contractSummaryStatusDisabled, t.contractSummaryStatusEmpty, t.contractSummaryStatusEmptyInput, t.contractSummaryStatusError, t.contractSummaryStatusOk, t.progressWorking])
+  const contractSummaryNotice = useMemo(() => {
+    if (contractSummaryText) return ""
+    if (contractSummaryStatus === "error") return t.contractSummaryErrorHint
+    if (contractSummaryEnabled) return t.contractSummaryEmptyHint
+    return t.emptyContractSummary
+  }, [contractSummaryEnabled, contractSummaryStatus, contractSummaryText, t.contractSummaryEmptyHint, t.contractSummaryErrorHint, t.emptyContractSummary])
+  const applyContractSummaryPayload = (payload) => {
+    const summaryText = String(payload?.summary || "").trim()
+    const summaryMeta = payload?.meta && typeof payload.meta === "object" ? payload.meta : {}
+    setContractResult((prev) => {
+      const next = prev && typeof prev === "object" ? { ...prev } : {}
+      next.contract_summary = summaryText
+      return next
+    })
+    setContractMeta((prev) => ({
+      ...(prev && typeof prev === "object" ? prev : {}),
+      ...summaryMeta,
+    }))
+  }
   const summaryText = String(contractResult?.summary || "").trim()
+  const auditLegalValidation = contractResult?.legal_validation && typeof contractResult.legal_validation === "object"
+    ? contractResult.legal_validation
+    : null
+  const auditIncompleteIssues = useMemo(() => (
+    Array.isArray(auditLegalValidation?.issues) ? auditLegalValidation.issues.filter((item) => item && typeof item === "object") : []
+  ), [auditLegalValidation])
+  const auditIncomplete = useMemo(() => {
+    if (Boolean(contractResult?.audit_incomplete)) return true
+    if (Boolean(contractMeta?.audit_incomplete)) return true
+    if (auditLegalValidation && auditLegalValidation.ok === false && auditIncompleteIssues.length > 0) return true
+    return false
+  }, [auditIncompleteIssues.length, auditLegalValidation, contractMeta?.audit_incomplete, contractResult?.audit_incomplete])
+  const auditIncompleteNotice = useMemo(() => {
+    if (!auditIncomplete) return ""
+    const firstIssue = auditIncompleteIssues.find((item) => String(item?.message || "").trim())
+    return String(firstIssue?.message || t.auditIncompleteResult).trim()
+  }, [auditIncomplete, auditIncompleteIssues, t.auditIncompleteResult])
   const progressStageText = {
     uploading: t.progressUploading,
     extracting: t.progressExtracting,
@@ -199,10 +342,180 @@ export default function App() {
       : t.previewGatePassed
   const previewGateRatio = previewQuality ? Number(previewQuality.text_ratio || 0) : 0
   const previewGateRatioLabel = previewQuality ? `${Math.max(0, Math.round(previewGateRatio * 1000) / 10)}%` : "-"
+  const digitizationStatus = String(contractMeta?.digitization_status || "").toLowerCase()
+  const digitizationUsed = Boolean(contractMeta?.digitization_used)
+  const digitizedDocxAvailable = Boolean(contractMeta?.digitized_docx_available)
+  const currentSourceMime = String(contractFile?.type || restoredFileMeta?.type || "").toLowerCase()
+  const currentSourceExt = getFileExtension(contractFile?.name || restoredFileMeta?.name || "")
+  const currentSourceIsPdf = currentSourceMime === "application/pdf" || currentSourceExt === ".pdf"
+  const digitizedExportLabel = currentSourceIsPdf ? t.exportDigitizedDocxPlain : t.exportDigitizedDocx
+  const commentedExportLabel = currentSourceIsPdf ? t.exportCommentedDigitizedDocx : t.exportCommentedDocx
+  const digitizationStatusLabel = ({
+    done: t.digitizationStatusDone,
+    failed: t.digitizationStatusFailed,
+    skipped: t.digitizationStatusSkipped,
+    running: t.digitizationStatusRunning,
+    pending: t.digitizationStatusPending,
+  })[digitizationStatus] || (digitizationStatus || "-")
+  const digitizationMatchRate = Number(contractMeta?.digitization_text_match_ratio || 0)
+  const digitizationMatchRateLabel = digitizedDocxAvailable
+    ? `${Math.max(0, Math.round(digitizationMatchRate * 1000) / 10)}%`
+    : "-"
+  const persistenceNoticeText = ({
+    restore_recovered: t.auditRestoreRecovered,
+    restore_invalid: t.auditRestoreInvalid,
+    storage_pruned: t.auditRestoreStoragePruned,
+    storage_full: t.auditRestoreStorageFull,
+    restore_incomplete: t.auditRestoreIncomplete,
+    restore_progress_missing: t.auditRestoreProgressMissing,
+  })[persistenceNoticeCode] || ""
+  const displayFileName = contractFile?.name || restoredFileMeta?.name || t.noFileChosen
+  const newTaskDisabled = contractLoading
   const bumpProgress = (percent, stage) => {
     const next = Math.max(0, Math.min(100, Number(percent) || 0))
     setContractProgress((p) => Math.max(p, next))
     if (stage) setContractProgressStage(stage)
+  }
+
+  const refreshSnapshotHistory = (targetUser = user) => {
+    setSnapshotHistory(listAuditSnapshots(targetUser))
+  }
+
+  const applyAuditSnapshot = (snapshot, options = {}) => {
+    const nextSnapshot = snapshot || null
+    progressStartupGraceRef.current = { auditId: "", startedAt: 0 }
+    const nextContract = nextSnapshot?.contract
+      ? { ...createDefaultContract(nextSnapshot.contract.language || uiLang), ...nextSnapshot.contract }
+      : createDefaultContract(uiLang)
+    previewRequestSeqRef.current += 1
+    clearPreviewUrls()
+    previewLastBlockByPageRef.current = {}
+    previewFailedPagesRef.current = {}
+    previewLoadingPagesRef.current = {}
+    previewLoadedDocumentIdRef.current = nextSnapshot?.documentId && (nextSnapshot?.previewText || nextSnapshot?.previewPages?.length > 0 || nextSnapshot?.previewError)
+      ? nextSnapshot.documentId
+      : ""
+    summaryLoadedDocumentIdRef.current = nextSnapshot?.documentId && (
+      String(nextSnapshot?.contractResult?.contract_summary || "").trim()
+      || String(nextSnapshot?.contractMeta?.contract_summary_status || "").trim()
+    )
+      ? `${nextSnapshot.documentId}:${normalizeAppLang(nextSnapshot?.contractMeta?.contract_summary_language || nextSnapshot?.contract?.language || uiLang)}`
+      : ""
+    setCurrentTaskId(nextSnapshot?.taskId || createAuditTaskId())
+    setCurrentAuditId(nextSnapshot?.auditId || "")
+    setContract(nextContract)
+    setContractFile(null)
+    setRestoredFileMeta(nextSnapshot?.fileMeta || null)
+    setContractError(nextSnapshot?.contractError || null)
+    setContractLoading(!!nextSnapshot?.contractLoading)
+    setContractResult(nextSnapshot?.contractResult || null)
+    setContractMeta(nextSnapshot?.contractMeta || null)
+    setDocumentId(nextSnapshot?.documentId || "")
+    setPreviewLoading(!!nextSnapshot?.previewLoading)
+    setPreviewError(nextSnapshot?.previewError || "")
+    setPreviewText(nextSnapshot?.previewText || "")
+    setPreviewMeta(nextSnapshot?.previewMeta || null)
+    setPreviewMode(nextSnapshot?.previewMode || "text")
+    setPreviewContinuous(typeof nextSnapshot?.previewContinuous === "boolean" ? nextSnapshot.previewContinuous : !!uiConfig.previewContinuousEnabled)
+    setPreviewThumbsOpen(!!nextSnapshot?.previewThumbsOpen)
+    setPreviewPages(Array.isArray(nextSnapshot?.previewPages) ? nextSnapshot.previewPages : [])
+    setPreviewPageUrls({})
+    setStreamVisiblePages({})
+    setPreviewZoom(Number(nextSnapshot?.previewZoom || 1) || 1)
+    setPreviewScrollPercent(Number(nextSnapshot?.previewScrollPercent || 0) || 0)
+    setActivePreviewPage(Number(nextSnapshot?.activePreviewPage || 1) || 1)
+    setActivePreviewHighlight(nextSnapshot?.activePreviewHighlight || null)
+    setRiskLocateMeta(nextSnapshot?.riskLocateMeta || {})
+    setActiveRiskIndex(Number.isFinite(Number(nextSnapshot?.activeRiskIndex)) ? Number(nextSnapshot.activeRiskIndex) : -1)
+    setRiskFilter(nextSnapshot?.riskFilter || "all")
+    setExpandedEvidence(nextSnapshot?.expandedEvidence || {})
+    setContractProgress(Number(nextSnapshot?.contractProgress || 0) || 0)
+    setContractProgressStage(nextSnapshot?.contractProgressStage || "working")
+    setExportingFormat(nextSnapshot?.exportingFormat || "")
+    setSourceDownloading(!!nextSnapshot?.sourceDownloading)
+    setExportError(nextSnapshot?.exportError || "")
+    setPersistenceNoticeCode(options.noticeCode || (nextSnapshot ? "restore_recovered" : ""))
+  }
+
+  const resetAuditWorkspace = () => {
+    const nextTaskId = createAuditTaskId()
+    previewRequestSeqRef.current += 1
+    progressStartupGraceRef.current = { auditId: "", startedAt: 0 }
+    if (progressAbortRef.current) {
+      progressAbortRef.current.abort()
+      progressAbortRef.current = null
+    }
+    clearCurrentAuditPointer(user)
+    clearPreviewUrls()
+    previewLastBlockByPageRef.current = {}
+    previewFailedPagesRef.current = {}
+    previewLoadingPagesRef.current = {}
+    previewLoadedDocumentIdRef.current = ""
+    summaryLoadedDocumentIdRef.current = ""
+    setCurrentTaskId(nextTaskId)
+    setCurrentAuditId("")
+    setSnapshotCompareSelection([])
+    setPersistenceNoticeCode("")
+    setContract(createDefaultContract(uiLang))
+    setContractFile(null)
+    setRestoredFileMeta(null)
+    setContractError(null)
+    setContractLoading(false)
+    setContractResult(null)
+    setContractMeta(null)
+    setDocumentId("")
+    setPreviewLoading(false)
+    setPreviewError("")
+    setPreviewText("")
+    setPreviewMeta(null)
+    setPreviewMode("text")
+    setPreviewContinuous(!!uiConfig.previewContinuousEnabled)
+    setPreviewThumbsOpen(false)
+    setPreviewPages([])
+    setPreviewPageUrls({})
+    setStreamVisiblePages({})
+    setPreviewZoom(1)
+    setPreviewScrollPercent(0)
+    setActivePreviewPage(1)
+    setActivePreviewHighlight(null)
+    setRiskLocateMeta({})
+    setActiveRiskIndex(-1)
+    setRiskFilter("all")
+    setExpandedEvidence({})
+    setContractProgress(0)
+    setContractProgressStage("working")
+    setExportingFormat("")
+    setSourceDownloading(false)
+    setExportError("")
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+    refreshSnapshotHistory(user)
+  }
+
+  const onStartNewTask = () => {
+    if (newTaskDisabled) return
+    const confirmed = window.confirm(t.startNewTaskConfirm)
+    if (!confirmed) return
+    resetAuditWorkspace()
+  }
+
+  const onToggleSnapshotCompare = (taskId) => {
+    setSnapshotCompareSelection((prev) => {
+      if (prev.includes(taskId)) return prev.filter((item) => item !== taskId)
+      const next = [...prev, taskId]
+      return next.length <= 3 ? next : next.slice(next.length - 3)
+    })
+  }
+
+  const onLoadSnapshotHistory = (taskId) => {
+    const restored = loadAuditSnapshotByTaskId(user, taskId)
+    if (restored.snapshot) {
+      applyAuditSnapshot(restored.snapshot, { noticeCode: "restore_recovered" })
+      refreshSnapshotHistory(user)
+      return
+    }
+    setPersistenceNoticeCode("restore_invalid")
   }
 
   useEffect(() => {
@@ -352,13 +665,14 @@ export default function App() {
       try {
         const data = await getUIConfig()
         const serverTheme = normalizeTheme(data?.default_theme)
-        const allowContinuous = true
+        const allowContinuous = !!data.preview_continuous_enabled
         setUiConfig({
           showCitationSource: !!data.show_citation_source,
           defaultTheme: serverTheme,
           previewContinuousEnabled: allowContinuous
         })
-        setPreviewContinuous(allowContinuous)
+        setPreviewContinuous((prev) => (allowContinuous ? prev : false))
+        if (!allowContinuous) setPreviewThumbsOpen(true)
         const stored = getStoredTheme()
         if (!stored) setTheme(serverTheme)
       } catch {
@@ -367,8 +681,247 @@ export default function App() {
     loadUIConfig()
   }, [user])
 
-  const formatRiskLocation = (location) => {
-    const pageNo = Number(location?.page_no || 0)
+  useEffect(() => {
+    if (!user) return
+    const scopeChanged = lastUserScopeRef.current !== activeUserScope
+    const restored = loadCurrentAuditSnapshot(user)
+    refreshSnapshotHistory(user)
+    setSnapshotCompareSelection([])
+    if (scopeChanged) {
+      lastUserScopeRef.current = activeUserScope
+      applyAuditSnapshot(restored.snapshot, { noticeCode: restored.snapshot ? "restore_recovered" : restored.noticeCode || "" })
+    }
+  }, [user, activeUserScope])
+
+  useEffect(() => {
+    if (!currentTaskId) setCurrentTaskId(createAuditTaskId())
+  }, [currentTaskId])
+
+  useEffect(() => {
+    setSnapshotCompareSelection((prev) => prev.filter((taskId) => snapshotHistory.some((item) => item.taskId === taskId)))
+  }, [snapshotHistory])
+
+  useEffect(() => {
+    if (!documentId || previewLoading) return
+    if (previewMode === "visual" && previewPages.length > 0) {
+      ensurePreviewPageRange(documentId, activePreviewPage || Number(previewPages[0]?.page_no || 1), previewContinuous ? 2 : 0)
+      return
+    }
+    if (previewLoadedDocumentIdRef.current !== documentId && !previewError) {
+      void loadContractPreview(documentId)
+    }
+  }, [documentId, previewMode, previewPages, activePreviewPage, previewContinuous, previewLoading, previewText, previewError])
+
+  useEffect(() => {
+    if (!documentId || !contractResult || contractLoading) return
+    const requestKey = `${documentId}:${uiLang}`
+    const terminalStatuses = new Set(["ok", "empty", "error", "disabled", "empty_input"])
+    if (contractSummaryText && contractSummaryLanguage === uiLang) {
+      summaryLoadedDocumentIdRef.current = requestKey
+      return
+    }
+    if (terminalStatuses.has(contractSummaryStatus) && contractSummaryLanguage === uiLang) {
+      summaryLoadedDocumentIdRef.current = requestKey
+      return
+    }
+    if (summaryLoadedDocumentIdRef.current === requestKey) return
+
+    let cancelled = false
+    const requestSeq = summaryRequestSeqRef.current + 1
+    summaryRequestSeqRef.current = requestSeq
+    setContractMeta((prev) => ({
+      ...(prev && typeof prev === "object" ? prev : {}),
+      contract_summary_enabled: true,
+      contract_summary_status: "working",
+      contract_summary_language: uiLang,
+      contract_summary_error: "",
+    }))
+
+    const loadSummary = async () => {
+      try {
+        const payload = await getContractSummary(documentId, uiLang)
+        if (cancelled || summaryRequestSeqRef.current !== requestSeq) return
+        applyContractSummaryPayload(payload)
+        summaryLoadedDocumentIdRef.current = requestKey
+      } catch (err) {
+        if (cancelled || summaryRequestSeqRef.current !== requestSeq) return
+        const message = String(err?.message || err || "")
+        applyContractSummaryPayload({
+          summary: "",
+          meta: {
+            contract_summary_enabled: true,
+            contract_summary_status: "error",
+            contract_summary_error: message,
+            contract_summary_language: uiLang,
+          },
+        })
+        summaryLoadedDocumentIdRef.current = requestKey
+      }
+    }
+
+    void loadSummary()
+    return () => {
+      cancelled = true
+    }
+  }, [documentId, contractLoading, contractResult, contractSummaryLanguage, contractSummaryStatus, contractSummaryText, uiLang])
+
+  useEffect(() => {
+    if (!user || !currentTaskId) return
+    const snapshot = buildAuditSnapshot({
+      taskId: currentTaskId,
+      auditId: currentAuditId || currentTaskId,
+      documentId,
+      contract,
+      fileMeta: getAuditFileMeta(contractFile) || restoredFileMeta,
+      contractError,
+      contractLoading,
+      contractResult,
+      contractMeta,
+      uiConfig,
+      previewLoading,
+      previewError,
+      previewText,
+      previewMeta,
+      previewMode,
+      previewContinuous,
+      previewThumbsOpen,
+      previewPages,
+      previewZoom,
+      previewScrollPercent,
+      activePreviewPage,
+      activePreviewHighlight,
+      riskLocateMeta,
+      activeRiskIndex,
+      riskFilter,
+      expandedEvidence,
+      contractProgress,
+      contractProgressStage,
+      exportingFormat,
+      sourceDownloading,
+      exportError,
+    })
+    const timer = window.setTimeout(() => {
+      const result = saveCurrentAuditSnapshot(snapshot, user)
+      refreshSnapshotHistory(user)
+      if (result.noticeCode === "storage_pruned") {
+        setPersistenceNoticeCode("storage_pruned")
+      } else if (result.noticeCode === "storage_full") {
+        setPersistenceNoticeCode("storage_full")
+      }
+    }, 180)
+    return () => window.clearTimeout(timer)
+  }, [
+    user,
+    currentTaskId,
+    currentAuditId,
+    documentId,
+    contract,
+    contractFile,
+    restoredFileMeta,
+    contractError,
+    contractLoading,
+    contractResult,
+    contractMeta,
+    uiConfig,
+    previewLoading,
+    previewError,
+    previewText,
+    previewMeta,
+    previewMode,
+    previewContinuous,
+    previewThumbsOpen,
+    previewPages,
+    previewZoom,
+    previewScrollPercent,
+    activePreviewPage,
+    activePreviewHighlight,
+    riskLocateMeta,
+    activeRiskIndex,
+    riskFilter,
+    expandedEvidence,
+    contractProgress,
+    contractProgressStage,
+    exportingFormat,
+    sourceDownloading,
+    exportError,
+  ])
+
+  useEffect(() => {
+    if (!user || !contractLoading || !currentAuditId) return
+    let cancelled = false
+    let timer = 0
+    const syncProgress = async () => {
+      const controller = new AbortController()
+      progressAbortRef.current = controller
+      try {
+        const payload = await getAuditProgress(currentAuditId, { signal: controller.signal })
+        if (progressAbortRef.current === controller) {
+          progressAbortRef.current = null
+        }
+        if (cancelled || !payload) return
+        const nextProgress = Math.max(0, Math.min(100, Number(payload.progress || 0)))
+        setContractProgress(nextProgress)
+        setContractProgressStage(String(payload.stage || "working"))
+        if (String(payload.status || "").toLowerCase() === "failed") {
+          setContractLoading(false)
+          setPersistenceNoticeCode("restore_incomplete")
+          setContractError(normalizeContractAuditError({
+            code: CONTRACT_AUDIT_ERROR_CODES.RuntimeFailed,
+            category: "runtime",
+            message: String(payload.message || t.auditRestoreIncomplete),
+          }, uiLang))
+        }
+        if (String(payload.status || "").toLowerCase() === "done" && !contractResult) {
+          setContractLoading(false)
+          setPersistenceNoticeCode("restore_incomplete")
+        }
+      } catch (err) {
+        if (progressAbortRef.current === controller) {
+          progressAbortRef.current = null
+        }
+        if (cancelled) return
+        if (err?.name === "AbortError") return
+        if (err instanceof ApiError && err.status === 404) {
+          const startupGrace = progressStartupGraceRef.current
+          const startupRequestMatched = startupGrace.auditId === currentAuditId
+          const withinStartupGrace = startupRequestMatched
+            && startupGrace.startedAt > 0
+            && (Date.now() - startupGrace.startedAt) < AUDIT_PROGRESS_STARTUP_GRACE_MS
+          if (withinStartupGrace) {
+            setContractProgressStage("uploading")
+            return
+          }
+          if (timer) window.clearInterval(timer)
+          setContractLoading(false)
+          setContractProgressStage("failed")
+          if (!contractResult) {
+            const startupTimeoutMessage = startupRequestMatched
+              ? String(t.auditStartupProgressTimeout)
+              : String(t.auditRestoreProgressMissing)
+            setPersistenceNoticeCode(startupRequestMatched ? "" : "restore_progress_missing")
+            setContractError(normalizeContractAuditError({
+              code: CONTRACT_AUDIT_ERROR_CODES.RuntimeFailed,
+              category: "runtime",
+              message: startupTimeoutMessage,
+            }, uiLang))
+          }
+        }
+      }
+    }
+    void syncProgress()
+    timer = window.setInterval(syncProgress, 2000)
+    return () => {
+      cancelled = true
+      if (progressAbortRef.current) {
+        progressAbortRef.current.abort()
+        progressAbortRef.current = null
+      }
+      if (timer) window.clearInterval(timer)
+    }
+  }, [user, contractLoading, currentAuditId, contractResult, uiLang, t.auditRestoreIncomplete])
+
+  const formatRiskLocation = (location, locateMeta = null) => {
+    const pageNo = Number(locateMeta?.resolvedPageNo || location?.page_no || 0)
     const paragraphNo = String(location?.paragraph_no || "").trim()
     if (pageNo > 0 || paragraphNo) {
       if (uiLang === "zh") return `第${pageNo || "-"}页 / 第${paragraphNo || "-"}段`
@@ -591,7 +1144,9 @@ export default function App() {
   }
 
   const loadContractPreview = async (nextDocumentId) => {
+    const requestSeq = ++previewRequestSeqRef.current
     if (!nextDocumentId) {
+      previewLoadedDocumentIdRef.current = ""
       clearPreviewUrls()
       previewLastBlockByPageRef.current = {}
       setStreamVisiblePages({})
@@ -600,6 +1155,7 @@ export default function App() {
       setStreamVisiblePages({})
       setActivePreviewPage(1)
       setActivePreviewHighlight(null)
+      setPreviewThumbsOpen(false)
       setPreviewText("")
       setPreviewMeta(null)
       setPreviewError("")
@@ -613,6 +1169,7 @@ export default function App() {
     setPreviewError("")
     try {
       const manifest = await getContractPreviewManifest(nextDocumentId)
+      if (previewRequestSeqRef.current !== requestSeq) return
       const mode = String(manifest?.mode || "text") === "visual" ? "visual" : "text"
       const pages = Array.isArray(manifest?.pages) ? manifest.pages : []
       clearPreviewUrls()
@@ -622,6 +1179,7 @@ export default function App() {
       setStreamVisiblePages({})
       setActivePreviewPage(1)
       setActivePreviewHighlight(null)
+      setPreviewThumbsOpen(false)
       setPreviewText(String(manifest?.text || ""))
       const meta = manifest?.meta && typeof manifest.meta === "object" ? manifest.meta : {}
       setPreviewMeta({ ...meta, source: String(manifest?.source || "") })
@@ -641,6 +1199,7 @@ export default function App() {
     } catch {
       try {
         const preview = await getContractPreview(nextDocumentId)
+        if (previewRequestSeqRef.current !== requestSeq) return
         clearPreviewUrls()
         previewLastBlockByPageRef.current = {}
         setPreviewMode("text")
@@ -648,62 +1207,68 @@ export default function App() {
         setStreamVisiblePages({})
         setActivePreviewPage(1)
         setActivePreviewHighlight(null)
+        setPreviewThumbsOpen(false)
         setPreviewText(String(preview?.text || ""))
         setPreviewMeta(preview?.meta || null)
         setPreviewZoom(1)
         setPreviewScrollPercent(0)
       } catch (err) {
+        if (previewRequestSeqRef.current !== requestSeq) return
         setPreviewError(String(err?.message || err || "Preview failed"))
         setPreviewMode("text")
         setPreviewPages([])
         setStreamVisiblePages({})
         setActivePreviewHighlight(null)
+        setPreviewThumbsOpen(false)
         setPreviewText("")
         setPreviewMeta(null)
       }
     } finally {
-      setPreviewLoading(false)
+      if (previewRequestSeqRef.current === requestSeq) {
+        previewLoadedDocumentIdRef.current = nextDocumentId
+        setPreviewLoading(false)
+      }
     }
   }
 
   const onRiskLocate = (risk, idx) => {
     setActiveRiskIndex(idx)
-    const requestedPageNo = Number(risk?.location?.page_no || 0)
-    const available = getAvailablePreviewPageNos()
-    const availableSet = new Set(available)
-    const pageNo = availableSet.has(requestedPageNo) ? requestedPageNo : (available[0] || 0)
+    const locateTarget = resolveRiskLocateTarget({
+      risk,
+      previewPages,
+      pickHighlight: (nextRisk, blocks, pageNo) => pickPreviewHighlight(nextRisk, blocks, pageNo),
+    })
+    const pageNo = Number(locateTarget.pageNo || 0)
     setRiskLocateMeta((prev) => {
       const next = { ...prev }
       next[String(idx)] = {
-        strategy: "clause_fallback",
-        confidence: pageNo > 0 ? 0.35 : 0,
+        strategy: String(locateTarget.strategy || "clause_fallback"),
+        confidence: Math.max(0, Math.min(1, Number(locateTarget.confidence || (pageNo > 0 ? 0.35 : 0)))),
+        resolvedPageNo: pageNo,
+        corrected: !!locateTarget.corrected,
       }
       return next
     })
     if (previewMode === "visual" && pageNo > 0) {
       setActivePreviewPage(pageNo)
       ensurePreviewPageRange(documentId, pageNo, previewContinuous ? 2 : 0)
-      const candidates = requestedPageNo > 0 && availableSet.has(requestedPageNo) ? [requestedPageNo] : available
-      let best = null
+      const best = locateTarget.picked
       let bestPageNo = pageNo
-      candidates.forEach((no) => {
-        const page = previewPages.find((p) => Number(p?.page_no || 0) === no)
-        const blocks = Array.isArray(page?.blocks) ? page.blocks : []
-        const picked = pickPreviewHighlight(risk, blocks, no)
-        if (!picked) return
-        const conf = Math.max(0, Math.min(1, Number(picked.confidence || 0)))
-        if (!best || conf > Number(best.confidence || 0)) {
-          best = picked
-          bestPageNo = no
-        }
-      })
       if (best) {
         setActivePreviewPage(bestPageNo)
         ensurePreviewPageRange(documentId, bestPageNo, previewContinuous ? 2 : 0)
         previewLastBlockByPageRef.current[String(bestPageNo)] = best.blockIndex
         previewLocateSeqRef.current += 1
         setActivePreviewHighlight({ pageNo: bestPageNo, bbox: best.bbox, blockId: best.blockId, seq: previewLocateSeqRef.current })
-        setRiskLocateMeta((prev) => ({ ...prev, [String(idx)]: { strategy: String(best.strategy || "semantic"), confidence: Math.max(0, Math.min(1, Number(best.confidence || 0))) } }))
+        setRiskLocateMeta((prev) => ({
+          ...prev,
+          [String(idx)]: {
+            strategy: String(best.strategy || locateTarget.strategy || "semantic"),
+            confidence: Math.max(0, Math.min(1, Number(best.confidence || locateTarget.confidence || 0))),
+            resolvedPageNo: bestPageNo,
+            corrected: !!locateTarget.corrected,
+          },
+        }))
       } else {
         setActivePreviewHighlight(null)
       }
@@ -735,18 +1300,50 @@ export default function App() {
     if (!contractFile) return
     const ext = contractFile.name.toLowerCase().split(".").pop()
     if (!["docx", "pdf"].includes(ext)) {
-      setContractError(t.invalidFileType)
+      setContractError(normalizeContractAuditError({
+        code: CONTRACT_AUDIT_ERROR_CODES.UnsupportedFileType,
+        category: "validation",
+        message: t.invalidFileType
+      }, uiLang))
       return
     }
-    setContractError("")
+    const nextAuditId = createAuditTaskId()
+    progressStartupGraceRef.current = {
+      auditId: nextAuditId,
+      startedAt: Date.now(),
+    }
+    setCurrentTaskId(nextAuditId)
+    setCurrentAuditId(nextAuditId)
+    summaryLoadedDocumentIdRef.current = ""
+    setSnapshotCompareSelection([])
+    setPersistenceNoticeCode("")
+    setContractError(null)
     setExportError("")
     setExportingFormat("")
+    setContractResult(null)
+    setContractMeta(null)
+    setDocumentId("")
+    setRestoredFileMeta(getAuditFileMeta(contractFile))
+    clearPreviewUrls()
+    previewLastBlockByPageRef.current = {}
+    setPreviewMode("text")
+    setPreviewPages([])
+    setStreamVisiblePages({})
+    setActivePreviewPage(1)
+    setActivePreviewHighlight(null)
+    setPreviewThumbsOpen(false)
+    setPreviewText("")
+    setPreviewMeta(null)
+    setPreviewError("")
+    setPreviewZoom(1)
+    setPreviewScrollPercent(0)
     setContractLoading(true)
     setRiskFilter("all")
     setActiveRiskIndex(-1)
     bumpProgress(16, "uploading")
     try {
       const form = new FormData()
+      form.append("audit_id", nextAuditId)
       const customTitle = String(contract.title || "").trim()
       form.append("title", customTitle || toContractTitle(contractFile.name))
       form.append("language", contract.language)
@@ -758,17 +1355,29 @@ export default function App() {
       form.append("file", contractFile)
       const res = await auditContract(form)
       bumpProgress(100, "done")
+      const resolvedAuditId = String(res.audit_id || nextAuditId)
+      progressStartupGraceRef.current = {
+        auditId: resolvedAuditId,
+        startedAt: progressStartupGraceRef.current.auditId === nextAuditId
+          ? progressStartupGraceRef.current.startedAt
+          : Date.now(),
+      }
       const nextDocumentId = String(res.document_id || "")
+      setCurrentTaskId(resolvedAuditId)
+      setCurrentAuditId(resolvedAuditId)
       const detectedLang = normalizeAppLang(res?.meta?.language || contract.language)
       setUiLang(detectedLang)
       setContract(prev => ({ ...prev, language: detectedLang }))
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)
       setDocumentId(nextDocumentId)
-      await loadContractPreview(nextDocumentId)
+      // Preview loading can take longer than the audit itself, especially for
+      // visual manifests with many pages. Do not keep the audit progress stuck
+      // in the running state while preview assets are still loading.
+      void loadContractPreview(nextDocumentId)
     } catch (err) {
       bumpProgress(100, "failed")
-      setContractError(String(err?.message || err || "Audit failed"))
+      setContractError(normalizeContractAuditError(err, contract.language || uiLang))
       setContractResult(null)
       setContractMeta(null)
       setDocumentId("")
@@ -778,12 +1387,25 @@ export default function App() {
       setPreviewPages([])
       setActivePreviewPage(1)
       setActivePreviewHighlight(null)
+      setPreviewThumbsOpen(false)
       setPreviewText("")
       setPreviewMeta(null)
       setPreviewError("")
     } finally {
+      progressStartupGraceRef.current = { auditId: "", startedAt: 0 }
       setContractLoading(false)
     }
+  }
+
+  const downloadBlobFile = (blob, fileName) => {
+    const url = window.URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
   }
 
   const onExportReport = async (format, mode = "report") => {
@@ -792,29 +1414,83 @@ export default function App() {
     setExportError("")
     setExportingFormat(`${fmt}_${mode}`)
     try {
-      const blob = await exportContractReport(documentId, {
+      const response = await exportContractReport(documentId, {
         export_format: fmt,
         export_mode: mode,
         locale: uiLang === "zh" ? "zh-CN" : "en-US",
         template_version: "v1.0",
         include_appendix: true,
       })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement("a")
+      const blob = response?.blob
+      if (!(blob instanceof Blob)) {
+        throw new Error(t.exportFailed)
+      }
       const ext = fmt === "docx" ? "docx" : "json"
-      const prefix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
-      const fileName = `${prefix}_${documentId}.${ext}`
-      a.href = url
-      a.download = fileName
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
+      const prefix = mode === "comments"
+        ? "contract_with_comments"
+        : mode === "digitized_source"
+          ? "contract_digitized_source"
+          : "contract_audit_report"
+      const responseFilename = String(response?.filename || "").trim()
+      downloadBlobFile(blob, responseFilename || `${prefix}_${documentId}.${ext}`)
     } catch (err) {
       setExportError(String(err?.message || err || t.exportFailed))
     } finally {
       setExportingFormat("")
     }
+  }
+
+  const onDownloadSource = async () => {
+    if (!documentId) return
+    setExportError("")
+    setSourceDownloading(true)
+    try {
+      const blob = await downloadContractSource(documentId, "original")
+      const fallbackName = contractFile?.name || `contract_source_${documentId}${String(contractMeta?.source_document_ext || "").trim() || ""}`
+      downloadBlobFile(blob, fallbackName)
+    } catch (err) {
+      setExportError(String(err?.message || err || t.exportFailed))
+    } finally {
+      setSourceDownloading(false)
+    }
+  }
+
+  const onPreviewLayoutChange = (nextContinuous) => {
+    if (nextContinuous && !uiConfig.previewContinuousEnabled) return
+    setPreviewContinuous(!!nextContinuous)
+    if (!nextContinuous) setPreviewThumbsOpen(true)
+  }
+
+  const onPreviewZoomChange = (direction) => {
+    if (direction === "reset") {
+      setPreviewZoom(1)
+      return
+    }
+    setPreviewZoom((prev) => {
+      const delta = direction === "in" ? 0.15 : -0.15
+      const next = Math.max(0.7, Math.min(2.2, Number(prev || 1) + delta))
+      return Math.round(next * 100) / 100
+    })
+  }
+
+  const onPreviewPageSelect = (pageNo) => {
+    const nextPage = Number(pageNo || 0)
+    if (nextPage <= 0) return
+    setActivePreviewPage(nextPage)
+    ensurePreviewPageRange(documentId, nextPage, previewContinuous ? 2 : 0)
+    if (previewContinuous) {
+      const pageEl = previewPageRefs.current[String(nextPage)]
+      if (pageEl && typeof pageEl.scrollIntoView === "function") {
+        pageEl.scrollIntoView({ behavior: "smooth", block: "center" })
+      }
+    }
+  }
+
+  const onPreviewPageHover = (pageNo) => {
+    const nextPage = Number(pageNo || 0)
+    if (nextPage <= 0) return
+    setActivePreviewPage(nextPage)
+    ensurePreviewPageRange(documentId, nextPage, 2)
   }
 
   const onUiLanguageChange = (next) => {
@@ -869,6 +1545,11 @@ export default function App() {
           </div>
         </div>
       </header>
+      {persistenceNoticeText && (
+        <div className={`card audit-restore-banner${persistenceNoticeCode === "restore_invalid" || persistenceNoticeCode === "storage_full" ? " is-warning" : ""}`}>
+          {persistenceNoticeText}
+        </div>
+      )}
       <section className="card contract-upload">
         <div className="contract-panel">
           <div className="panel-title">{t.contractTitle}</div>
@@ -931,21 +1612,78 @@ export default function App() {
               onChange={e => {
                 const f = e.target.files?.[0] || null
                 setContractFile(f)
+                setRestoredFileMeta(getAuditFileMeta(f))
                 setContract(prev => ({ ...prev, title: f ? toContractTitle(f.name) : "" }))
-                setContractError("")
+                setContractError(null)
               }}
               style={{ display: "none" }}
             />
             <button type="button" className="ghost" onClick={() => fileInputRef.current && fileInputRef.current.click()}>
               {t.chooseFile}
             </button>
-            <span>{contractFile ? contractFile.name : t.noFileChosen}</span>
+            <span>{displayFileName}</span>
             <em>{t.uploadHint}</em>
+            {!contractFile && restoredFileMeta && (
+              <small className="audit-restore-file-note">{t.restoredFileNotice}</small>
+            )}
           </div>
-          {contractError && <div className="error">{contractError}</div>}
-          <button className="primary" onClick={onContractUpload} disabled={contractLoading}>
-            {contractLoading ? t.uploading : t.uploadBtn}
-          </button>
+          {contractError && (
+            <div className="error contract-error-card">
+              <div className="contract-error-head">
+                <strong>{contractError.title || t.auditErrorTitle}</strong>
+                {contractError.code && <span>{contractError.code}</span>}
+              </div>
+              <p className="contract-error-message">{contractError.message}</p>
+              {(contractError.scenarios?.length > 0 || contractError.actions?.length > 0) && (
+                <details className="contract-error-details">
+                  <summary>{t.auditErrorOpsInfo}</summary>
+                  <div className="contract-error-meta-list">
+                    <div className="contract-error-meta-row">
+                      <label>{t.auditErrorCode}</label>
+                      <span>{contractError.code || "-"}</span>
+                    </div>
+                    <div className="contract-error-meta-row">
+                      <label>{t.auditErrorCategory}</label>
+                      <span>{contractError.categoryLabel || contractError.category || "-"}</span>
+                    </div>
+                  </div>
+                  {contractError.scenarios?.length > 0 && (
+                    <div className="contract-error-section">
+                      <div className="contract-error-section-title">{t.auditErrorScenarios}</div>
+                      <ul>
+                        {contractError.scenarios.map((item) => (
+                          <li key={`scenario-${item}`}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {contractError.actions?.length > 0 && (
+                    <div className="contract-error-section">
+                      <div className="contract-error-section-title">{t.auditErrorActions}</div>
+                      <ul>
+                        {contractError.actions.map((item) => (
+                          <li key={`action-${item}`}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </details>
+              )}
+            </div>
+          )}
+          <div className="task-action-row">
+            <button className="primary" onClick={onContractUpload} disabled={contractLoading}>
+              {contractLoading ? t.uploading : t.uploadBtn}
+            </button>
+            <button
+              type="button"
+              className="ghost start-new-task-btn"
+              onClick={onStartNewTask}
+              disabled={newTaskDisabled}
+            >
+              {t.startNewTask}
+            </button>
+          </div>
           {contractLoading && (
             <div className="audit-progress">
               <div className="audit-progress-head">
@@ -961,122 +1699,41 @@ export default function App() {
         </div>
       </section>
       <div className="workbench-grid">
-        <section className="card contract-preview">
-          <div className="preview-head">
-            <div className="panel-title">{t.contractPreview}</div>
-            {previewMode === "visual" && previewPages.length > 0 && (
-              <div className="preview-toolbar" />
-            )}
-            {previewMeta && (
-              <div className="preview-meta">
-                <span>{t.pageMeta}: {previewMeta.page_count ?? previewPages.length ?? "-"}</span>
-                <span>{t.lineCount}: {previewMeta.line_total ?? 0}</span>
-                <span>{previewMode === "visual" ? t.previewVisualMode : t.previewTextMode}</span>
-                <span>{t.previewCoordSource}: {previewCoordProviderLabel}</span>
-                <span>{t.previewPipeline}: {previewPipelineLabel}</span>
-                <span className={`preview-gate ${previewConversion?.fallback ? "is-fallback" : "is-pass"}`}>{t.previewGate}: {previewGateLabel}</span>
-                {previewConversion && (
-                  <span>{t.previewGateRatio}: {previewGateRatioLabel}</span>
-                )}
-              </div>
-            )}
-          </div>
-          {previewLoading && (
-            <div className="empty-state preview-empty">
-              <p>{t.previewLoading}</p>
-            </div>
-          )}
-          {!previewLoading && previewError && <div className="error">{t.previewError}: {previewError}</div>}
-          {!previewLoading && !previewError && previewMode === "visual" && previewPages.length === 0 && (
-            <div className="empty-state preview-empty">
-              <p>{t.previewEmpty}</p>
-            </div>
-          )}
-          {!previewLoading && !previewError && previewMode === "visual" && previewPages.length > 0 && (
-            <div className="preview-visual">
-              <div className={`preview-main${previewContinuous ? " preview-main-scroll" : ""}`} ref={previewMainRef}>
-                {previewMode === "visual" && (
-                  <div className="preview-float-indicator">P{activePreviewPage} / {previewMeta?.page_count ?? previewPages.length} · {t.previewProgress} {previewScrollPercent}%</div>
-                )}
-                {previewContinuous ? (
-                  <div className="preview-stream">
-                    {previewPages.map((p) => {
-                      const pageNo = Number(p?.page_no || 0)
-                      const key = String(pageNo)
-                      const active = pageNo === activePreviewPage
-                      const url = previewPageUrls[key] || ""
-                      return (
-                        <article
-                          key={`stream-${key}`}
-                          data-page-no={key}
-                          ref={(el) => {
-                            previewPageRefs.current[key] = el
-                            if (el && previewPageObserverRef.current) previewPageObserverRef.current.observe(el)
-                          }}
-                          className={`preview-main-media preview-stream-page${active ? " is-active" : ""}`}
-                          onMouseEnter={() => {
-                            setActivePreviewPage(pageNo)
-                            ensurePreviewPageRange(documentId, pageNo, 2)
-                          }}
-                        >
-                          {url ? <img loading="lazy" decoding="async" style={{ width: `${Math.round(previewZoom * 100)}%` }} src={url} alt={`page-${pageNo}`} /> : <div className="preview-main-loading">{t.previewLoading}</div>}
-                          {Array.isArray(activePreviewHighlight?.bbox) && activePreviewHighlight.bbox.length === 4 && Number(activePreviewHighlight?.pageNo || 0) === pageNo ? (
-                            <div
-                              key={`hl-${activePreviewHighlight.seq || 0}`}
-                              className="preview-highlight"
-                              style={{
-                                left: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[0]) || 0)) * 100}%`,
-                                top: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[1]) || 0)) * 100}%`,
-                                width: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[2]) || 0)) * 100}%`,
-                                height: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[3]) || 0)) * 100}%`,
-                              }}
-                            />
-                          ) : null}
-                        </article>
-                      )
-                    })}
-                  </div>
-                ) : (() => {
-                  const key = String(activePreviewPage)
-                  const url = previewPageUrls[key] || ""
-                  return (
-                    <div className="preview-main-media">
-                      {url ? (
-                        <>
-                          <img style={{ width: `${Math.round(previewZoom * 100)}%` }} src={url} alt={`page-${activePreviewPage}`} />
-                          {Array.isArray(activePreviewHighlight?.bbox) && activePreviewHighlight.bbox.length === 4 && Number(activePreviewHighlight?.pageNo || 0) === activePreviewPage ? (
-                            <div
-                              key={`hl-${activePreviewHighlight.seq || 0}`}
-                              className="preview-highlight"
-                              style={{
-                                left: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[0]) || 0)) * 100}%`,
-                                top: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[1]) || 0)) * 100}%`,
-                                width: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[2]) || 0)) * 100}%`,
-                                height: `${Math.max(0, Math.min(1, Number(activePreviewHighlight.bbox[3]) || 0)) * 100}%`,
-                              }}
-                            />
-                          ) : null}
-                        </>
-                      ) : <div className="preview-main-loading">{t.previewLoading}</div>}
-                    </div>
-                  )
-                })()}
-              </div>
-            </div>
-          )}
-          {!previewLoading && !previewError && previewMode !== "visual" && !previewText && (
-            <div className="empty-state preview-empty">
-              <p>{t.previewEmpty}</p>
-            </div>
-          )}
-          {!previewLoading && !previewError && previewMode !== "visual" && !!previewText && (
-            <div className="preview-scroll" ref={previewScrollRef}>
-              <article className="preview-document">
-                <pre>{previewText}</pre>
-              </article>
-            </div>
-          )}
-        </section>
+        <ContractPreviewPanel
+          t={t}
+          documentId={documentId}
+          previewLoading={previewLoading}
+          previewError={previewError}
+          previewMode={previewMode}
+          previewPages={previewPages}
+          previewText={previewText}
+          previewMeta={previewMeta}
+          previewContinuous={previewContinuous}
+          previewContinuousEnabled={uiConfig.previewContinuousEnabled}
+          previewThumbsOpen={previewThumbsOpen}
+          previewZoom={previewZoom}
+          previewScrollPercent={previewScrollPercent}
+          activePreviewPage={activePreviewPage}
+          activePreviewHighlight={activePreviewHighlight}
+          previewPageUrls={previewPageUrls}
+          previewCoordProviderLabel={previewCoordProviderLabel}
+          previewPipelineLabel={previewPipelineLabel}
+          previewGateLabel={previewGateLabel}
+          previewGateRatioLabel={previewGateRatioLabel}
+          previewConversion={previewConversion}
+          previewMainRef={previewMainRef}
+          previewScrollRef={previewScrollRef}
+          previewPageRefs={previewPageRefs}
+          previewPageObserverRef={previewPageObserverRef}
+          previewThumbRefs={previewThumbRefs}
+          onToggleThumbs={() => setPreviewThumbsOpen((prev) => !prev)}
+          onLayoutChange={onPreviewLayoutChange}
+          onPageSelect={onPreviewPageSelect}
+          onPageHover={onPreviewPageHover}
+          onZoomChange={onPreviewZoomChange}
+          onDownloadSource={onDownloadSource}
+          sourceDownloading={sourceDownloading}
+        />
         <section className="card contract-result">
           <div className="result-head">
             <div className="panel-title">{t.auditResult}</div>
@@ -1098,13 +1755,23 @@ export default function App() {
                 >
                   {exportingFormat === "docx_report" ? t.exporting : t.exportDocx}
                 </button>
+                {digitizedDocxAvailable && (
+                  <button
+                    type="button"
+                    className="primary outline"
+                    onClick={() => onExportReport("docx", "digitized_source")}
+                    disabled={!!exportingFormat}
+                  >
+                    {exportingFormat === "docx_digitized_source" ? t.exporting : digitizedExportLabel}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="primary outline"
                   onClick={() => onExportReport("docx", "comments")}
                   disabled={!!exportingFormat}
                 >
-                  {exportingFormat === "docx_comments" ? t.exporting : t.exportCommentedDocx}
+                  {exportingFormat === "docx_comments" ? t.exporting : commentedExportLabel}
                 </button>
               </div>
             )}
@@ -1117,6 +1784,17 @@ export default function App() {
           )}
           {contractResult && (
             <div className="result-body">
+              {showContractSummary && (
+                <div className="result-summary">
+                  <div className="result-title">{t.contractSummary}</div>
+                  <div className="summary-meta">
+                    <span>{t.clauseCount}: {contractMeta?.preview_clause_total ?? previewMeta?.clause_total ?? "-"}</span>
+                    <span>{t.contractSummaryStatus}: {contractSummaryStatusLabel}</span>
+                    <span>{uiLang === "zh" ? `${contractSummaryText.length} 字` : `${contractSummaryText.length} chars`}</span>
+                  </div>
+                  <div className={`summary-content${contractSummaryText ? "" : " is-empty"}`}>{contractSummaryText || contractSummaryNotice}</div>
+                </div>
+              )}
               <div className="result-summary">
                 <div className="result-title">{t.summary}</div>
                 <div className="summary-meta">
@@ -1125,6 +1803,9 @@ export default function App() {
                 </div>
                 <div className={`summary-content${summaryText ? "" : " is-empty"}`}>{summaryText || "-"}</div>
               </div>
+              {auditIncomplete && (
+                <div className="audit-restore-banner is-warning">{auditIncompleteNotice}</div>
+              )}
               <div className="result-risks">
                 <div className="result-title">{t.risks}</div>
                 {riskList.length > 0 ? (
@@ -1169,6 +1850,7 @@ export default function App() {
                           const location = r?.location || {}
                           const hasLocation = Boolean(String(location.anchor_id || "").trim())
                           const isActive = idx === activeRiskIndex
+                          const locateMeta = riskLocateMeta[String(idx)]
                           return (
                             <li
                               key={idx}
@@ -1186,10 +1868,9 @@ export default function App() {
                               <strong>{formatRiskLevel(r.level)}</strong>
                               <span>{r.type || "-"}</span>
                               <p>{r.issue || "-"}</p>
-                              <div className="risk-location">{t.location}: {formatRiskLocation(location)}</div>
+                              <div className="risk-location">{t.location}: {formatRiskLocation(location, locateMeta)}</div>
                               {(() => {
-                                const key = String(idx)
-                                const meta = riskLocateMeta[key]
+                                const meta = locateMeta
                                 if (!meta || !meta.strategy) return null
                                 const confidence = Math.max(0, Math.min(1, Number(meta.confidence || 0)))
                                 const confidencePercent = Math.round(confidence * 100)
@@ -1247,11 +1928,11 @@ export default function App() {
                         })}
                       </ul>
                     ) : (
-                      <div className="empty-risk">{t.emptyRisk}</div>
+                      <div className="empty-risk">{auditIncomplete ? t.auditIncompleteResult : t.emptyRisk}</div>
                     )}
                   </>
                 ) : (
-                  <div className="empty-risk">{t.emptyRisk}</div>
+                  <div className="empty-risk">{auditIncomplete ? t.auditIncompleteResult : t.emptyRisk}</div>
                 )}
               </div>
             </div>
@@ -1267,11 +1948,32 @@ export default function App() {
               <span>{t.queryMeta}: {contractMeta.retrieval_queries ?? 0}</span>
               <span>{t.promptMeta}: {contractMeta.prompt_tokens_est ?? "-"}</span>
               <span>{t.clauseCount}: {contractMeta.preview_clause_total ?? previewMeta?.clause_total ?? "-"}</span>
+              {(digitizationUsed || digitizedDocxAvailable) && (
+                <>
+                  <span>{t.digitizationStatus}: {digitizationStatusLabel}</span>
+                  <span>{t.digitizationVersion}: {contractMeta.digitization_version ?? 0}</span>
+                  <span>{t.digitizationMatchRate}: {digitizationMatchRateLabel}</span>
+                  <span>{t.digitizationLayout}: {contractMeta.digitization_layout_retained ? "on" : "off"}</span>
+                  <span>{t.digitizationParagraphs}: {contractMeta.digitization_paragraph_count ?? 0}</span>
+                  <span>{t.digitizationTables}: {contractMeta.digitization_table_count ?? 0}</span>
+                  <span>{t.digitizationImages}: {contractMeta.digitization_image_count ?? 0}</span>
+                </>
+              )}
               <span>ID: {documentId || "-"}</span>
             </div>
           )}
         </section>
       </div>
+      <AuditSnapshotHistoryPanel
+        t={t}
+        uiLang={uiLang}
+        user={user}
+        snapshots={snapshotHistory}
+        currentTaskId={currentTaskId}
+        selectedTaskIds={snapshotCompareSelection}
+        onToggleSelect={onToggleSnapshotCompare}
+        onLoadSnapshot={onLoadSnapshotHistory}
+      />
     </div>
   )
 }

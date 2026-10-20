@@ -1,4 +1,4 @@
-import { API_BASE, getAuthHeaders, requestBlob, requestJson } from "./base"
+import { API_BASE, getAuthHeaders, requestBlob, requestBlobResponse, requestJson } from "./base"
 
 export async function auditContract(formData) {
   return requestJson(`${API_BASE}/contracts/audit`, {
@@ -8,14 +8,28 @@ export async function auditContract(formData) {
   })
 }
 
-export async function getAuditProgress(auditId) {
+export async function getAuditProgress(auditId, options = {}) {
   return requestJson(`${API_BASE}/contracts/audit/${auditId}/progress`, {
-    headers: { ...getAuthHeaders() }
+    headers: { ...getAuthHeaders() },
+    signal: options.signal,
   })
 }
 
 export async function getUIConfig() {
   return requestJson(`${API_BASE}/contracts/ui-config`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function getPdfPipelineSummary() {
+  return requestJson(`${API_BASE}/contracts/pdf-pipeline/summary`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function getContractSummary(documentId, language = "zh") {
+  const query = new URLSearchParams({ language: String(language || "zh") }).toString()
+  return requestJson(`${API_BASE}/contracts/${documentId}/summary?${query}`, {
     headers: { ...getAuthHeaders() }
   })
 }
@@ -39,8 +53,15 @@ export async function getContractPreviewPageImage(documentId, pageNo) {
   })
 }
 
+export async function downloadContractSource(documentId, variant = "original") {
+  const query = new URLSearchParams({ variant: String(variant || "original") }).toString()
+  return requestBlob(`${API_BASE}/contracts/${documentId}/source?${query}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function exportContractReport(documentId, payload) {
-  return requestBlob(`${API_BASE}/contracts/${documentId}/report/export`, {
+  return requestBlobResponse(`${API_BASE}/contracts/${documentId}/report/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     body: JSON.stringify(payload || {})
