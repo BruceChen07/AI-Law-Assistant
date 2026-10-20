@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -23,6 +24,10 @@ READY_HTTP_TIMEOUT = 5
 DEFAULT_STARTUP_TIMEOUT = 60
 DEFAULT_STATUS_INTERVAL = 5
 TAIL_LINE_LIMIT = 80
+STRUCTURED_LOG_RE = re.compile(
+    r"^(?:\d{4}-\d{2}-\d{2} [0-9:,.-]+\s*\|\s*(?:DEBUG|INFO|WARNING|ERROR|CRITICAL)\s*\||(?:DEBUG|INFO|WARNING|ERROR|CRITICAL):)"
+)
+ERROR_CLASS_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception)\b")
 
 
 def configure_logger(log_dir: Path) -> logging.Logger:
@@ -145,11 +150,30 @@ def infer_log_level(stream_name: str, line: str) -> int:
         return logging.ERROR
     if " ERROR " in f" {text} " or text.startswith("ERROR"):
         return logging.ERROR
+    if ERROR_CLASS_RE.search(str(line or "")):
+        return logging.ERROR
+    if "EXCEPTION IN CALLBACK" in text or text.startswith("HANDLE: <HANDLE "):
+        return logging.ERROR
     if " WARNING " in f" {text} " or " WARN " in f" {text} " or text.startswith("WARNING"):
         return logging.WARNING
     if stream_name == "stderr" and "USERWARNING" in text:
         return logging.WARNING
     return logging.INFO
+
+
+def starts_error_block(line: str) -> bool:
+    text = str(line or "")
+    upper = text.upper()
+    return (
+        "TRACEBACK (MOST RECENT CALL LAST):" in upper
+        or "DURING HANDLING OF THE ABOVE EXCEPTION" in upper
+        or "EXCEPTION IN CALLBACK" in upper
+        or text.startswith("handle: <Handle ")
+    )
+
+
+def is_structured_log_line(line: str) -> bool:
+    return bool(STRUCTURED_LOG_RE.match(str(line or "")))
 
 
 @dataclass
@@ -203,6 +227,7 @@ class ServiceProcess:
             thread.start()
 
     def _relay_stream(self, logger: logging.Logger, stream_name: str, stream: TextIO) -> None:
+        error_block_active = False
         for raw_line in iter(stream.readline, ""):
             line = raw_line.rstrip()
             if not line:
@@ -212,7 +237,16 @@ class ServiceProcess:
                 with self.log_path.open("a", encoding="utf-8") as file_obj:
                     file_obj.write(entry + "\n")
                 self.tail_lines.append(entry)
-            level = infer_log_level(stream_name, line)
+            if error_block_active and is_structured_log_line(line):
+                error_block_active = False
+
+            if starts_error_block(line):
+                error_block_active = True
+                level = logging.ERROR
+            elif error_block_active:
+                level = logging.ERROR
+            else:
+                level = infer_log_level(stream_name, line)
             logger.log(level, "[%s] %s", self.name, line)
         stream.close()
 
@@ -243,7 +277,7 @@ def parse_args() -> argparse.Namespace:
         description="Start backend and frontend services with unified logging and status monitoring."
     )
     parser.add_argument("--backend-port", type=int,
-                        default=8000, help="Backend service port.")
+                        default=8001, help="Backend service port.")
     parser.add_argument("--frontend-port", type=int,
                         default=5173, help="Frontend dev server port.")
     parser.add_argument(
@@ -415,6 +449,9 @@ def main() -> int:
     backend_env["PYTHONUNBUFFERED"] = "1"
     backend_env.setdefault("PYTHONIOENCODING", "utf-8")
     frontend_env = os.environ.copy()
+    frontend_env["VITE_API_BASE"] = frontend_env.get(
+        "VITE_API_BASE", f"http://127.0.0.1:{args.backend_port}")
+    logger.info("frontend_api_base=%s", frontend_env["VITE_API_BASE"])
 
     services = [
         ServiceProcess(

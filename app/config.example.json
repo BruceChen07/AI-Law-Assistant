@@ -64,6 +64,11 @@
         "formula": true,
         "table": true,
         "model_source": "huggingface",
+        "model_source_fallback_enabled": true,
+        "fallback_model_source": "modelscope",
+        "hf_retry_count": 1,
+        "hf_connect_timeout_sec": 10,
+        "hf_download_timeout_sec": 30,
         "timeout": 900
     },
     "llm_config": {
@@ -77,6 +82,7 @@
     },
     "local_llm": {
         "enabled": true,
+        "runtime_mode": "local",
         "routing_enabled": true,
         "cloud_fallback_enabled": false,
         "timeout_sec": 30,
@@ -110,6 +116,7 @@
                 "tax_match_small": "small",
                 "entity_extract_small": "small"
             },
+            "contract_audit_force_env_cloud": false,
             "tax_match_use_small_model": true,
             "entity_extract_use_small_model": true,
             "high_risk_force_cloud": false
@@ -191,6 +198,7 @@
     "llm_trace_enabled": false,
     "llm_trace_dir": "../data/memory/llm_interactions",
     "llm_trace_max_chars": 12000,
+    "contract_summary_enabled": true,
     "rag_trace_enabled": true,
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,
@@ -217,6 +225,19 @@
         "docx_pdf_min_text_ratio": 0.35,
         "docx_pdf_gate_min_chars": 120,
         "docx_pdf_keep_file": false
+    },
+    "pdf_pipeline": {
+        "enabled": true,
+        "hybrid_enabled": true,
+        "force_scanned": false,
+        "scan_min_chars_per_page": 24,
+        "scan_ratio_for_ocr": 0.55,
+        "scan_ratio_for_digitize": 0.7,
+        "auto_digitize": false,
+        "prefer_digitized_for_audit": true,
+        "preview_render_enabled": true,
+        "preview_render_engine": "pdfium",
+        "preview_max_edge": 1800
     },
     "memory_use_long_hits": false,
     "memory_enable_long_memory": false,

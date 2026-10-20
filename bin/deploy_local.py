@@ -84,7 +84,8 @@ def command_exists(name: str) -> bool:
 
 def detect_os() -> Dict[str, str]:
     system = platform.system().lower()
-    info = {"system": system, "release": platform.release(), "machine": platform.machine()}
+    info = {"system": system, "release": platform.release(),
+            "machine": platform.machine()}
     if system == "linux":
         os_release = Path("/etc/os-release")
         if os_release.exists():
@@ -108,7 +109,8 @@ def get_node_version_text() -> str:
     if not command_exists("node"):
         return ""
     try:
-        result = run_command(["node", "--version"], capture_output=True, check=True)
+        result = run_command(["node", "--version"],
+                             capture_output=True, check=True)
         return str(result.stdout).strip().lstrip("v")
     except Exception:
         return ""
@@ -195,7 +197,8 @@ def get_physical_cores() -> int:
             return os.cpu_count() or 0
     if system == "linux":
         try:
-            result = run_command(["lscpu", "-p=CORE,SOCKET"], capture_output=True, check=True)
+            result = run_command(["lscpu", "-p=CORE,SOCKET"],
+                                 capture_output=True, check=True)
             pairs = set()
             for line in str(result.stdout).splitlines():
                 if not line or line.startswith("#"):
@@ -305,7 +308,8 @@ def build_model_profile(profile_name: str, memory_gb: float, physical_cores: int
 
 
 def dependency_catalog(selected_models: Dict[str, Any]) -> List[Dict[str, Any]]:
-    translation_dir = REPO_ROOT / "models" / "translation" / DEFAULT_TRANSLATION_MODEL.replace("/", "__")
+    translation_dir = REPO_ROOT / "models" / "translation" / \
+        DEFAULT_TRANSLATION_MODEL.replace("/", "__")
     return [
         {
             "name": "python",
@@ -376,7 +380,8 @@ def inspect_ollama_models() -> Dict[str, Any]:
     if not command_exists("ollama"):
         return {"available": False, "models": []}
     try:
-        result = run_command(["ollama", "list"], capture_output=True, check=True)
+        result = run_command(["ollama", "list"],
+                             capture_output=True, check=True)
     except Exception:
         return {"available": True, "models": []}
     models: List[str] = []
@@ -393,7 +398,8 @@ def inspect_ollama_models() -> Dict[str, Any]:
 def inspect_aux_models(config_path: Path, include_optional: bool) -> Dict[str, Any]:
     env = os.environ.copy()
     env["APP_CONFIG"] = str(config_path)
-    cmd = [sys.executable, str(REPO_ROOT / "bin" / "ensure_local_models.py"), "--check-only", "--types", "all"]
+    cmd = [sys.executable, str(
+        REPO_ROOT / "bin" / "ensure_local_models.py"), "--check-only", "--types", "all"]
     if include_optional:
         cmd.append("--include-optional")
     try:
@@ -478,13 +484,17 @@ def collect_missing_items(
         current_map["translation_model"] = {
             "current_version": ",".join(str(r.get("model_id") or "") for r in translation_rows),
             "available": (not include_optional) or (
-                all(bool(r.get("ok", False)) for r in translation_rows) if translation_rows else False
+                all(bool(r.get("ok", False))
+                    for r in translation_rows) if translation_rows else False
             ),
         }
     else:
-        current_map["embedding_models"] = {"current_version": "", "available": False}
-        current_map["reranker_models"] = {"current_version": "", "available": False}
-        current_map["translation_model"] = {"current_version": "", "available": not include_optional}
+        current_map["embedding_models"] = {
+            "current_version": "", "available": False}
+        current_map["reranker_models"] = {
+            "current_version": "", "available": False}
+        current_map["translation_model"] = {
+            "current_version": "", "available": not include_optional}
 
     missing = []
     for item in catalog:
@@ -541,7 +551,8 @@ def ensure_mineru_cli_available(venv_python: Optional[Path] = None) -> None:
         if candidate.exists():
             log(f"[OK] MinerU CLI 已安装在虚拟环境: {candidate}")
             return
-    raise DeployError("未检测到 mineru CLI。请先安装 Python 依赖，或确认虚拟环境中的 Scripts/bin 已加入 PATH。")
+    raise DeployError(
+        "未检测到 mineru CLI。请先安装 Python 依赖，或确认虚拟环境中的 Scripts/bin 已加入 PATH。")
 
 
 def ensure_ocr_dependencies(os_info: Dict[str, str], venv_python: Optional[Path] = None) -> None:
@@ -550,15 +561,18 @@ def ensure_ocr_dependencies(os_info: Dict[str, str], venv_python: Optional[Path]
         return
     system = os_info["system"]
     if venv_python is not None and venv_python.exists():
-        run_command([str(venv_python), "-m", "pip", "install", "-U", "mineru==3.1.5"])
+        run_command([str(venv_python), "-m", "pip",
+                    "install", "-U", "mineru==3.1.5"])
         ensure_mineru_cli_available(venv_python)
         return
     if system == "windows":
-        run_command(["cmd", "/c", str(REPO_ROOT / "bin" / "install_ocr_windows.bat")], cwd=REPO_ROOT)
+        run_command(["cmd", "/c", str(REPO_ROOT / "bin" /
+                    "install_ocr_windows.bat")], cwd=REPO_ROOT)
         ensure_mineru_cli_available()
         return
     if system == "darwin":
-        run_command(["bash", str(REPO_ROOT / "bin" / "install_ocr_macos.sh")], cwd=REPO_ROOT)
+        run_command(
+            ["bash", str(REPO_ROOT / "bin" / "install_ocr_macos.sh")], cwd=REPO_ROOT)
         ensure_mineru_cli_available()
         return
     raise DeployError("无法自动安装 MinerU。请先完成 Python 依赖安装后重试。")
@@ -573,7 +587,8 @@ def install_node_if_needed(os_info: Dict[str, str]) -> None:
     manager = detect_package_manager(os_info)
     if system == "windows":
         if manager == "winget":
-            run_command(["winget", "install", "-e", "--id", "OpenJS.NodeJS.LTS"])
+            run_command(["winget", "install", "-e",
+                        "--id", "OpenJS.NodeJS.LTS"])
         elif manager == "choco":
             run_command(["choco", "install", "nodejs-lts", "-y"])
         else:
@@ -621,7 +636,8 @@ def install_ollama_if_needed(os_info: Dict[str, str]) -> None:
     elif system == "darwin":
         run_command(["brew", "install", "ollama"])
     else:
-        run_command(["bash", "-lc", "curl -fsSL https://ollama.com/install.sh | sh"])
+        run_command(
+            ["bash", "-lc", "curl -fsSL https://ollama.com/install.sh | sh"])
     if not command_exists("ollama"):
         raise DeployError("Ollama 安装后仍不可用，请重新打开终端或手动确认 PATH。")
 
@@ -629,7 +645,8 @@ def install_ollama_if_needed(os_info: Dict[str, str]) -> None:
 def create_or_update_venv(venv_dir: Path) -> Path:
     if not venv_dir.exists():
         log(f"[START] 创建虚拟环境: {venv_dir}")
-        builder = venv.EnvBuilder(with_pip=True, clear=False, upgrade_deps=False)
+        builder = venv.EnvBuilder(
+            with_pip=True, clear=False, upgrade_deps=False)
         builder.create(str(venv_dir))
     else:
         log(f"[SKIP] 虚拟环境已存在: {venv_dir}")
@@ -640,8 +657,12 @@ def create_or_update_venv(venv_dir: Path) -> Path:
 
 
 def install_python_dependencies(venv_python: Path) -> None:
-    run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip", "setuptools", "wheel"])
-    run_command([str(venv_python), "-m", "pip", "install", "-r", str(APP_DIR / "requirements.txt")])
+    run_command([str(venv_python), "-m", "pip", "install",
+                "--upgrade", "pip", "setuptools", "wheel"])
+    run_command([str(venv_python), "-m", "pip",
+                "install", "pip-tools>=7.4,<8"])
+    run_command([str(venv_python), "-m", "piptools",
+                "sync", str(APP_DIR / "requirements.txt")])
     ensure_ocr_dependencies(detect_os(), venv_python=venv_python)
 
 
@@ -764,25 +785,36 @@ def write_local_config(
         "formula": False,
         "table": False,
         "model_source": "huggingface",
+        "model_source_fallback_enabled": True,
+        "fallback_model_source": "modelscope",
+        "hf_retry_count": 1,
+        "hf_connect_timeout_sec": 10,
+        "hf_download_timeout_sec": 30,
         "timeout": 900,
     }
     config["model_preflight_check_on_startup"] = True
     config["model_preflight_auto_download_on_startup"] = False
     config["model_preflight_include_optional"] = bool(enable_translation)
     config["model_preflight_require_all"] = True
-    translation_cfg = config.get("translation_config") if isinstance(config.get("translation_config"), dict) else {}
+    translation_cfg = config.get("translation_config") if isinstance(
+        config.get("translation_config"), dict) else {}
     translation_cfg["enabled"] = bool(enable_translation)
     translation_cfg["backend"] = "hy_mt_local"
     translation_cfg["mode"] = translation_cfg.get("mode") or "dual"
-    translation_cfg["cross_lang_source_query_enabled"] = bool(translation_cfg.get("cross_lang_source_query_enabled", False))
-    translation_cfg["model_id"] = str(translation_cfg.get("model_id") or DEFAULT_TRANSLATION_MODEL)
-    translation_cfg["model_dir"] = str(translation_cfg.get("model_dir") or translation_model_dir(translation_cfg["model_id"]))
+    translation_cfg["cross_lang_source_query_enabled"] = bool(
+        translation_cfg.get("cross_lang_source_query_enabled", False))
+    translation_cfg["model_id"] = str(translation_cfg.get(
+        "model_id") or DEFAULT_TRANSLATION_MODEL)
+    translation_cfg["model_dir"] = str(translation_cfg.get(
+        "model_dir") or translation_model_dir(translation_cfg["model_id"]))
     translation_cfg["device"] = str(translation_cfg.get("device") or "cpu")
-    translation_cfg["source_langs"] = translation_cfg.get("source_langs") or ["en"]
+    translation_cfg["source_langs"] = translation_cfg.get("source_langs") or [
+        "en"]
     translation_cfg["target_lang"] = translation_cfg.get("target_lang") or "zh"
     config["translation_config"] = translation_cfg
 
-    allow_origins = config.get("cors_allow_origins") if isinstance(config.get("cors_allow_origins"), list) else []
+    allow_origins = config.get("cors_allow_origins") if isinstance(
+        config.get("cors_allow_origins"), list) else []
     defaults = [
         f"http://localhost:{frontend_port}",
         f"http://127.0.0.1:{frontend_port}",
@@ -801,13 +833,15 @@ def write_local_config(
 def initialize_app(venv_python: Path, config_path: Path) -> None:
     env = os.environ.copy()
     env["APP_CONFIG"] = str(config_path)
-    run_command([str(venv_python), str(REPO_ROOT / "bin" / "init.py"), "--config-path", str(config_path)], cwd=REPO_ROOT, env=env)
+    run_command([str(venv_python), str(REPO_ROOT / "bin" / "init.py"),
+                "--config-path", str(config_path)], cwd=REPO_ROOT, env=env)
 
 
 def ensure_aux_models(venv_python: Path, config_path: Path, include_optional: bool) -> None:
     env = os.environ.copy()
     env["APP_CONFIG"] = str(config_path)
-    cmd = [str(venv_python), str(REPO_ROOT / "bin" / "ensure_local_models.py"), "--types", "all"]
+    cmd = [str(venv_python), str(REPO_ROOT / "bin" /
+                                 "ensure_local_models.py"), "--types", "all"]
     if include_optional:
         cmd.append("--include-optional")
     run_command(cmd, cwd=REPO_ROOT, env=env)
@@ -888,7 +922,8 @@ def stop_pid(pid: int) -> None:
         return
     system = platform.system().lower()
     if system == "windows":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, check=False)
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                       capture_output=True, text=True, check=False)
         return
     try:
         os.kill(pid, signal.SIGTERM)
@@ -923,7 +958,8 @@ def start_and_verify_services(
         log_path=backend_log,
     )
     frontend_proc = start_service_process(
-        [npm_cmd, "run", "dev", "--", "--host", "0.0.0.0", "--port", str(frontend_port)],
+        [npm_cmd, "run", "dev", "--", "--host",
+            "0.0.0.0", "--port", str(frontend_port)],
         cwd=WEB_DIR,
         env=frontend_env,
         log_path=frontend_log,
@@ -941,8 +977,10 @@ def start_and_verify_services(
         }
     )
 
-    backend_result = wait_for_http(f"http://127.0.0.1:{backend_port}/health", timeout_sec=60)
-    frontend_result = wait_for_http(f"http://127.0.0.1:{frontend_port}", timeout_sec=60)
+    backend_result = wait_for_http(
+        f"http://127.0.0.1:{backend_port}/health", timeout_sec=60)
+    frontend_result = wait_for_http(
+        f"http://127.0.0.1:{frontend_port}", timeout_sec=60)
 
     if not backend_result.get("ok"):
         stop_pid(frontend_proc.pid)
@@ -1014,8 +1052,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="AI Law Assistant 本地完整部署脚本（预检、安装、模型、配置、启动、验证）。"
     )
-    parser.add_argument("--config-path", default=str(DEFAULT_CONFIG_PATH), help="app/config.json 路径。")
-    parser.add_argument("--venv-dir", default=str(APP_DIR / ".venv"), help="虚拟环境目录。")
+    parser.add_argument(
+        "--config-path", default=str(DEFAULT_CONFIG_PATH), help="app/config.json 路径。")
+    parser.add_argument(
+        "--venv-dir", default=str(APP_DIR / ".venv"), help="虚拟环境目录。")
     parser.add_argument(
         "--profile",
         choices=["auto", "full", "balanced", "lite"],
@@ -1025,15 +1065,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--main-model", default="", help="手动覆盖主模型标签。")
     parser.add_argument("--small-model", default="", help="手动覆盖轻量模型标签。")
     parser.add_argument("--backend-port", type=int, default=8000, help="后端端口。")
-    parser.add_argument("--frontend-port", type=int, default=5173, help="前端端口。")
-    parser.add_argument("--check-only", action="store_true", help="仅输出缺失项清单，不执行安装。")
-    parser.add_argument("--skip-system-deps", action="store_true", help="跳过系统依赖安装。")
-    parser.add_argument("--skip-python-deps", action="store_true", help="跳过 Python 依赖安装。")
-    parser.add_argument("--skip-frontend-deps", action="store_true", help="跳过前端依赖安装。")
-    parser.add_argument("--skip-models", action="store_true", help="跳过模型下载与准备。")
-    parser.add_argument("--skip-start", action="store_true", help="跳过服务启动与连通性验证。")
-    parser.add_argument("--disable-translation", action="store_true", help="关闭本地翻译模型准备与配置。")
-    parser.add_argument("--keep-running", action="store_true", help="验证完成后保持服务运行。")
+    parser.add_argument("--frontend-port", type=int,
+                        default=5173, help="前端端口。")
+    parser.add_argument("--check-only", action="store_true",
+                        help="仅输出缺失项清单，不执行安装。")
+    parser.add_argument("--skip-system-deps",
+                        action="store_true", help="跳过系统依赖安装。")
+    parser.add_argument("--skip-python-deps",
+                        action="store_true", help="跳过 Python 依赖安装。")
+    parser.add_argument("--skip-frontend-deps",
+                        action="store_true", help="跳过前端依赖安装。")
+    parser.add_argument(
+        "--skip-models", action="store_true", help="跳过模型下载与准备。")
+    parser.add_argument("--skip-start", action="store_true",
+                        help="跳过服务启动与连通性验证。")
+    parser.add_argument("--disable-translation",
+                        action="store_true", help="关闭本地翻译模型准备与配置。")
+    parser.add_argument(
+        "--keep-running", action="store_true", help="验证完成后保持服务运行。")
     parser.add_argument(
         "--report-json",
         default=str(REPORT_DIR / "local_deploy_report.json"),
@@ -1054,7 +1103,8 @@ def main() -> int:
     physical_cores = get_physical_cores()
     gpu_info = get_gpu_info()
 
-    selected_models = build_model_profile(args.profile, memory_gb, physical_cores)
+    selected_models = build_model_profile(
+        args.profile, memory_gb, physical_cores)
     if args.main_model:
         selected_models["main_model"] = args.main_model
     if args.small_model:
@@ -1062,7 +1112,8 @@ def main() -> int:
 
     ensure_config_exists(config_path)
     include_optional = not args.disable_translation
-    missing_before = collect_missing_items(selected_models, config_path, include_optional=include_optional)
+    missing_before = collect_missing_items(
+        selected_models, config_path, include_optional=include_optional)
 
     if args.check_only:
         report = build_report(
@@ -1083,7 +1134,8 @@ def main() -> int:
         return 0
 
     if sys.version_info < (3, 12):
-        raise DeployError(f"当前 Python 版本为 {get_python_version_text()}，需 3.12+。")
+        raise DeployError(
+            f"当前 Python 版本为 {get_python_version_text()}，需 3.12+。")
     if memory_gb < float(selected_models["required_ram_gb"]):
         raise DeployError(
             f"当前内存 {memory_gb} GB，不满足所选档位 {selected_models['profile']} 的最低要求 "
@@ -1123,7 +1175,8 @@ def main() -> int:
     initialize_app(venv_python, config_path)
 
     if not args.skip_models:
-        ensure_aux_models(venv_python, config_path, include_optional=include_optional)
+        ensure_aux_models(venv_python, config_path,
+                          include_optional=include_optional)
         ensure_ollama_models(venv_python, selected_models)
 
     service_summary: Dict[str, Any] = {"skipped": True, "reason": "skip_start"}
@@ -1136,7 +1189,8 @@ def main() -> int:
             keep_running=args.keep_running,
         )
 
-    missing_after = collect_missing_items(selected_models, config_path, include_optional=include_optional)
+    missing_after = collect_missing_items(
+        selected_models, config_path, include_optional=include_optional)
     report = build_report(
         os_info=os_info,
         memory_gb=memory_gb,

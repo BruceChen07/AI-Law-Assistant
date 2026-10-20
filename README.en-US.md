@@ -69,7 +69,22 @@ cd AI-Law-Assistant
 
 ```bash
 cd app
-pip install -r requirements.txt
+python -m pip install -U pip
+python -m pip install "pip-tools>=7.4,<8"
+python -m piptools sync requirements.txt dev-requirements.txt
+```
+
+Dependency maintenance rules:
+
+- Only edit `app/requirements.in` and `app/dev-requirements.in`
+- Do not edit `app/requirements.txt` or `app/dev-requirements.txt` by hand
+- After changing dependencies, run:
+
+```bash
+cd app
+python -m piptools compile --resolver=backtracking --output-file requirements.txt requirements.in
+python -m piptools compile --resolver=backtracking --output-file dev-requirements.txt dev-requirements.in
+python -m piptools sync requirements.txt dev-requirements.txt
 ```
 
 ### 3. Configure Environment

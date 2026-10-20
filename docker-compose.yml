@@ -1,11 +1,26 @@
-version: "3.9"
 services:
   backend:
     build: .
+    image: ai-law-assistant:latest
     ports:
       - "8000:8000"
+    environment:
+      # Keep the container port deterministic so it always matches the mapping
+      # above; the app otherwise auto-switches to 8001 when 8000 is busy.
+      APP_PORT: "8000"
+      APP_PORT_AUTO_SWITCH: "0"
+      # LLM credentials are read from the host environment (or a .env file next
+      # to this file). Never commit them.
+      LLM_API_BASE: ${LLM_API_BASE:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
     volumes:
       - ./data:/app/data
       - ./models:/app/models
-      - ./log:/app/log
+      # log_dir in app/config.json is "../logs" -> /app/logs (not /app/log).
+      - ./logs:/app/logs
       - ./app/config.json:/app/app/config.json
+    restart: unless-stopped

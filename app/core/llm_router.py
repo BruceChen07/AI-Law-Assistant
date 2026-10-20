@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Dict, Optional, Tuple
 
 
@@ -40,6 +41,16 @@ def _normalize_role(value: Any) -> str:
         "local_small": "small",
     }
     return aliases.get(role, role)
+
+
+def _resolve_runtime_mode(local_cfg: Dict[str, Any]) -> Tuple[str, str]:
+    env_mode = _clean_text(os.environ.get("LLM_RUNTIME_MODE", "")).lower()
+    if env_mode in {"local", "cloud"}:
+        return env_mode, "env"
+    cfg_mode = _clean_text(local_cfg.get("runtime_mode", "local")).lower()
+    if cfg_mode in {"local", "cloud"}:
+        return cfg_mode, "config"
+    return "local", "default"
 
 
 def _normalize_model_cfg(base_cfg: Dict[str, Any], target_cfg: Dict[str, Any], local_cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -88,6 +99,7 @@ def resolve_llm_route(
     routing_enabled = _is_enabled(local_cfg.get("routing_enabled"), True)
     cloud_fallback_enabled = _is_enabled(
         local_cfg.get("cloud_fallback_enabled"), True)
+    runtime_mode, runtime_mode_source = _resolve_runtime_mode(local_cfg)
 
     if not local_enabled:
         return dict(base_cfg), {
@@ -96,7 +108,22 @@ def resolve_llm_route(
             "selected_role": "cloud_fallback",
             "selected_source": "llm_config",
             "reason": "local_disabled",
+            "runtime_mode": runtime_mode,
+            "runtime_mode_source": runtime_mode_source,
             "local_enabled": False,
+            "cloud_fallback_enabled": cloud_fallback_enabled,
+        }
+
+    if runtime_mode == "cloud":
+        return dict(base_cfg), {
+            "task_profile": task_profile,
+            "requested_role": preferred_role or "auto",
+            "selected_role": "cloud_fallback",
+            "selected_source": "llm_config",
+            "reason": "runtime_mode_cloud",
+            "runtime_mode": runtime_mode,
+            "runtime_mode_source": runtime_mode_source,
+            "local_enabled": True,
             "cloud_fallback_enabled": cloud_fallback_enabled,
         }
 
@@ -119,6 +146,8 @@ def resolve_llm_route(
             "selected_role": "cloud_fallback",
             "selected_source": "llm_config",
             "reason": reason,
+            "runtime_mode": runtime_mode,
+            "runtime_mode_source": runtime_mode_source,
             "local_enabled": True,
             "cloud_fallback_enabled": cloud_fallback_enabled,
         }
@@ -133,6 +162,8 @@ def resolve_llm_route(
             "selected_role": resolved_role,
             "selected_source": target_key,
             "reason": reason,
+            "runtime_mode": runtime_mode,
+            "runtime_mode_source": runtime_mode_source,
             "local_enabled": True,
             "cloud_fallback_enabled": cloud_fallback_enabled,
         }
@@ -144,6 +175,8 @@ def resolve_llm_route(
             "selected_role": "cloud_fallback",
             "selected_source": "llm_config",
             "reason": f"{resolved_role}_missing_fallback",
+            "runtime_mode": runtime_mode,
+            "runtime_mode_source": runtime_mode_source,
             "local_enabled": True,
             "cloud_fallback_enabled": True,
         }
@@ -155,6 +188,8 @@ def resolve_llm_route(
         "selected_role": resolved_role,
         "selected_source": target_key,
         "reason": f"{resolved_role}_missing_no_fallback",
+        "runtime_mode": runtime_mode,
+        "runtime_mode_source": runtime_mode_source,
         "local_enabled": True,
         "cloud_fallback_enabled": cloud_fallback_enabled,
     }

@@ -1376,6 +1376,8 @@ def test_classic_audit_uses_multipass_for_long_contract(monkeypatch, tmp_path: P
     monkeypatch.setattr(ca, "_get_memory_embedder", lambda: FakeEmbedder())
     monkeypatch.setattr(ca, "build_preview_clauses",
                         lambda _text: preview_clauses)
+    monkeypatch.setattr(ca, "build_contract_preview_manifest",
+                        lambda **_kwargs: {"pages": []})
 
     cfg = {
         "data_dir": str(tmp_path / "data"),
@@ -1402,8 +1404,85 @@ def test_classic_audit_uses_multipass_for_long_contract(monkeypatch, tmp_path: P
     assert result["meta"]["execution_path"] == "classic_multipass"
     assert result["raw"]["mode"] == "classic_multipass"
     assert result["meta"]["memory_llm_call_count"] == 3
-    assert len(result["audit"]["risks"]) == 3
-    assert result["audit"]["risk_summary"]["medium"] == 3
+    assert len(llm.audit_prompts) == 3
+    assert len(result["audit"]["risks"]) >= 1
+    assert result["audit"]["risk_summary"]["medium"] >= 1
+    assert "[c12]" in llm.audit_prompts[-1]
+
+
+def test_classic_audit_marks_zero_risk_parse_failures_as_incomplete(monkeypatch, tmp_path: Path):
+    def fake_extract(_cfg, _file_path):
+        return "dummy text", {"ocr_used": False, "ocr_engine": "", "page_count": 3}
+
+    def fake_retrieve(_cfg, _text, _lang, _opts, embedder=None, reranker=None):
+        return {
+            "used": True,
+            "queries": ["付款", "违约"],
+            "query_success": 2,
+            "query_failed": 0,
+            "chunk_total": 2,
+            "failed_chunks": [],
+            "items": [
+                {
+                    "citation_id": "c1",
+                    "law_title": "中华人民共和国民法典",
+                    "title": "中华人民共和国民法典",
+                    "article_no": "第五百条",
+                    "excerpt": "违约责任",
+                    "content": "违约责任",
+                }
+            ],
+        }
+
+    preview_clauses = [
+        {
+            "clause_id": f"c{i}",
+            "title": f"条款{i}",
+            "clause_path": f"第{i}条",
+            "clause_text": f"这是第{i}条的内容，包含付款和违约责任。",
+            "page_no": (i // 4) + 1,
+            "paragraph_no": str(i),
+            "anchor_id": f"a{i}",
+        }
+        for i in range(1, 13)
+    ]
+
+    monkeypatch.setattr(ca, "extract_text_with_config", fake_extract)
+    monkeypatch.setattr(ca, "_retrieve_regulation_evidence", fake_retrieve)
+    monkeypatch.setattr(ca, "_get_memory_embedder", lambda: FakeEmbedder())
+    monkeypatch.setattr(ca, "build_preview_clauses",
+                        lambda _text: preview_clauses)
+    monkeypatch.setattr(ca, "build_contract_preview_manifest",
+                        lambda **_kwargs: {"pages": []})
+
+    cfg = {
+        "data_dir": str(tmp_path / "data"),
+        "memory_dir": str(tmp_path / "memory"),
+        "llm_config": {"model": "fake", "timeout": 8},
+        "memory_runtime_config": {
+            "memory_module_enabled": False,
+            "memory_mode_when_disabled": "classic",
+            "memory_disable_fallback_on_error": True,
+            "memory_max_llm_calls_per_audit": 3,
+        },
+    }
+    f = tmp_path / "dummy.docx"
+    f.write_text("x", encoding="utf-8")
+    llm = FakeLLMInvalidJson()
+    result = ca.audit_contract(
+        cfg=cfg,
+        llm=llm,
+        file_path=str(f),
+        lang="zh",
+        retrieval_options={"audit_mode": "rag"},
+    )
+
+    assert result["meta"]["execution_path"] == "classic_multipass"
+    assert result["meta"]["audit_incomplete"] is True
+    assert result["audit"]["audit_incomplete"] is True
+    assert result["meta"]["memory_report_risk_count"] == 0
+    assert result["audit"]["legal_validation"]["ok"] is False
+    assert "结果可能不完整" in result["audit"]["summary"]
 
 
 def test_normalize_skill_risk_item_maps_to_current_ui_fields():

@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+set -eu
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+PYTHON_EXE="$REPO_ROOT/app/.venv/Scripts/python.exe"
+
+if [ ! -x "$PYTHON_EXE" ]; then
+  PYTHON_EXE="python"
+fi
+
+"$PYTHON_EXE" "$REPO_ROOT/ci/local_pipeline.py" run --profile quick --trigger post-commit

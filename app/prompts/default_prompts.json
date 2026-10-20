@@ -8,12 +8,12 @@
       "en": "You are a senior contract audit lawyer. Output JSON only."
     },
     "localized_focus_texts": {
-      "zh": "",
-      "en": ""
+      "zh": "关注税务赔偿条款是否明确规定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失的，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准，避免仅依据单方主张或初步通知直接认定赔偿责任。",
+      "en": "Check whether tax indemnity clauses clearly provide that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges should be determined based on the final effective decision of the tax authority or an effective court judgment, rather than a unilateral claim or preliminary notice."
     },
     "localized_template_texts": {
-      "zh": "请仅根据以下合同条款与法规白名单完成审计，不要输出推理过程。\n\n法规白名单：\n【法规白名单】\n\n合同条款：\n【合同条款】\n\n请严格按照以下 JSON 结构输出：\n【输出JSON结构】",
-      "en": "Use only the contract clauses and regulation whitelist below for the audit. Do not output your reasoning process.\n\nRegulation Whitelist:\n[Regulation Whitelist]\n\nContract Clauses:\n[Contract Clauses]\n\nReturn strict JSON using this structure:\n[Output JSON Schema]"
+      "zh": "请仅根据以下合同条款与法规白名单完成审计，不要输出推理过程。\n请特别关注税务赔偿条款是否明确约定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失时，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准；若条款仅依据单方主张、催告函、初步通知、内部认定或未最终生效的处理结果直接触发赔偿责任，应识别相关风险。\n\n法规白名单：\n【法规白名单】\n\n合同条款：\n【合同条款】\n\n请严格按照以下 JSON 结构输出：\n【输出JSON结构】",
+      "en": "Use only the contract clauses and regulation whitelist below for the audit. Do not output your reasoning process.\nPay special attention to whether any tax indemnity clause clearly states that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges must be determined based on the final effective decision of the tax authority or an effective court judgment. If the clause allows indemnity to be triggered directly by a unilateral claim, demand letter, preliminary notice, internal determination, or any non-final outcome, identify the related risk.\n\nRegulation Whitelist:\n[Regulation Whitelist]\n\nContract Clauses:\n[Contract Clauses]\n\nReturn strict JSON using this structure:\n[Output JSON Schema]"
     },
     "placeholder_map": {
       "whitelist_text": {
@@ -30,7 +30,7 @@
       }
     },
     "system_text": "{% if lang == 'en' %}You are a senior contract audit lawyer. Output ONLY JSON.{% else %}你是资深合同审计律师。只输出JSON。{% endif %}",
-    "template_text": "{% if lang == 'en' %}Use only the contract text and whitelist evidence below.\nDo not output reasoning process.\nWhitelist:\n{{ whitelist_text }}\n\nContract Clauses:\n{{ contract_clauses }}\n\nJSON: {{ json_schema }}{% else %}仅根据合同文本与白名单证据输出结果；不要输出推理过程。\n白名单:\n{{ whitelist_text }}\n\n合同条款:\n{{ contract_clauses }}\n\nJSON: {{ json_schema }}{% endif %}",
+    "template_text": "{% if lang == 'en' %}Use only the contract text and whitelist evidence below.\nDo not output reasoning process.\nPay special attention to whether any tax indemnity clause clearly states that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges must be determined based on the final effective decision of the tax authority or an effective court judgment. If the clause allows indemnity to be triggered directly by a unilateral claim, demand letter, preliminary notice, internal determination, or any non-final outcome, identify the related risk.\nWhitelist:\n{{ whitelist_text }}\n\nContract Clauses:\n{{ contract_clauses }}\n\nJSON: {{ json_schema }}{% else %}仅根据合同文本与白名单证据输出结果；不要输出推理过程。\n请特别关注税务赔偿条款是否明确约定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失时，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准；若条款仅依据单方主张、催告函、初步通知、内部认定或未最终生效的处理结果直接触发赔偿责任，应识别相关风险。\n白名单:\n{{ whitelist_text }}\n\n合同条款:\n{{ contract_clauses }}\n\nJSON: {{ json_schema }}{% endif %}",
     "sample_input_json": {
       "lang": "zh",
       "whitelist_text": "- C1 [citation_1] Tax Law Article 1",
@@ -42,6 +42,62 @@
     "scene_key": "contract_audit.classic_json"
   },
   {
+    "prompt_key": "contract_audit.contract_summary",
+    "name": "Contract Audit Whole Contract Summary",
+    "description": "Concise whole-contract summary prompt displayed above the risk overview.",
+    "localized_system_texts": {
+      "zh": "你是资深合同分析助手。请基于合同原文输出简洁摘要，不要编造。",
+      "en": "You are a senior contract analysis assistant. Summarize the contract faithfully and concisely."
+    },
+    "localized_focus_texts": {
+      "zh": "",
+      "en": ""
+    },
+    "localized_template_texts": {
+      "zh": "请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 【合同数量】 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. 【摘要标题】\n\n合同在说什么：\n请用 2 至 3 句概括合同目的、合作背景和交易类型。\n\n核心安排：\n请用 2 至 3 句概括关键商业条款，优先包括供货/服务、结算付款、开票、返利、保证金、退货、违约、终止等机制；若合同未明确则不要臆测。\n\n税务审核提示：\n请用 2 至 3 句仅提示最值得税务审核人员优先关注的涉税口径或交易实质问题，不要展开法规分析，不要输出修改建议。\n\n来源文件：【来源文件】\n\n合同页数：\n【合同页数】\n\n条款数：\n【条款数】\n\n合同内容：\n【合同内容】",
+      "en": "Output strictly in the following format. Do not return JSON and do not add extra notes outside the template.\n\nContract Content Brief Summary\n\nQuick Read for Tax Reviewers\n\nTotal [Contract Document Count] Contract / Supplement Agreement\n\nInstructions\n\nThis document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n1. [Summary Title]\n\nWhat the contract is about:\nUse 2 to 3 sentences to summarize the contract purpose, business background, and transaction type.\n\nCore arrangement:\nUse 2 to 3 sentences to summarize the key commercial terms, prioritizing supply/service scope, settlement and payment, invoicing, rebates, deposits, returns, breach, and termination mechanisms. Do not speculate when the contract is silent.\n\nTax review note:\nUse 2 to 3 sentences to highlight only the most important tax-review concerns or transaction-substance issues. Do not provide legal analysis or amendment advice.\n\nSource file: [Source File Name]\n\nPage Count:\n[Contract Page Count]\n\nClause Count:\n[Contract Clause Count]\n\nContract Content:\n[Contract Content]"
+    },
+    "placeholder_map": {
+      "contract_document_count": {
+        "zh": "【合同数量】",
+        "en": "[Contract Document Count]"
+      },
+      "contract_summary_title": {
+        "zh": "【摘要标题】",
+        "en": "[Summary Title]"
+      },
+      "source_filename": {
+        "zh": "【来源文件】",
+        "en": "[Source File Name]"
+      },
+      "contract_page_count": {
+        "zh": "【合同页数】",
+        "en": "[Contract Page Count]"
+      },
+      "contract_clause_count": {
+        "zh": "【条款数】",
+        "en": "[Contract Clause Count]"
+      },
+      "contract_text": {
+        "zh": "【合同内容】",
+        "en": "[Contract Content]"
+      }
+    },
+    "system_text": "{% if lang == 'en' %}You are a senior contract analysis assistant. Summarize the contract faithfully and concisely.{% else %}你是资深合同分析助手。请基于合同原文输出简洁摘要，不要编造。{% endif %}",
+    "template_text": "{% if lang == 'en' %}Output strictly in the following format. Do not return JSON and do not add extra notes outside the template.\n\nContract Content Brief Summary\n\nQuick Read for Tax Reviewers\n\nTotal {{ contract_document_count }} Contract / Supplement Agreement\n\nInstructions\n\nThis document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n1. {{ contract_summary_title }}\n\nWhat the contract is about:\nUse 2 to 3 sentences to summarize the contract purpose, business background, and transaction type.\n\nCore arrangement:\nUse 2 to 3 sentences to summarize the key commercial terms, prioritizing supply/service scope, settlement and payment, invoicing, rebates, deposits, returns, breach, and termination mechanisms. Do not speculate when the contract is silent.\n\nTax review note:\nUse 2 to 3 sentences to highlight only the most important tax-review concerns or transaction-substance issues. Do not provide legal analysis or amendment advice.\n\nSource file: {{ source_filename }}\n\nPage Count:\n{{ contract_page_count }}\n\nClause Count:\n{{ contract_clause_count }}\n\nContract Content:\n{{ contract_text }}{% else %}请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 {{ contract_document_count }} 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. {{ contract_summary_title }}\n\n合同在说什么：\n请用 2 至 3 句概括合同目的、合作背景和交易类型。\n\n核心安排：\n请用 2 至 3 句概括关键商业条款，优先包括供货/服务、结算付款、开票、返利、保证金、退货、违约、终止等机制；若合同未明确则不要臆测。\n\n税务审核提示：\n请用 2 至 3 句仅提示最值得税务审核人员优先关注的涉税口径或交易实质问题，不要展开法规分析，不要输出修改建议。\n\n来源文件：{{ source_filename }}\n\n合同页数：\n{{ contract_page_count }}\n\n条款数：\n{{ contract_clause_count }}\n\n合同内容：\n{{ contract_text }}{% endif %}",
+    "sample_input_json": {
+      "lang": "zh",
+      "contract_document_count": 1,
+      "contract_summary_title": "华润万家购销合同2026年修订版",
+      "source_filename": "华润万家购销合同2026年修订-可编辑文字版.docx",
+      "contract_page_count": 12,
+      "contract_clause_count": 38,
+      "contract_text": "甲乙双方就年度采购合作达成如下约定：乙方按甲方订单供货，甲方按约验收并付款。乙方应按约开具增值税发票，双方约定违约责任与保密义务。"
+    },
+    "source_module": "app.services.contract_audit._build_contract_summary",
+    "scene_key": "contract_audit.contract_summary"
+  },
+  {
     "prompt_key": "audit_prompt.tax_audit_json",
     "name": "Tax Audit JSON Prompt",
     "description": "Tax-focused contract audit prompt used by audit_prompt helpers.",
@@ -50,12 +106,12 @@
       "en": "You are a contract audit assistant. Output strict JSON only."
     },
     "localized_focus_texts": {
-      "zh": "优先识别涉税条款风险，重点关注税率、开票、纳税义务、代扣代缴与税务合规责任。",
-      "en": "Prioritize tax-related clauses and focus on tax rates, invoicing, tax obligations, withholding duties, and tax compliance responsibilities."
+      "zh": "优先识别涉税条款风险，重点关注税率、开票、纳税义务、代扣代缴、税务合规责任，以及税务赔偿条款是否以税务机关最终生效认定结果或司法机关生效裁判结果作为责任和损失金额认定依据。",
+      "en": "Prioritize tax-related clauses and focus on tax rates, invoicing, tax obligations, withholding duties, tax compliance responsibilities, and whether tax indemnity clauses rely on the final effective decision of the tax authority or an effective court judgment to determine liability and loss amount."
     },
     "localized_template_texts": {
-      "zh": "请对合同进行财税与法律风险审计，优先引用给定法规证据。\n需包含涉税风险与重要法律合规风险。\n仅输出严格 JSON，包含字段：summary, executive_opinion, risk_summary, risks, citations。\nexecutive_opinion 是给税务团队的前置审核意见数组，需简洁可执行。\nrisk_summary 是对象，字段：high, medium, low。\nrisks 为数组，元素字段：level, type, issue, evidence, suggestion, law_reference, citation_id。\ncitations 为数组，元素字段：citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry。\n如无风险，risks 为空数组，risk_summary 三个字段为 0。\n不要为了覆盖等级而强行输出 high/medium/low 各一条，某个等级可以为 0。\n请尽可能完整列出识别到的风险，不做人为数量限制。\n若无法匹配证据，citation_id 留空字符串。\n\n法规证据列表：\n【法规证据列表】\n\n合同内容：\n【合同内容】",
-      "en": "Analyze the contract and identify tax, compliance, and legal risks using the provided regulation evidence when available.\nInclude both tax-related findings and important legal compliance issues.\nReturn strict JSON with the keys: summary, executive_opinion, risk_summary, risks, citations.\nexecutive_opinion is an array of concise, action-first suggestions for the tax team.\nrisk_summary is an object with the keys: high, medium, low.\nrisks is an array of objects with the keys: level, type, issue, evidence, suggestion, law_reference, citation_id.\ncitations is an array of objects with the keys: citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry.\nIf no risk is found, return an empty risks array and set all risk_summary values to 0.\nDo not force one item for each level. Any level can be 0.\nList all identifiable risks without artificial quantity limits.\nIf no matching evidence is found, citation_id should be an empty string.\n\nRegulation Evidence List:\n[Regulation Evidence List]\n\nContract Content:\n[Contract Content]"
+      "zh": "请对合同进行财税与法律风险审计，优先引用给定法规证据。\n需包含涉税风险与重要法律合规风险。\n请特别关注税务赔偿条款是否明确约定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失时，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准；若条款仅依据单方主张、催告函、初步通知、内部认定或未最终生效的处理结果直接触发赔偿责任，应识别相关风险。\n仅输出严格 JSON，包含字段：summary, executive_opinion, risk_summary, risks, citations。\nexecutive_opinion 是给税务团队的前置审核意见数组，需简洁可执行。\nrisk_summary 是对象，字段：high, medium, low。\nrisks 为数组，元素字段：level, type, issue, evidence, suggestion, law_reference, citation_id。\ncitations 为数组，元素字段：citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry。\n如无风险，risks 为空数组，risk_summary 三个字段为 0。\n不要为了覆盖等级而强行输出 high/medium/low 各一条，某个等级可以为 0。\n请尽可能完整列出识别到的风险，不做人为数量限制。\n若无法匹配证据，citation_id 留空字符串。\n\n法规证据列表：\n【法规证据列表】\n\n合同内容：\n【合同内容】",
+      "en": "Analyze the contract and identify tax, compliance, and legal risks using the provided regulation evidence when available.\nInclude both tax-related findings and important legal compliance issues.\nPay special attention to whether any tax indemnity clause clearly states that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges must be determined based on the final effective decision of the tax authority or an effective court judgment. If the clause allows indemnity to be triggered directly by a unilateral claim, demand letter, preliminary notice, internal determination, or any non-final outcome, identify the related risk.\nReturn strict JSON with the keys: summary, executive_opinion, risk_summary, risks, citations.\nexecutive_opinion is an array of concise, action-first suggestions for the tax team.\nrisk_summary is an object with the keys: high, medium, low.\nrisks is an array of objects with the keys: level, type, issue, evidence, suggestion, law_reference, citation_id.\ncitations is an array of objects with the keys: citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry.\nIf no risk is found, return an empty risks array and set all risk_summary values to 0.\nDo not force one item for each level. Any level can be 0.\nList all identifiable risks without artificial quantity limits.\nIf no matching evidence is found, citation_id should be an empty string.\n\nRegulation Evidence List:\n[Regulation Evidence List]\n\nContract Content:\n[Contract Content]"
     },
     "placeholder_map": {
       "evidence_block": {
@@ -68,7 +124,7 @@
       }
     },
     "system_text": "{% if lang == 'en' %}You are a contract audit assistant. Output strict JSON only.{% else %}你是合同审计助手，仅输出严格JSON。{% endif %}",
-    "template_text": "{% if lang == 'en' %}{% if tax_focus %}Prioritize tax-related regulations and tax implications in obligations, invoicing, withholding, and tax liabilities. {% endif %}Analyze the contract and identify tax/compliance and legal risks using the regulation evidence list when available. Include both tax-related findings and important legal compliance issues. Return strict JSON with keys: summary, executive_opinion, risk_summary, risks, citations. executive_opinion is an array of concise action-first suggestions for tax team. risk_summary is an object with keys: high, medium, low. risks is an array of objects with keys: level, type, issue, evidence, suggestion, law_reference, citation_id. citations is an array of objects with keys: citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry. If no risk, return risks as empty array and risk_summary values as 0. Do not force one item for each level. A level can be zero if not present. List all identifiable risks without artificial quantity limits. If no matching citation, citation_id should be empty string. Regulation evidence list:\n{{ evidence_block }}\nContract:\n{{ contract_text }}{% else %}{% if tax_focus %}优先识别涉税条款风险，重点关注税率、开票、纳税义务、代扣代缴与税务合规责任。{% endif %}对合同进行财税与法律风险审计，优先引用给定法规证据。需包含涉税风险与重要法律合规风险。仅输出严格JSON，包含字段：summary, executive_opinion, risk_summary, risks, citations。executive_opinion是给税务团队的前置审核意见数组，需简洁可执行。risk_summary是对象，字段：high, medium, low。risks为数组，元素字段：level, type, issue, evidence, suggestion, law_reference, citation_id。citations为数组，元素字段：citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry。如无风险，risks为空数组，risk_summary三个字段为0。不要为了覆盖等级而强行输出high/medium/low各一条，某个等级可以为0。请尽可能完整列出识别到的风险，不做人为数量限制。若无法匹配证据，citation_id留空字符串。法规证据列表：\n{{ evidence_block }}\n合同内容：\n{{ contract_text }}{% endif %}",
+    "template_text": "{% if lang == 'en' %}{% if tax_focus %}Prioritize tax-related regulations and tax implications in obligations, invoicing, withholding, tax liabilities, and whether tax indemnity clauses rely on the final effective decision of the tax authority or an effective court judgment to determine liability and loss amount. {% endif %}Analyze the contract and identify tax/compliance and legal risks using the regulation evidence list when available. Include both tax-related findings and important legal compliance issues. Pay special attention to whether any tax indemnity clause clearly states that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges must be determined based on the final effective decision of the tax authority or an effective court judgment. If the clause allows indemnity to be triggered directly by a unilateral claim, demand letter, preliminary notice, internal determination, or any non-final outcome, identify the related risk. Return strict JSON with keys: summary, executive_opinion, risk_summary, risks, citations. executive_opinion is an array of concise action-first suggestions for tax team. risk_summary is an object with keys: high, medium, low. risks is an array of objects with keys: level, type, issue, evidence, suggestion, law_reference, citation_id. citations is an array of objects with keys: citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry. If no risk, return risks as empty array and risk_summary values as 0. Do not force one item for each level. A level can be zero if not present. List all identifiable risks without artificial quantity limits. If no matching citation, citation_id should be empty string. Regulation evidence list:\n{{ evidence_block }}\nContract:\n{{ contract_text }}{% else %}{% if tax_focus %}优先识别涉税条款风险，重点关注税率、开票、纳税义务、代扣代缴、税务合规责任，以及税务赔偿条款是否以税务机关最终生效认定结果或司法机关生效裁判结果作为责任和损失金额认定依据。{% endif %}对合同进行财税与法律风险审计，优先引用给定法规证据。需包含涉税风险与重要法律合规风险。请特别关注税务赔偿条款是否明确约定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失时，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准；若条款仅依据单方主张、催告函、初步通知、内部认定或未最终生效的处理结果直接触发赔偿责任，应识别相关风险。仅输出严格JSON，包含字段：summary, executive_opinion, risk_summary, risks, citations。executive_opinion是给税务团队的前置审核意见数组，需简洁可执行。risk_summary是对象，字段：high, medium, low。risks为数组，元素字段：level, type, issue, evidence, suggestion, law_reference, citation_id。citations为数组，元素字段：citation_id, law_title, title, article_no, excerpt, content, effective_date, expiry_date, region, industry。如无风险，risks为空数组，risk_summary三个字段为0。不要为了覆盖等级而强行输出high/medium/low各一条，某个等级可以为0。请尽可能完整列出识别到的风险，不做人为数量限制。若无法匹配证据，citation_id留空字符串。法规证据列表：\n{{ evidence_block }}\n合同内容：\n{{ contract_text }}{% endif %}",
     "sample_input_json": {
       "lang": "zh",
       "tax_focus": true,
@@ -86,12 +142,12 @@
       "en": "You are a senior contract audit lawyer. Please output JSON only."
     },
     "localized_focus_texts": {
-      "zh": "",
-      "en": ""
+      "zh": "关注税务赔偿条款是否明确规定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失的，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准，避免仅依据单方主张或初步通知直接认定赔偿责任。",
+      "en": "Check whether tax indemnity clauses clearly provide that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges should be determined based on the final effective decision of the tax authority or an effective court judgment, rather than a unilateral claim or preliminary notice."
     },
     "localized_template_texts": {
-      "zh": "请仅根据当前输入进行条款审计，优先参考法规白名单，最终输出必须是 JSON。\n在给出结论前，请先核对是否命中已知的误报或漏报模式。\n短期记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n如果某个风险能匹配到法规白名单，必须填写与白名单完全一致的 citation_id，不得编造；只有在确实无法匹配时才可留空，并尽量补充 law_title 与 article_no 供后处理核验。\n若准备输出“未明确 / 未约定 / 未提及 / 缺失”类风险，请结合短期记忆、长期命中与当前条款综合判断；只有当同一要素已被明确且可执行的约定覆盖时，才可抑制该风险。\n禁止输出推理过程、分析过程与额外解释，只输出最终 JSON。\n\n法规白名单：\n【法规白名单】\n\n短期记忆：\n【短期记忆】\n\n案例记忆：\n【案例记忆】\n\n误报/漏报模式：\n【误报漏报模式】\n\n工作流记忆：\n【工作流记忆】\n\n全局上下文：\n【全局上下文】\n\n长期记忆：\n【长期记忆】\n\n条款标题：\n【条款标题】\n\n条款正文：\n【条款正文】\n\n请按以下 JSON 结构输出：\n{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}",
-      "en": "Audit the clause strictly based on the current input. Prioritize the regulation whitelist and return JSON only.\nBefore finalizing the result, check whether the clause matches any known false-positive or false-negative pattern.\nShort-term memory and long-term hits are factual references only and must not be reused as historical conclusions.\nIf a risk can be matched to a whitelist item, you must fill citation_id with the exact whitelist ID and must not invent any ID. Leave citation_id blank only when no match can be determined, and still fill law_title and article_no whenever possible for downstream verification.\nIf you are about to output an \"unclear / unspecified / unmentioned / missing\" risk, combine the short-term memory, long-term hits, and the current clause before deciding. Suppress that risk only when the same element is already covered by an explicit and enforceable provision.\nDo not output reasoning steps, analysis traces, or extra explanations. Return the final JSON only.\n\nRegulation Whitelist:\n[Regulation Whitelist]\n\nShort-term Memory:\n[Short-term Memory]\n\nCase Memory:\n[Case Memory]\n\nFalse-positive / False-negative Patterns:\n[False-positive or False-negative Patterns]\n\nWorkflow Memory:\n[Workflow Memory]\n\nGlobal Context:\n[Global Context]\n\nLong-term Memory:\n[Long-term Memory]\n\nClause Title:\n[Clause Title]\n\nClause Text:\n[Clause Text]\n\nReturn JSON using this structure:\n{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
+      "zh": "请仅根据当前输入进行条款审计，优先参考法规白名单，最终输出必须是 JSON。\n在给出结论前，请先核对是否命中已知的误报或漏报模式。\n短期记忆和长期命中仅作为事实参考，不可直接复用其中历史结论。\n如果某个风险能匹配到法规白名单，必须填写与白名单完全一致的 citation_id，不得编造；只有在确实无法匹配时才可留空，并尽量补充 law_title 与 article_no 供后处理核验。\n若准备输出“未明确 / 未约定 / 未提及 / 缺失”类风险，请结合短期记忆、长期命中与当前条款综合判断；只有当同一要素已被明确且可执行的约定覆盖时，才可抑制该风险。\n请特别关注税务赔偿条款是否明确约定：因发票、税务合规、涉税处罚、补税、滞纳金等事项产生损失时，赔偿责任及损失金额应以税务机关最终生效的认定结果或司法机关生效裁判结果为准；若条款仅依据单方主张、催告函、初步通知、内部认定或未最终生效的处理结果直接触发赔偿责任，应识别相关风险。\n禁止输出推理过程、分析过程与额外解释，只输出最终 JSON。\n\n法规白名单：\n【法规白名单】\n\n短期记忆：\n【短期记忆】\n\n案例记忆：\n【案例记忆】\n\n误报/漏报模式：\n【误报漏报模式】\n\n工作流记忆：\n【工作流记忆】\n\n全局上下文：\n【全局上下文】\n\n长期记忆：\n【长期记忆】\n\n条款标题：\n【条款标题】\n\n条款正文：\n【条款正文】\n\n请按以下 JSON 结构输出：\n{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}",
+      "en": "Audit the clause strictly based on the current input. Prioritize the regulation whitelist and return JSON only.\nBefore finalizing the result, check whether the clause matches any known false-positive or false-negative pattern.\nShort-term memory and long-term hits are factual references only and must not be reused as historical conclusions.\nIf a risk can be matched to a whitelist item, you must fill citation_id with the exact whitelist ID and must not invent any ID. Leave citation_id blank only when no match can be determined, and still fill law_title and article_no whenever possible for downstream verification.\nIf you are about to output an \"unclear / unspecified / unmentioned / missing\" risk, combine the short-term memory, long-term hits, and the current clause before deciding. Suppress that risk only when the same element is already covered by an explicit and enforceable provision.\nPay special attention to whether any tax indemnity clause clearly states that losses arising from invoicing issues, tax compliance, tax penalties, additional tax assessments, or late payment surcharges must be determined based on the final effective decision of the tax authority or an effective court judgment. If the clause allows indemnity to be triggered directly by a unilateral claim, demand letter, preliminary notice, internal determination, or any non-final outcome, identify the related risk.\nDo not output reasoning steps, analysis traces, or extra explanations. Return the final JSON only.\n\nRegulation Whitelist:\n[Regulation Whitelist]\n\nShort-term Memory:\n[Short-term Memory]\n\nCase Memory:\n[Case Memory]\n\nFalse-positive / False-negative Patterns:\n[False-positive or False-negative Patterns]\n\nWorkflow Memory:\n[Workflow Memory]\n\nGlobal Context:\n[Global Context]\n\nLong-term Memory:\n[Long-term Memory]\n\nClause Title:\n[Clause Title]\n\nClause Text:\n[Clause Text]\n\nReturn JSON using this structure:\n{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0}]}"
     },
     "placeholder_map": {
       "evidence_whitelist_text": {

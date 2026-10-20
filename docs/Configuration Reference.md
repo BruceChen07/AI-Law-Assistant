@@ -67,6 +67,11 @@ This document explains the configuration fields in `app/config.example.json`.
 | `formula` | bool | Enable formula parsing. |
 | `table` | bool | Enable table parsing. |
 | `model_source` | string | Model source platform. |
+| `model_source_fallback_enabled` | bool | Enable automatic fallback from Hugging Face to ModelScope on network failure. |
+| `fallback_model_source` | string | Fallback model source, typically `modelscope`. |
+| `hf_retry_count` | int | Additional retry count before switching away from Hugging Face. |
+| `hf_connect_timeout_sec` | int | Hugging Face metadata/connect timeout passed via environment. |
+| `hf_download_timeout_sec` | int | Hugging Face download timeout passed via environment. |
 | `timeout` | int | OCR timeout (seconds). |
 
 ## 6) LLM
@@ -159,7 +164,25 @@ Security note:
 | `docx_pdf_gate_min_chars` | int | Minimum chars threshold for PDF gate. |
 | `docx_pdf_keep_file` | bool | Whether to keep intermediate PDF file. |
 
-## 11) Memory Audit Behavior
+## 11) PDF Pipeline
+
+### `pdf_pipeline`
+
+| Key | Type | Description |
+|---|---|---|
+| `enabled` | bool | Enable unified PDF pipeline orchestration. |
+| `hybrid_enabled` | bool | Enable hybrid PDF route metadata and scanned-page heuristics. |
+| `force_scanned` | bool | Force PDF OCR/scanned behavior. |
+| `scan_min_chars_per_page` | int | Minimum chars per page before a page is treated as text-bearing. |
+| `scan_ratio_for_ocr` | float | Scanned-page ratio threshold to prefer OCR fallback. |
+| `scan_ratio_for_digitize` | float | Scanned-page ratio threshold to allow auto digitization when enabled. |
+| `auto_digitize` | bool | Auto-digitize scanned PDFs in generic extraction paths. |
+| `prefer_digitized_for_audit` | bool | Prefer digitized DOCX as audit input in contract audit routes. |
+| `preview_render_enabled` | bool | Enable raster preview generation for PDFs. |
+| `preview_render_engine` | string | Preview render engine name (`pdfium`). |
+| `preview_max_edge` | int | Maximum long edge in pixels for preview images. |
+
+## 12) Memory Audit Behavior
 
 | Key | Type | Description |
 |---|---|---|
@@ -169,7 +192,7 @@ Security note:
 | `memory_filter_unverifiable_risks` | bool | Filter risks that cannot be mapped to valid citations. |
 | `memory_filtered_risk_log_limit` | int | Max count of filtered-risk hits kept in debug/meta. |
 
-## 12) Contract Audit Debug Lifecycle
+## 13) Contract Audit Debug Lifecycle
 
 | Key | Type | Description |
 |---|---|---|
@@ -178,7 +201,7 @@ Security note:
 | `contract_audit_debug_archive_before_delete` | bool | Archive old debug folders to zip before deletion. |
 | `contract_audit_debug_archive_dir` | string | Archive output directory; empty means use module-local `_archive`. |
 
-## 13) Upload & CORS
+## 14) Upload & CORS
 
 | Key | Type | Description |
 |---|---|---|

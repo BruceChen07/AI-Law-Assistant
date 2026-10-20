@@ -16,6 +16,7 @@
 
 - **合同审计**：上传合同（docx/pdf/扫描 pdf），输出风险清单、摘要与证据引用，并支持导出带精准批注的 Word 文档
 - **OCR 增强**：PDF 文本不足时自动回退 OCR，支持多引擎与按文件类型路由
+- **统一 PDF 管线**：新增 `pdf_pipeline` 服务层，统一文本抽取、扫描件 OCR、页面预览、数字化 Word 审计接线
 - **法规管理**：Admin 支持法规上传、条款解析、混合检索与任务追踪
 - **混合检索与跨语种召回**：BM25 + 向量召回 + 可选重排，支持翻译增强查询（translation_config）
 - **记忆式审计管线**：支持条款级轮次审计、引用白名单映射、未验证风险过滤与调试追踪
@@ -49,7 +50,7 @@ Models (Embedding + Reranker + LLM)
 | 模型    | BGE-small-zh/en, BGE-reranker     |
 | 前端框架  | React 18, Vite 5                  |
 | 鉴权    | PyJWT, bcrypt, passlib            |
-| 文件解析  | python-docx, pypdf                |
+| 文件解析  | python-docx, pypdf, pypdfium2     |
 
 ## 快速开始
 
@@ -58,7 +59,7 @@ Models (Embedding + Reranker + LLM)
 - Python 3.12+
 - Node.js 22+
 - Windows / Linux / macOS
-- OCR 依赖：tesseract、poppler, mineru（用于扫描 PDF）
+- OCR / PDF 依赖：tesseract、poppler、mineru（用于扫描 PDF）、pypdfium2（用于 PDF 页面预览）
 - 向量数据库：默认使用 SQLite 内存计算。如果是生产环境（百万级以上向量），建议安装 `chromadb` 并在后台配置切换。
 
 ### 1. 克隆项目
@@ -72,7 +73,22 @@ cd AI-Law-Assistant
 
 ```bash
 cd app
-pip install -r requirements.txt
+python -m pip install -U pip
+python -m pip install "pip-tools>=7.4,<8"
+python -m piptools sync requirements.txt dev-requirements.txt
+```
+
+依赖维护规则：
+
+- 仅修改 `app/requirements.in` 和 `app/dev-requirements.in`
+- 禁止手动编辑 `app/requirements.txt` 和 `app/dev-requirements.txt`
+- 变更依赖后执行：
+
+```bash
+cd app
+python -m piptools compile --resolver=backtracking --output-file requirements.txt requirements.in
+python -m piptools compile --resolver=backtracking --output-file dev-requirements.txt dev-requirements.in
+python -m piptools sync requirements.txt dev-requirements.txt
 ```
 
 ### 3. 配置环境

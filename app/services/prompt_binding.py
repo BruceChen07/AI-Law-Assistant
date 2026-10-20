@@ -22,6 +22,12 @@ PROMPT_BINDING_SCENES: Dict[str, Dict[str, str]] = {
         "description": "Classic contract audit JSON prompt used by the admin audit pipeline.",
         "source_module": "app.services.contract_audit._build_classic_audit",
         "default_prompt_key": "contract_audit.classic_json",
+    },
+    "contract_audit.contract_summary": {
+        "label": "Contract Audit Contract Summary",
+        "description": "Whole-contract summary prompt used to generate a concise contract overview before the risk summary.",
+        "source_module": "app.services.contract_audit._build_contract_summary",
+        "default_prompt_key": "contract_audit.contract_summary",
     }
 }
 

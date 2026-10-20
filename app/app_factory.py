@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from app.core.config import get_config, ensure_dirs, get_config_path
 from app.core.logger import setup_logging, get_pipeline_logger
 from app.core.database import init_db, ensure_embedding_columns
+from app.services.contract_audit_stage_log import init_contract_audit_log_db
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
 from app.core.llm import LLMService
@@ -18,6 +19,7 @@ from app.api.routers.regulations import build_router as build_regulations_router
 from app.api.routers.auth import build_router as build_auth_router
 from app.api.routers.admin import router as admin_router
 from app.api.routers.contracts import build_router as build_contracts_router
+from app.api.routers.contract_audit_logs import build_router as build_contract_audit_logs_router
 from app.api.routers.tax_audit import build_router as build_tax_audit_router
 
 
@@ -25,6 +27,7 @@ def init_only():
     cfg = get_config()
     ensure_dirs(cfg)
     init_db(cfg)
+    init_contract_audit_log_db(cfg)
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
@@ -37,6 +40,7 @@ def create_app():
     rag_logger = get_pipeline_logger(
         cfg, name="rag_pipeline", filename="rag_pipeline.log")
     init_db(cfg)
+    init_contract_audit_log_db(cfg)
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
@@ -183,6 +187,7 @@ def create_app():
     app.include_router(build_auth_router())
     app.include_router(admin_router)
     app.include_router(build_contracts_router(cfg))
+    app.include_router(build_contract_audit_logs_router(cfg))
     app.include_router(build_tax_audit_router(cfg))
 
     app.state.cfg = cfg

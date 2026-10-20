@@ -45,7 +45,7 @@
 1. 识别当前操作系统、Python 版本、Node 版本、CPU、内存、磁盘、GPU 信息
 2. 生成缺失项清单，标记当前未就绪的系统依赖与模型资源
 3. 自动安装 MinerU、Node.js、Ollama 等核心依赖
-4. 创建 `app/.venv` 虚拟环境并安装 `app/requirements.txt`
+4. 创建 `app/.venv` 虚拟环境，使用 `pip-tools` 执行 `piptools sync app/requirements.txt`
 5. 安装 `web` 前端依赖
 6. 自动生成或更新 `app/config.json`
 7. 自动关闭 memory 模块，开启本地 Ollama 路由，按需开启本地翻译模型

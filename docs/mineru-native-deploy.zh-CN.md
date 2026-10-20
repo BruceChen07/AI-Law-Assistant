@@ -25,13 +25,15 @@
 ```bash
 python -m venv app/.venv
 app/.venv/Scripts/python -m pip install -U pip setuptools wheel
-app/.venv/Scripts/python -m pip install -r app/requirements.txt
+app/.venv/Scripts/python -m pip install "pip-tools>=7.4,<8"
+app/.venv/Scripts/python -m piptools sync app/requirements.txt
 ```
 
 Windows PowerShell 可用：
 
 ```powershell
-.\app\.venv\Scripts\python.exe -m pip install -r .\app\requirements.txt
+.\app\.venv\Scripts\python.exe -m pip install "pip-tools>=7.4,<8"
+.\app\.venv\Scripts\python.exe -m piptools sync .\app\requirements.txt
 ```
 
 ### 4.2 安装 MinerU OCR 依赖

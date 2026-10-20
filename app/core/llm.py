@@ -13,7 +13,9 @@ from openai import OpenAI, APITimeoutError
 from app.core.llm_backends import get_provider
 from app.core.llm_env import (
     collect_persisted_secret_issues,
+    detect_env_provider_hint,
     get_provider_label,
+    is_cloud_provider,
     resolve_runtime_llm_config,
 )
 from app.core.llm_router import resolve_llm_route
@@ -31,6 +33,36 @@ class LLMService:
             "”", "").replace("‘", "").replace("’", "")
         s = s.strip('"').strip("'").strip()
         return s
+
+    def _is_enabled(self, value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _contract_audit_env_cloud_override(
+        self, task_profile: str, route_meta: Dict[str, Any]
+    ) -> Tuple[bool, str, str]:
+        if task_profile not in {
+            "contract_audit_main",
+            "contract_audit_memory",
+            "contract_clause_audit",
+            "contract_audit_skill",
+        }:
+            return False, "", ""
+        if str(route_meta.get("selected_role") or "") not in {"main", "small"}:
+            return False, "", ""
+        local_cfg = self.cfg.get("local_llm") if isinstance(
+            self.cfg, dict) else {}
+        routing_cfg = local_cfg.get(
+            "routing") if isinstance(local_cfg, dict) else {}
+        if not self._is_enabled(routing_cfg.get("contract_audit_force_env_cloud"), False):
+            return False, "", ""
+        provider, source = detect_env_provider_hint()
+        if not source or not is_cloud_provider(provider):
+            return False, "", ""
+        return True, provider, source
 
     def _resolve_chat_target(
         self, overrides: Optional[Dict[str, Any]] = None
@@ -51,11 +83,41 @@ class LLMService:
             task_profile=task_profile,
             model_role=model_role,
         )
+        force_env_cloud, env_provider, env_source = self._contract_audit_env_cloud_override(
+            task_profile, route_meta)
+        if force_env_cloud:
+            cfg = dict((self.cfg or {}).get("llm_config"))
+            route_meta = {
+                **dict(route_meta),
+                "selected_role": "cloud_fallback",
+                "selected_source": "llm_config",
+                "reason": "contract_audit_env_cloud_override",
+                "env_override_provider": env_provider,
+                "env_override_source": env_source,
+            }
         visible_overrides = {
             k: v for k, v in merged_overrides.items()
             if not str(k).startswith("_")
         }
         cfg.update(visible_overrides)
+        cfg["_runtime_task_profile"] = task_profile
+        cfg["_runtime_selected_role"] = str(
+            route_meta.get("selected_role") or "")
+        cfg["_prefer_long_timeout"] = task_profile in {
+            "contract_audit_main",
+            "contract_clause_audit",
+        }
+        # Keep local main/small targets stable at runtime instead of letting
+        # global env vars silently replace provider/api_base/model.
+        cfg["_lock_runtime_target"] = str(route_meta.get("selected_role") or "") in {
+            "main",
+            "small",
+        } and str(route_meta.get("selected_source") or "") in {
+            "main_model",
+            "small_model",
+        }
+        route_meta["runtime_target_locked"] = bool(
+            cfg.get("_lock_runtime_target"))
         route_trace = dict(route_meta)
         route_trace["task_profile"] = task_profile
         merged_trace_meta = dict(trace_meta)
@@ -171,12 +233,19 @@ class LLMService:
         opts = self._trace_options()
         if not opts["enabled"]:
             return
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        trace_dir = os.path.join(opts["dir"], day)
-        os.makedirs(trace_dir, exist_ok=True)
-        file_path = os.path.join(trace_dir, "llm_trace.jsonl")
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        try:
+            day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            trace_dir = os.path.join(opts["dir"], day)
+            os.makedirs(trace_dir, exist_ok=True)
+            file_path = os.path.join(trace_dir, "llm_trace.jsonl")
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(
+                "llm_trace_write_failed dir=%s err=%s",
+                opts.get("dir", ""),
+                str(e),
+            )
 
     def _build_chat_kwargs(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int, cfg: Dict[str, Any]) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
@@ -569,4 +638,3 @@ class LLMService:
         next_overrides = dict(overrides or {})
         next_overrides["_task_profile"] = task_profile
         return self.chat(messages, overrides=next_overrides)
-

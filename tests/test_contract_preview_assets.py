@@ -33,7 +33,7 @@ def test_docx_pdf_mineru_path_used_when_quality_gate_passes(tmp_path, monkeypatc
         Path(output_pdf).write_bytes(b"%PDF-1.7")
         return output_pdf, "docx2pdf"
 
-    def fake_render_pdf_pages(_file_path, _out_dir, _dpi, _max_pages):
+    def fake_render_pdf_pages(_cfg, _file_path, _out_dir, _dpi, _max_pages):
         return [{"page_no": 1, "width": 800, "height": 1200, "blocks": [], "image_file": ""}]
 
     def fake_build_blocks_from_mineru(file_path, out_dir, max_pages):
@@ -86,7 +86,7 @@ def test_docx_pdf_quality_gate_fail_falls_back_to_docx_raster(tmp_path, monkeypa
         Path(output_pdf).write_bytes(b"%PDF-1.7")
         return output_pdf, "win32com"
 
-    def fake_render_pdf_pages(_file_path, _out_dir, _dpi, _max_pages):
+    def fake_render_pdf_pages(_cfg, _file_path, _out_dir, _dpi, _max_pages):
         return [{"page_no": 1, "width": 800, "height": 1200, "blocks": [], "image_file": ""}]
 
     def fake_build_blocks_from_mineru(file_path, out_dir, max_pages):
@@ -135,4 +135,26 @@ def test_pdf_preview_without_raster_backend_falls_back_to_text(tmp_path, monkeyp
 
     assert manifest["mode"] == "text"
     assert manifest["meta"]["ocr_engine"] == "mineru"
+    assert manifest["meta"]["coord_provider"] == "text_fallback"
+
+
+def test_pdf_preview_respects_pipeline_render_toggle(tmp_path, monkeypatch):
+    cfg = _base_cfg(tmp_path)
+    cfg["pdf_pipeline"] = {"preview_render_enabled": False}
+    files_dir = Path(cfg["files_dir"])
+    files_dir.mkdir(parents=True, exist_ok=True)
+    pdf_path = files_dir / "render-disabled.pdf"
+    pdf_path.write_bytes(b"%PDF-1.7")
+
+    monkeypatch.setattr(cpa, "extract_text_with_config", lambda *_args, **_kwargs: ("fallback text", {"ocr_used": False, "ocr_engine": "", "page_count": 1}))
+
+    manifest = cpa.build_contract_preview_manifest(
+        cfg=cfg,
+        document_id="pdf-render-disabled",
+        file_path=str(pdf_path),
+        mime_type="application/pdf",
+    )
+
+    assert manifest["mode"] == "text"
+    assert manifest["text"] == "fallback text"
     assert manifest["meta"]["coord_provider"] == "text_fallback"

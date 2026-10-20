@@ -4,10 +4,13 @@ import logging
 import threading
 import jieba
 from typing import List, Tuple, Optional, Dict, Any
-from pypdf import PdfReader
-from docx import Document
-from app.core.ocr import OCREngineManager
 from app.core.config import get_config
+from app.services.document_text_extractors import (
+    extract_docx_text,
+    extract_pdf_text,
+    extract_text_from_extension,
+    safe_decode,
+)
 
 logger = logging.getLogger("law_assistant")
 
@@ -34,38 +37,19 @@ def resolve_path(p: str, base_dir: str = APP_ROOT) -> str:
 
 
 def _safe_decode(data: bytes) -> str:
-    try:
-        return data.decode("utf-8")
-    except UnicodeDecodeError:
-        return data.decode("gbk", errors="ignore")
+    return safe_decode(data)
 
 
 def _extract_docx(path: str) -> str:
-    doc = Document(path)
-    lines = [p.text for p in doc.paragraphs]
-    return "\n".join([l for l in lines if l is not None])
+    return extract_docx_text(path)
 
 
 def _extract_pdf_text(path: str) -> Tuple[str, int]:
-    reader = PdfReader(path)
-    pages = []
-    for p in reader.pages:
-        pages.append(p.extract_text() or "")
-    return "\n\n".join(pages), len(pages)
+    return extract_pdf_text(path)
 
 
 def extract_text(path: str) -> str:
-    ext = os.path.splitext(path)[1].lower()
-    if ext == ".txt":
-        with open(path, "rb") as f:
-            data = f.read()
-        return _safe_decode(data)
-    if ext == ".docx":
-        return _extract_docx(path)
-    if ext == ".pdf":
-        text, _ = _extract_pdf_text(path)
-        return text
-    raise ValueError("unsupported file type")
+    return extract_text_from_extension(path)
 
 
 def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[str, Any]]:
@@ -85,53 +69,36 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
     if ext != ".pdf":
         raise ValueError("unsupported file type")
 
-    text, page_count = _extract_pdf_text(path)
-    meta["page_count"] = page_count
-    logger.info("pdf_extract_done file=%s pages=%s text_length=%s",
-                path, page_count, len(text))
+    from app.services.pdf_pipeline import extract_pdf_text_with_pipeline
 
-    ocr_enabled = bool(cfg.get("ocr_enabled", True))
-    ocr_min_len = int(cfg.get("ocr_min_text_length", 200))
-    ocr_langs = str(cfg.get("ocr_languages", "chi_sim+eng"))
-    ocr_dpi = int(cfg.get("ocr_dpi", 220))
-
-    if ocr_enabled and len(text.strip()) < ocr_min_len:
-        logger.info(
-            "ocr_trigger file=%s text_length=%s min_len=%s langs=%s dpi=%s",
+    try:
+        text, pdf_meta = extract_pdf_text_with_pipeline(
+            cfg,
             path,
-            len(text.strip()),
-            ocr_min_len,
-            ocr_langs,
-            ocr_dpi
+            raise_on_ocr_failure=False,
         )
-        try:
-            manager = OCREngineManager(cfg)
-            ocr_text, ocr_pages, engine = manager.ocr_pdf(
-                path, ocr_langs, ocr_dpi, doc_type="pdf")
-            if ocr_text.strip():
-                meta["ocr_used"] = True
-                meta["ocr_engine"] = engine or ""
-                meta["page_count"] = max(page_count, ocr_pages)
-                logger.info(
-                    "ocr_done file=%s engine=%s pages=%s text_length=%s",
-                    path,
-                    engine,
-                    ocr_pages,
-                    len(ocr_text)
-                )
-                return ocr_text, meta
-            logger.error("ocr_empty_result file=%s engine=%s", path, engine)
-            raise OCRExtractionError(
-                "OCR_PARSE_FAILED: OCR returned empty text for scanned PDF"
-            )
-        except OCRExtractionError:
-            raise
-        except Exception as e:
-            logger.exception("ocr_failed file=%s", path)
-            raise OCRExtractionError(
-                f"OCR_PARSE_FAILED: {type(e).__name__}: {e}"
-            ) from e
-    return text, meta
+        merged_meta = dict(meta)
+        merged_meta.update(pdf_meta or {})
+        logger.info(
+            "pdf_pipeline_extract_done file=%s pages=%s text_length=%s backend=%s route=%s",
+            path,
+            merged_meta.get("page_count"),
+            len(text),
+            merged_meta.get("pdf_backend"),
+            merged_meta.get("route"),
+        )
+        if bool(merged_meta.get("ocr_used")) and not str(text or "").strip():
+            raise OCRExtractionError("OCR_PARSE_FAILED: OCR returned empty text for scanned PDF")
+        if not str(text or "").strip() and bool(cfg.get("ocr_enabled", True)):
+            raise OCRExtractionError("OCR_PARSE_FAILED: PDF text extraction returned empty text")
+        return text, merged_meta
+    except OCRExtractionError:
+        raise
+    except Exception as e:
+        logger.exception("pdf_pipeline_extract_failed file=%s", path)
+        raise OCRExtractionError(
+            f"OCR_PARSE_FAILED: {type(e).__name__}: {e}"
+        ) from e
 
 
 def split_articles(text):

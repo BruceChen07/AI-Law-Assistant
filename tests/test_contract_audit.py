@@ -1,3 +1,4 @@
+from app.services import contract_audit as ca
 from app.services.contract_audit_modules.result_assembler import normalize_audit_result as _normalize_audit_result
 from app.services.contract_audit_modules.risk_suppression import (
     should_suppress_missing_risk as _should_suppress_missing_risk,
@@ -211,3 +212,93 @@ def test_load_llm_json_object_accepts_wrapped_json_object():
     parsed = _load_llm_json_object(raw)
     assert parsed["summary"] == "ok"
     assert parsed["risks"] == []
+
+
+def test_build_contract_summary_returns_formatted_text_when_enabled():
+    class SummaryThenAuditLLM:
+        def chat(self, messages, overrides=None):
+            return (
+                "合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 1 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. demo\n\n合同在说什么：\n本合同约定年度供货合作安排。\n\n核心安排：\n乙方按订单供货，甲方负责验收付款并开票结算。\n\n税务审核提示：\n需核对发票处理与交易实质是否一致。\n\n来源文件：demo.docx",
+                {"model": "fake"},
+            )
+
+    result = ca._build_contract_summary(
+        cfg={
+            "llm_config": {"model": "fake"},
+            "contract_summary_enabled": True,
+        },
+        llm=SummaryThenAuditLLM(),
+        text="第一条 合作范围 乙方按甲方订单供货。第二条 结算与开票 甲方验收后付款，乙方开具发票。第三条 违约与终止 双方约定违约责任与解约条件。",
+        lang="zh",
+        preview_clauses=[
+            {"clause_path": "第一条", "clause_text": "乙方按甲方订单供货。"},
+            {"clause_path": "第二条", "clause_text": "甲方验收后付款，乙方开具发票。"},
+        ],
+        page_count=3,
+        audit_id="audit_test_summary_only",
+        source_filename="demo.docx",
+    )
+
+    assert "合同内容简要摘要" in str(result.get("text") or "")
+    assert "税务审核提示" in str(result.get("text") or "")
+    assert result["enabled"] is True
+    assert result["status"] == "ok"
+
+
+def test_audit_contract_does_not_attach_contract_summary(monkeypatch, tmp_path):
+    class AuditOnlyLLM:
+        def chat(self, messages, overrides=None):
+            return (
+                "{\"summary\":\"识别到 0 项风险\",\"risks\":[]}",
+                {
+                    "model": "fake",
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 60, "total_tokens": 160},
+                    "choices": [{"finish_reason": "stop"}],
+                },
+            )
+
+    monkeypatch.setattr(
+        ca,
+        "extract_text_with_config",
+        lambda _cfg, _file_path: (
+            "第一条 合作范围 乙方按甲方订单供货。第二条 结算与开票 甲方验收后付款，乙方开具发票。",
+            {"ocr_used": False, "ocr_engine": "", "page_count": 2},
+        ),
+    )
+    monkeypatch.setattr(
+        ca,
+        "_retrieve_regulation_evidence",
+        lambda *_args, **_kwargs: {
+            "used": True,
+            "queries": [],
+            "query_success": 0,
+            "query_failed": 0,
+            "chunk_total": 0,
+            "failed_chunks": [],
+            "items": [],
+        },
+    )
+    monkeypatch.setattr(
+        ca,
+        "build_contract_preview_manifest",
+        lambda **_kwargs: {"pages": []},
+    )
+
+    result = ca.audit_contract(
+        cfg={
+            "data_dir": str(tmp_path / "data"),
+            "files_dir": str(tmp_path / "files"),
+            "llm_config": {"model": "fake"},
+            "contract_summary_enabled": True,
+            "memory_runtime_config": {"memory_module_enabled": False},
+        },
+        llm=AuditOnlyLLM(),
+        file_path=str(tmp_path / "demo.docx"),
+        preview_file_path=str(tmp_path / "demo.docx"),
+        lang="zh",
+        retrieval_options={"audit_mode": "rag"},
+    )
+
+    assert str((result.get("audit") or {}).get(
+        "contract_summary") or "").strip() == ""
+    assert "contract_summary_enabled" not in (result.get("meta") or {})

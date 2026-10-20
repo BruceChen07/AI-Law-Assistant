@@ -6,6 +6,7 @@ import time
 import uuid
 import hashlib
 import json
+import os
 import re
 import structlog
 from typing import Dict, Any, Optional, Callable, List
@@ -16,6 +17,7 @@ from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
 from app.services.contract_audit_modules.result_assembler import attach_risk_locations
 from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip
+from app.services.contract_preview_assets import build_contract_preview_manifest
 from app.services.prompt_binding import resolve_bound_prompt_text
 
 logger = structlog.get_logger(__name__)
@@ -23,6 +25,8 @@ logger = structlog.get_logger(__name__)
 CLASSIC_AUDIT_MAX_TOKENS = 900
 CLASSIC_AUDIT_RETRY_MAX_TOKENS = 1400
 CLASSIC_MULTIPASS_TRIGGER_CLAUSES = 10
+CONTRACT_SUMMARY_SOURCE_MAX_CHARS = 9000
+CONTRACT_SUMMARY_MAX_TOKENS = 720
 SKILL_AUDIT_MODES = {"skill", "skills", "advanced",
                      "advanced_skill", "skill_orchestrated"}
 HybridSearcher = None
@@ -32,8 +36,8 @@ def _build_preview_clauses(text: str):
     return build_preview_clauses(text)
 
 
-def _attach_risk_locations(audit, clauses):
-    return attach_risk_locations(audit, clauses)
+def _attach_risk_locations(audit, clauses, preview_manifest=None):
+    return attach_risk_locations(audit, clauses, preview_manifest=preview_manifest)
 
 
 def _chat_with_task_profile(llm, messages, task_profile: str, overrides=None):
@@ -42,6 +46,37 @@ def _chat_with_task_profile(llm, messages, task_profile: str, overrides=None):
     next_overrides = dict(overrides or {})
     next_overrides["_task_profile"] = task_profile
     return llm.chat(messages, overrides=next_overrides)
+
+
+def _build_contract_summary_source_text(
+    text: str,
+    preview_clauses: List[Dict[str, Any]],
+    max_chars: int = CONTRACT_SUMMARY_SOURCE_MAX_CHARS,
+) -> str:
+    remaining = max(400, int(max_chars or CONTRACT_SUMMARY_SOURCE_MAX_CHARS))
+    blocks: List[str] = []
+    for clause in list(preview_clauses or []):
+        if remaining <= 180:
+            break
+        title = str(clause.get("clause_path") or clause.get("title")
+                    or clause.get("clause_id") or "").strip()
+        body = str(clause.get("clause_text")
+                   or clause.get("text") or "").strip()
+        if not body:
+            continue
+        local_limit = min(1200, max(220, remaining - 40))
+        snippet = body[:local_limit].strip()
+        block = f"[{title}]\n{snippet}" if title else snippet
+        if len(block) > remaining:
+            block = block[:remaining].strip()
+        if not block:
+            continue
+        blocks.append(block)
+        remaining -= len(block) + 2
+    source_text = "\n\n".join(blocks).strip()
+    if source_text:
+        return source_text[:max_chars].strip()
+    return str(text or "")[:max_chars].strip()
 
 
 def _get_memory_embedder(lang: str = "zh", cfg: Optional[Dict[str, Any]] = None):
@@ -162,6 +197,7 @@ def _run_skill_orchestrated_audit(
     text: str,
     lang: str,
     preview_clauses: List[Dict[str, Any]],
+    preview_manifest: Optional[Dict[str, Any]],
     embedder,
     progress_cb: Optional[Callable[[str, int, str], None]] = None,
 ) -> Dict[str, Any]:
@@ -185,7 +221,11 @@ def _run_skill_orchestrated_audit(
         "citations": _build_skill_citations(raw_risk_items),
         "legal_validation": {"ok": True, "issues": []},
     }
-    audit = attach_risk_locations(audit, preview_clauses)
+    audit = attach_risk_locations(
+        audit,
+        preview_clauses,
+        preview_manifest=preview_manifest,
+    )
     audit["cross_validation_notes"] = list(
         getattr(report, "cross_validation_notes", []) or [])
     skill_results = getattr(report, "skill_results", {}) or {}
@@ -267,6 +307,191 @@ def _extract_usage(raw: Dict[str, Any]) -> Dict[str, int]:
     }
 
 
+def _extract_contract_summary_text(raw_text: str) -> str:
+    parsed = _load_llm_json_object(raw_text)
+    if parsed:
+        summary = str(parsed.get("contract_summary")
+                      or parsed.get("summary") or "").strip()
+        if summary:
+            return summary
+    text = str(raw_text or "").strip()
+    if not text:
+        return ""
+    text = re.sub(r"^\s*```(?:text|markdown|md)?\s*", "", text,
+                  count=1, flags=re.IGNORECASE)
+    text = re.sub(r"\s*```\s*$", "", text, count=1,
+                  flags=re.IGNORECASE).strip()
+    text = re.sub(
+        r"^\s*(?:contract\s*summary|summary|合同摘要|合同总结|整份合同总结)\s*[:：]\s*",
+        "",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip()
+    return text
+
+
+def _build_contract_summary_title(source_filename: str, lang: str) -> str:
+    name = str(source_filename or "").strip()
+    if not name:
+        return "Current Contract" if str(lang or "").lower() == "en" else "当前合同"
+    stem = os.path.splitext(os.path.basename(name))[0].strip()
+    if not stem:
+        return "Current Contract" if str(lang or "").lower() == "en" else "当前合同"
+    return stem
+
+
+def _build_contract_summary(
+    cfg: Dict[str, Any],
+    llm,
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    page_count: int,
+    audit_id: str,
+    source_filename: str,
+) -> Dict[str, Any]:
+    enabled = bool(cfg.get("contract_summary_enabled", False))
+    if not enabled:
+        return {"enabled": False, "text": "", "source": "disabled", "status": "disabled"}
+    source_text = _build_contract_summary_source_text(text, preview_clauses)
+    if not source_text:
+        return {"enabled": True, "text": "", "source": "empty_input", "status": "empty_input"}
+    norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
+    source_name = os.path.basename(str(source_filename or "").strip())
+    summary_title = _build_contract_summary_title(source_name, norm_lang)
+    prompt_context = {
+        "lang": norm_lang,
+        "contract_page_count": max(0, int(page_count or 0)),
+        "contract_clause_count": len(list(preview_clauses or [])),
+        "contract_document_count": 1,
+        "contract_summary_title": summary_title,
+        "source_filename": source_name,
+        "contract_text": source_text,
+    }
+    try:
+        bound_prompt = resolve_bound_prompt_text(
+            "contract_audit.contract_summary",
+            "",
+            prompt_context,
+            cfg,
+        )
+    except KeyError:
+        bound_prompt = {
+            "rendered_system_text": (
+                "You are a contract analysis assistant. Summarize the contract faithfully."
+                if norm_lang == "en"
+                else "你是合同分析助手，请忠实概括整份合同。"
+            ),
+            "rendered_text": (
+                "Summarize the whole contract in 3 to 5 concise sentences for business users.\n\n"
+                "Output exactly in the following format:\n"
+                "Contract Content Brief Summary\n\n"
+                "Quick Read for Tax Reviewers\n\n"
+                f"Total {1} Contract / Supplement Agreement\n\n"
+                "Instructions\n\n"
+                "This document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n"
+                f"1. {summary_title}\n\n"
+                "What the contract is about:\n"
+                "...\n\n"
+                "Core arrangement:\n"
+                "...\n\n"
+                "Tax review note:\n"
+                "...\n\n"
+                f"Source file: {source_name or 'Current Contract'}\n\n"
+                "Only use the contract content below. Do not fabricate missing facts.\n\n"
+                f"Page Count:\n{max(0, int(page_count or 0))}\n\n"
+                f"Clause Count:\n{len(list(preview_clauses or []))}\n\n"
+                f"Contract Content:\n{source_text}"
+                if norm_lang == "en"
+                else "请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n"
+                "合同内容简要摘要\n\n"
+                "税务审核师快速阅读版\n\n"
+                f"共 {1} 份合同 / 补充协议\n\n"
+                "使用说明\n\n"
+                "本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n"
+                f"1. {summary_title}\n\n"
+                "合同在说什么：\n"
+                "...\n\n"
+                "核心安排：\n"
+                "...\n\n"
+                "税务审核提示：\n"
+                "...\n\n"
+                f"来源文件：{source_name or '当前合同'}\n\n"
+                "只能根据下方合同内容生成，不要臆测缺失信息。\n\n"
+                f"合同页数：\n{max(0, int(page_count or 0))}\n\n"
+                f"条款数：\n{len(list(preview_clauses or []))}\n\n"
+                f"合同内容：\n{source_text}"
+            ),
+            "source": "inline_fallback",
+            "prompt_id": "contract_audit.contract_summary",
+            "prompt_name": "contract_audit.contract_summary",
+        }
+    trace_meta = {
+        "module": "contract_audit",
+        "stage": "contract_summary",
+        "audit_id": audit_id,
+        "lang": norm_lang,
+        "prompt_source": str(bound_prompt.get("source") or "system_default"),
+        "prompt_binding_scene": "contract_audit.contract_summary",
+        "prompt_binding_id": str(bound_prompt.get("prompt_id") or ""),
+        "prompt_binding_name": str(bound_prompt.get("prompt_name") or ""),
+    }
+    try:
+        result_text, _raw = _chat_with_task_profile(
+            llm,
+            [
+                {"role": "system", "content": str(
+                    bound_prompt.get("rendered_system_text") or "")},
+                {"role": "user", "content": str(
+                    bound_prompt.get("rendered_text") or "")},
+            ],
+            "contract_audit_main",
+            overrides={
+                "max_tokens": CONTRACT_SUMMARY_MAX_TOKENS,
+                "enable_thinking": False,
+                "reasoning_effort": "low",
+                "thinking_budget_tokens": 0,
+                "_trace_meta": trace_meta,
+            },
+        )
+        summary_text = _extract_contract_summary_text(result_text)
+        summary_text = re.sub(
+            r"\n{3,}", "\n\n", str(summary_text or "").strip())
+        if len(summary_text) > 2400:
+            summary_text = summary_text[:2400].rstrip()
+        status = "ok" if summary_text else "empty"
+        logger.info(
+            "contract_summary_generation_done",
+            audit_id=audit_id,
+            status=status,
+            chars=len(summary_text),
+            source=str(bound_prompt.get("source") or "system_default"),
+            prompt_id=str(bound_prompt.get("prompt_id") or ""),
+        )
+        return {
+            "enabled": True,
+            "text": summary_text,
+            "status": status,
+            "source": str(bound_prompt.get("source") or "system_default"),
+            "prompt_id": str(bound_prompt.get("prompt_id") or ""),
+            "prompt_name": str(bound_prompt.get("prompt_name") or ""),
+        }
+    except Exception as exc:
+        logger.warning(
+            "contract_summary_generation_failed",
+            audit_id=audit_id,
+            error=str(exc),
+        )
+        return {
+            "enabled": True,
+            "text": "",
+            "status": "error",
+            "source": "error",
+            "error": str(exc),
+        }
+
+
 def _merge_citations(primary: List[Dict[str, Any]], extra: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     merged: List[Dict[str, Any]] = []
     seen = set()
@@ -318,6 +543,8 @@ def _aggregate_classic_results(
     total_llm_calls = 0
     validation_ok = True
     parse_failed_chunks = 0
+    response_empty_chunks = 0
+    response_truncated_chunks = 0
     completion_tokens = 0
     max_output_tokens = 0
     for chunk_result in list(results or []):
@@ -335,6 +562,10 @@ def _aggregate_classic_results(
         )
         if bool(meta.get("classic_parse_failed")):
             parse_failed_chunks += 1
+        if bool(meta.get("classic_response_empty")):
+            response_empty_chunks += 1
+        if bool(meta.get("classic_response_truncated")):
+            response_truncated_chunks += 1
         validation_ok = validation_ok and bool(
             meta.get("memory_validation_ok", False))
         merged_citations = _merge_citations(
@@ -368,11 +599,20 @@ def _aggregate_classic_results(
         if level not in risk_summary:
             level = "low"
         risk_summary[level] += 1
-    summary = (
-        f"Classic multipass audit completed, found {len(merged_risks)} risks across {len(results)} chunk(s)"
-        if norm_lang == "en"
-        else f"分块经典审计完成，共在 {len(results)} 个片段中识别 {len(merged_risks)} 项风险"
-    )
+    audit_incomplete = bool(
+        legal_issues) or parse_failed_chunks > 0 or response_empty_chunks > 0 or response_truncated_chunks > 0
+    if audit_incomplete:
+        summary = (
+            f"Classic multipass audit may be incomplete: found {len(merged_risks)} risks across {len(results)} chunk(s), but {parse_failed_chunks} chunk(s) failed to parse and {response_truncated_chunks} chunk(s) were truncated"
+            if norm_lang == "en"
+            else f"分块经典审计结果可能不完整：共处理 {len(results)} 个片段，当前识别 {len(merged_risks)} 项风险；其中 {parse_failed_chunks} 个片段解析失败，{response_truncated_chunks} 个片段输出被截断"
+        )
+    else:
+        summary = (
+            f"Classic multipass audit completed, found {len(merged_risks)} risks across {len(results)} chunk(s)"
+            if norm_lang == "en"
+            else f"分块经典审计完成，共在 {len(results)} 个片段中识别 {len(merged_risks)} 项风险"
+        )
     return {
         "audit": {
             "summary": summary,
@@ -380,6 +620,7 @@ def _aggregate_classic_results(
             "risk_summary": risk_summary,
             "risks": merged_risks,
             "citations": merged_citations,
+            "audit_incomplete": audit_incomplete,
             "legal_validation": {
                 "ok": validation_ok and not legal_issues,
                 "issues": legal_issues,
@@ -392,7 +633,10 @@ def _aggregate_classic_results(
             "memory_llm_call_count": total_llm_calls,
             "memory_report_risk_count": len(merged_risks),
             "memory_validation_ok": validation_ok and not legal_issues,
+            "audit_incomplete": audit_incomplete,
             "classic_parse_failed": parse_failed_chunks > 0,
+            "classic_response_empty": response_empty_chunks > 0,
+            "classic_response_truncated": response_truncated_chunks > 0,
             "classic_completion_tokens": completion_tokens,
             "classic_max_tokens": max_output_tokens,
             "parse_failed_clauses": parse_failed_chunks,
@@ -408,6 +652,7 @@ def _build_classic_audit(
     text: str,
     lang: str,
     preview_clauses: List[Dict[str, Any]],
+    preview_manifest: Optional[Dict[str, Any]],
     evidence_items: List[Dict[str, Any]],
     retrieval_opts: Dict[str, Any],
     audit_id: str,
@@ -430,7 +675,7 @@ def _build_classic_audit(
     max_clause_chars = int(_get_memory_runtime_config(
         cfg).get("memory_max_prompt_chars_per_clause") or 2400)
     clause_lines = []
-    for c in list(preview_clauses or [])[:10]:
+    for c in list(preview_clauses or []):
         cid = str(c.get("clause_id") or "")
         title = str(c.get("title") or c.get("clause_path") or "")
         body = str(c.get("clause_text") or c.get("text") or "")
@@ -535,6 +780,7 @@ def _build_classic_audit(
     parse_failed = bool(attempt.get("parse_failed"))
     response_empty = bool(attempt.get("response_empty"))
     response_truncated = bool(attempt.get("response_truncated"))
+    audit_incomplete = parse_failed or response_empty or response_truncated
     risks = parsed.get("risks") if isinstance(
         parsed.get("risks"), list) else []
     clause_map = {str(c.get("clause_id") or ""): c for c in preview_clauses}
@@ -569,7 +815,7 @@ def _build_classic_audit(
                     "risk_id": f"classic-r{idx}",
                     "clause_id": str(c.get("clause_id") or ""),
                     "anchor_id": str(c.get("anchor_id") or ""),
-                    "page_no": int(c.get("page_no") or 0),
+                    "page_no": 0,
                     "paragraph_no": str(c.get("paragraph_no") or ""),
                     "clause_path": str(c.get("clause_path") or ""),
                     "quote": str(r.get("evidence") or ""),
@@ -581,18 +827,6 @@ def _build_classic_audit(
     for item in normalized_risks:
         risk_summary[str(item.get("level") or "low")] += 1
     summary = str(parsed.get("summary") or "").strip()
-    if not summary:
-        summary = (
-            f"经典审计完成，共发现 {len(normalized_risks)} 项风险"
-            if norm_lang != "en"
-            else f"Classic audit completed, found {len(normalized_risks)} risks"
-        )
-        if parse_failed or response_empty:
-            summary = (
-                "经典审计未返回可解析 JSON，结果可能不完整"
-                if norm_lang != "en"
-                else "Classic audit did not return parseable JSON and may be incomplete"
-            )
     legal_issues: List[Dict[str, Any]] = []
     if parse_failed or response_empty:
         legal_issues.append(
@@ -616,17 +850,35 @@ def _build_classic_audit(
                 ),
             }
         )
+    if audit_incomplete:
+        summary = (
+            f"经典审计结果可能不完整：当前识别 {len(normalized_risks)} 项风险，请结合日志复核"
+            if norm_lang != "en"
+            else f"Classic audit may be incomplete: found {len(normalized_risks)} risks, please review logs"
+        )
+    elif not summary:
+        summary = (
+            f"经典审计完成，共发现 {len(normalized_risks)} 项风险"
+            if norm_lang != "en"
+            else f"Classic audit completed, found {len(normalized_risks)} risks"
+        )
     audit = {
         "summary": summary,
         "executive_opinion": [],
         "risk_summary": risk_summary,
         "risks": normalized_risks,
         "citations": _enrich_citations(evidence_items, evidence_items),
+        "audit_incomplete": audit_incomplete,
         "legal_validation": {
             "ok": len(legal_issues) == 0,
             "issues": legal_issues,
         },
     }
+    audit = attach_risk_locations(
+        audit,
+        preview_clauses,
+        preview_manifest=preview_manifest,
+    )
     return {
         "audit": audit,
         "meta": {
@@ -636,7 +888,9 @@ def _build_classic_audit(
             "memory_llm_call_count": 1 + (1 if retry_used else 0),
             "memory_report_risk_count": len(normalized_risks),
             "memory_validation_ok": len(legal_issues) == 0,
+            "audit_incomplete": audit_incomplete,
             "classic_parse_failed": parse_failed,
+            "classic_response_empty": response_empty,
             "classic_response_truncated": response_truncated,
             "classic_completion_tokens": completion_tokens,
             "classic_prompt_tokens": prompt_tokens,
@@ -727,6 +981,7 @@ def _run_classic_multipass_audit(
     text: str,
     lang: str,
     preview_clauses: List[Dict[str, Any]],
+    preview_manifest: Optional[Dict[str, Any]],
     evidence_items: List[Dict[str, Any]],
     retrieval_opts: Dict[str, Any],
     audit_id: str,
@@ -743,6 +998,7 @@ def _run_classic_multipass_audit(
             text=text,
             lang=lang,
             preview_clauses=preview_clauses,
+            preview_manifest=preview_manifest,
             evidence_items=evidence_items,
             retrieval_opts=retrieval_opts,
             audit_id=audit_id,
@@ -756,6 +1012,7 @@ def _run_classic_multipass_audit(
                 text=text,
                 lang=lang,
                 preview_clauses=clause_chunk,
+                preview_manifest=preview_manifest,
                 evidence_items=evidence_items,
                 retrieval_opts=retrieval_opts,
                 audit_id=f"{audit_id}_chunk_{index}",
@@ -768,6 +1025,7 @@ def audit_contract(
     cfg: Dict[str, Any],
     llm,
     file_path: str,
+    preview_file_path: Optional[str] = None,
     lang: str = "zh",
     embedder=None,
     reranker=None,
@@ -795,6 +1053,22 @@ def audit_contract(
                 lang=lang, audit_id=audit_id)
     text, meta = extract_text_with_config(cfg, file_path)
     preview_clauses = build_preview_clauses(text)
+    preview_manifest = None
+    preview_source_path = str(preview_file_path or file_path or "").strip()
+    if preview_source_path:
+        try:
+            preview_manifest = build_contract_preview_manifest(
+                cfg=cfg,
+                document_id=audit_id,
+                file_path=preview_source_path,
+                mime_type="",
+            )
+        except Exception:
+            logger.exception(
+                "audit_preview_manifest_build_failed audit_id=%s file=%s",
+                audit_id,
+                preview_source_path,
+            )
     logger.info(
         "audit_extract_done",
         file=file_path,
@@ -827,6 +1101,7 @@ def audit_contract(
             text=text,
             lang=lang,
             preview_clauses=preview_clauses,
+            preview_manifest=preview_manifest,
             embedder=skill_embedder,
             progress_cb=progress_cb,
         )
@@ -927,6 +1202,7 @@ def audit_contract(
                 text=text,
                 lang=lang,
                 preview_clauses=preview_clauses,
+                preview_manifest=preview_manifest,
                 evidence_items=evidence_items,
                 retrieval_opts=opts,
                 audit_id=audit_id,
@@ -938,6 +1214,7 @@ def audit_contract(
                 text=text,
                 lang=lang,
                 preview_clauses=preview_clauses,
+                preview_manifest=preview_manifest,
                 evidence_items=evidence_items,
                 retrieval_opts=opts,
                 audit_id=audit_id,

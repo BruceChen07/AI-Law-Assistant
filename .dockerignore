@@ -1,0 +1,60 @@
+# =============================================================================
+# Build-context exclusions for AI-Law-Assistant
+#
+# Without this file the context is ~16.9 GB (models 10.6 GB, .git 4.0 GB,
+# app/.venv 2.0 GB, web/node_modules 162 MB) and a Windows venv would be baked
+# into a Linux image. Keep this in sync with the Dockerfile COPY steps.
+# =============================================================================
+
+# --- VCS / local agent tooling ---
+.git
+.gitignore
+.github
+.trae
+.dbg
+.runtime
+ref
+plan
+reports
+memory
+
+# --- Python virtualenvs / caches ---
+app/.venv
+.venv
+venv
+ENV
+env
+**/__pycache__
+**/*.py[cod]
+*.egg-info
+.mypy_cache
+.pytest_cache
+.ruff_cache
+
+# --- Node build artifacts (dist is rebuilt in the web stage) ---
+web/node_modules
+web/dist
+web/.vite
+web/storybook-static
+
+# --- Large runtime data: mount these instead of baking them in ---
+models
+data
+logs
+log
+
+# --- Vendored platform-specific binaries (Windows-only llama.cpp build) ---
+third_party
+
+# --- Host-specific config and secrets (mounted by docker-compose) ---
+app/config.json
+.env
+.env.*
+*.secret.json
+*.credentials.json
+secrets.*
+
+# --- Documentation ---
+docs
+*.md
+LICENSE.txt

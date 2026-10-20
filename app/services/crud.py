@@ -115,6 +115,100 @@ def get_latest_contract_audit_by_document(cfg, document_id, status="done"):
     return dict(row) if row else None
 
 
+def get_next_document_digitization_version(cfg, document_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT COALESCE(MAX(version_no), 0) FROM document_digitization WHERE document_id=?",
+        (document_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return int((row[0] if row else 0) or 0) + 1
+
+
+def create_document_digitization_record(cfg, payload):
+    data = dict(payload or {})
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO document_digitization(
+            id, document_id, version_no, status, source_file_path, source_ext,
+            digitized_docx_path, artifact_dir, md_path, middle_path, content_list_path,
+            ocr_engine, ocr_used, layout_retained, source_text_length, digitized_text_length,
+            text_match_ratio, paragraph_count, table_count, image_count, page_count, note,
+            created_at, updated_at
+        )
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """,
+        (
+            data.get("id"),
+            data.get("document_id"),
+            int(data.get("version_no") or 0),
+            str(data.get("status") or "done"),
+            str(data.get("source_file_path") or ""),
+            str(data.get("source_ext") or ""),
+            str(data.get("digitized_docx_path") or ""),
+            str(data.get("artifact_dir") or ""),
+            str(data.get("md_path") or ""),
+            str(data.get("middle_path") or ""),
+            str(data.get("content_list_path") or ""),
+            str(data.get("ocr_engine") or ""),
+            int(data.get("ocr_used") or 0),
+            int(data.get("layout_retained") or 0),
+            int(data.get("source_text_length") or 0),
+            int(data.get("digitized_text_length") or 0),
+            float(data.get("text_match_ratio") or 0),
+            int(data.get("paragraph_count") or 0),
+            int(data.get("table_count") or 0),
+            int(data.get("image_count") or 0),
+            int(data.get("page_count") or 0),
+            str(data.get("note") or ""),
+            data.get("created_at") or _utc_now_iso(),
+            data.get("updated_at") or _utc_now_iso(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_latest_document_digitization_by_document(cfg, document_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT *
+        FROM document_digitization
+        WHERE document_id=?
+        ORDER BY version_no DESC, created_at DESC
+        LIMIT 1
+        """,
+        (document_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_latest_successful_document_digitization_by_document(cfg, document_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT *
+        FROM document_digitization
+        WHERE document_id=? AND status='done'
+        ORDER BY version_no DESC, created_at DESC
+        LIMIT 1
+        """,
+        (document_id,),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def insert_document(cfg, doc_id, filename, original_filename, file_path, file_size, mime_type, user_id,
                     title=None, category=None, status="active"):
     conn = get_conn(cfg)

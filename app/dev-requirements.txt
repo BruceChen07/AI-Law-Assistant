@@ -1,0 +1,10 @@
+# Temporary simplified dev overlay:
+# - Reuse the runtime lock directly
+# - Add only local QA / tooling packages
+# This keeps local setup stable while the separate dev lock flow is refined.
+
+-r requirements.txt
+pip-tools==7.6.2
+pytest==8.4.2
+pytest-asyncio==0.24.0
+ruff==0.14.14

@@ -84,6 +84,9 @@ app/config.local.json
 
 # Runtime state
 .runtime/services.pids.json
+.runtime/npm-cache/
+.runtime/pip-cache/
+artifacts/ci/
 
 # Local IDE / agent assets
 .trae/skills/

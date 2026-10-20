@@ -1,0 +1,56 @@
+# Edit this file to change runtime dependencies, then run:
+#   python -m piptools compile --resolver=backtracking --output-file requirements.txt requirements.in
+
+# Web framework and API
+fastapi>=0.115,<0.116
+uvicorn>=0.27,<0.28
+pydantic>=2.10,<2.11
+python-multipart>=0.0.30,<0.1
+jinja2>=3.1,<3.2
+email-validator>=2.1,<2.2
+
+# HTTP and LLM clients
+httpx>=0.27,<0.28
+openai>=2.32,<3
+requests>=2.32,<3
+
+# Documents, PDF, and OCR
+python-docx>=1.2,<1.3
+pypdf>=6.9,<7
+pypdfium2>=5.10,<5.11
+pillow>=12.1,<13
+mineru>=3.1,<3.2
+doclayout-yolo>=0.0.4,<0.1
+onnxruntime>=1.20,<1.21
+onnx>=1.17,<1.18
+shapely>=2.0.7,<3
+pyclipper>=1.3.0.post6,<2
+ftfy>=6.3,<7
+dill>=0.4,<0.5
+omegaconf>=2.3,<3
+
+# ML and retrieval
+torch>=2.11,<2.12
+transformers>=4.56,<4.57
+sentence-transformers>=3.3,<3.4
+huggingface-hub>=0.36,<0.37
+modelscope>=1.35,<1.36
+numpy>=1.26,<1.27
+chromadb>=1.5,<1.6
+jieba>=0.42,<0.43
+packaging>=25,<26
+
+# Configuration and runtime services
+PyYAML>=6.0,<7
+keyring>=25.7,<26
+structlog>=25.5,<26
+watchdog>=6,<7
+
+# Authentication
+pyjwt>=2.8,<2.9
+bcrypt>=4.0,<4.1
+passlib>=1.7,<1.8
+
+# Windows-only Office-based DOCX preview conversion
+docx2pdf>=0.1,<0.2 ; platform_system == "Windows"
+pywin32>=311,<312 ; platform_system == "Windows"

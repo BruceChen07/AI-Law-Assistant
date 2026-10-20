@@ -14,7 +14,7 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PID_FILE = REPO_ROOT / ".runtime" / "services.pids.json"
 START_SCRIPT = REPO_ROOT / "bin" / "start-services.py"
-DEFAULT_BACKEND_PORT = 8000
+DEFAULT_BACKEND_PORT = 8001
 DEFAULT_FRONTEND_PORT = 5173
 DEFAULT_WAIT_TIMEOUT = 30
 

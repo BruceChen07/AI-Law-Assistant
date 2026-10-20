@@ -1,6 +1,3 @@
-from app.core.config import get_config
-from app.core.database import init_db
-from app.core.auth import create_user as auth_create_user, get_user_by_username
 import os
 import sys
 import argparse
@@ -9,6 +6,10 @@ import argparse
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+
+from app.core.config import get_config
+from app.core.database import init_db
+from app.core.auth import create_user as auth_create_user, get_user_by_username
 
 
 def main():

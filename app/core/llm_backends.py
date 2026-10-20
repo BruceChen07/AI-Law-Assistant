@@ -63,6 +63,10 @@ class OpenAIProvider(OpenAICompatibleProvider):
     provider_name = "openai"
 
 
+class DeepSeekProvider(OpenAICompatibleProvider):
+    provider_name = "deepseek"
+
+
 class QwenProvider(OpenAICompatibleProvider):
     provider_name = "qwen"
 
@@ -134,6 +138,7 @@ class OllamaProvider(BaseLLMProvider):
 
 
 _PROVIDER_REGISTRY: Dict[str, BaseLLMProvider] = {
+    "deepseek": DeepSeekProvider(),
     "openai": OpenAIProvider(),
     "openai_compatible": OpenAICompatibleProvider(),
     "qwen": QwenProvider(),
@@ -145,4 +150,3 @@ _PROVIDER_REGISTRY: Dict[str, BaseLLMProvider] = {
 def get_provider(provider: Optional[str]) -> BaseLLMProvider:
     normalized = normalize_provider(provider)
     return _PROVIDER_REGISTRY.get(normalized) or _PROVIDER_REGISTRY["openai_compatible"]
-

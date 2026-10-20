@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "selected_toolchain": "jenkins_local_runner",
+  "log_root": "logs/ci",
+  "artifact_root": "artifacts/ci",
+  "defaults": {
+    "max_parallel": 2,
+    "fail_fast": true,
+    "backend_port": 18001,
+    "frontend_port": 14173,
+    "admin_username": "admin",
+    "admin_password": "admin123",
+    "npm_cache_dir": ".runtime/npm-cache",
+    "pip_cache_dir": ".runtime/pip-cache",
+    "resource_env": {
+      "CI": "1",
+      "PYTHONUTF8": "1",
+      "PYTHONUNBUFFERED": "1",
+      "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+      "PIP_CACHE_DIR": "{repo_root}\\.runtime\\pip-cache",
+      "npm_config_cache": "{repo_root}\\.runtime\\npm-cache",
+      "TOKENIZERS_PARALLELISM": "false",
+      "OMP_NUM_THREADS": "2",
+      "MKL_NUM_THREADS": "2",
+      "UVICORN_WORKERS": "1",
+      "VITEST_MAX_THREADS": "2",
+      "NODE_OPTIONS": "--max-old-space-size=3072"
+    }
+  },
+  "profiles": {
+    "quick": [
+      "workspace_probe",
+      "python_dependency_check",
+      "frontend_lint",
+      "frontend_typecheck",
+      "frontend_unit",
+      "backend_static",
+      "backend_unit_core"
+    ],
+    "full": [
+      "workspace_probe",
+      "deps_lock",
+      "python_dependency_check",
+      "frontend_lint",
+      "frontend_typecheck",
+      "frontend_unit",
+      "frontend_build",
+      "backend_static",
+      "backend_security",
+      "backend_unit_core",
+      "backend_unit_full",
+      "backend_package",
+      "prerelease_smoke"
+    ]
+  },
+  "stage_groups": {
+    "quality_frontend": [
+      "frontend_lint",
+      "frontend_typecheck"
+    ],
+    "quality_backend": [
+      "backend_static",
+      "backend_security"
+    ]
+  }
+}

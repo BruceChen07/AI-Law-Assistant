@@ -1,6 +1,28 @@
 import unittest
+import os
+from contextlib import contextmanager
 
 from app.core.llm_router import resolve_llm_route
+
+
+@contextmanager
+def temp_env(mapping):
+    old = {}
+    missing = object()
+    for key, value in mapping.items():
+        old[key] = os.environ.get(key, missing)
+        if value is None:
+            os.environ.pop(key, None)
+        else:
+            os.environ[key] = value
+    try:
+        yield
+    finally:
+        for key, value in old.items():
+            if value is missing:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 class LLMRouterTests(unittest.TestCase):
@@ -48,6 +70,7 @@ class LLMRouterTests(unittest.TestCase):
         self.assertEqual(cfg["provider"], "ollama")
         self.assertEqual(meta["selected_role"], "main")
         self.assertEqual(meta["selected_source"], "main_model")
+        self.assertEqual(meta["runtime_mode"], "local")
 
     def test_small_task_routes_to_small_model(self):
         cfg, meta = resolve_llm_route(self.cfg, task_profile="tax_match_small")
@@ -72,6 +95,33 @@ class LLMRouterTests(unittest.TestCase):
         self.assertEqual(cfg["model"], "gpt-4o-mini")
         self.assertEqual(meta["selected_role"], "cloud_fallback")
         self.assertEqual(meta["reason"], "preferred_role")
+
+    def test_config_runtime_mode_cloud_switches_to_base_llm(self):
+        self.cfg["local_llm"]["runtime_mode"] = "cloud"
+        cfg, meta = resolve_llm_route(self.cfg, task_profile="default")
+        self.assertEqual(cfg["model"], "gpt-4o-mini")
+        self.assertEqual(cfg["provider"], "openai_compatible")
+        self.assertEqual(meta["selected_role"], "cloud_fallback")
+        self.assertEqual(meta["reason"], "runtime_mode_cloud")
+        self.assertEqual(meta["runtime_mode_source"], "config")
+
+    def test_env_runtime_mode_cloud_overrides_local_default(self):
+        with temp_env({"LLM_RUNTIME_MODE": "cloud"}):
+            cfg, meta = resolve_llm_route(self.cfg, task_profile="default")
+        self.assertEqual(cfg["model"], "gpt-4o-mini")
+        self.assertEqual(meta["selected_role"], "cloud_fallback")
+        self.assertEqual(meta["runtime_mode"], "cloud")
+        self.assertEqual(meta["runtime_mode_source"], "env")
+
+    def test_env_runtime_mode_local_preserves_ollama_when_config_cloud(self):
+        self.cfg["local_llm"]["runtime_mode"] = "cloud"
+        with temp_env({"LLM_RUNTIME_MODE": "local"}):
+            cfg, meta = resolve_llm_route(self.cfg, task_profile="default")
+        self.assertEqual(cfg["model"], "qwen3.6:27b")
+        self.assertEqual(cfg["provider"], "ollama")
+        self.assertEqual(meta["selected_role"], "main")
+        self.assertEqual(meta["runtime_mode"], "local")
+        self.assertEqual(meta["runtime_mode_source"], "env")
 
 
 if __name__ == "__main__":

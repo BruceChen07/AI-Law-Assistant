@@ -1,6 +1,3 @@
-from app.core.auth import hash_password
-from app.core.database import get_conn
-from app.core.config import get_config
 import os
 import sys
 import argparse
@@ -9,6 +6,10 @@ from datetime import datetime
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
+
+from app.core.auth import hash_password
+from app.core.database import get_conn
+from app.core.config import get_config
 
 
 def main():
