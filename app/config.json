@@ -164,7 +164,9 @@
         "memory_disable_fallback_on_error": true,
         "memory_token_guard_enabled": true,
         "memory_max_llm_calls_per_audit": 12,
-        "memory_max_prompt_chars_per_clause": 2400
+        "memory_max_prompt_chars_per_clause": 2400,
+        "classic_audit_max_tokens": 1200,
+        "classic_audit_retry_max_tokens": 2000
     },
     "local_llm": {
         "enabled": true,

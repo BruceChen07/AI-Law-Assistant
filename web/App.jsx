@@ -34,6 +34,70 @@ const getFileExtension = (name) => {
   return idx >= 0 ? text.slice(idx) : ""
 }
 
+const escapeRegExp = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+
+const getContractSummarySectionLabels = (lang = "zh") => (
+  normalizeAppLang(lang) === "en"
+    ? {
+        about: "What the contract is about",
+        core: "Core arrangement",
+        tax: "Tax review note",
+        source: "Source file",
+        legacyCutoffs: ["Page Count", "Clause Count", "Contract Content"],
+      }
+    : {
+        about: "合同在说什么",
+        core: "核心安排",
+        tax: "税务审核提示",
+        source: "来源文件",
+        legacyCutoffs: ["合同页数", "条款数", "合同内容"],
+      }
+)
+
+const normalizeSummarySectionText = (value) => String(value || "")
+  .replace(/\r\n/g, "\n")
+  .replace(/\n{3,}/g, "\n\n")
+  .trim()
+
+const extractSummarySectionText = (text, label, nextLabels = []) => {
+  const source = normalizeSummarySectionText(text)
+  if (!source) return ""
+  const startRegex = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\s*[:：]\\s*`, "i")
+  const startMatch = startRegex.exec(source)
+  if (!startMatch) return ""
+  const startIndex = startMatch.index + startMatch[0].length
+  let endIndex = source.length
+  nextLabels.forEach((nextLabel) => {
+    const nextRegex = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(nextLabel)}\\s*[:：]`, "im")
+    const remainder = source.slice(startIndex)
+    const nextMatch = nextRegex.exec(remainder)
+    if (nextMatch) {
+      const candidateEnd = startIndex + nextMatch.index
+      if (candidateEnd < endIndex) endIndex = candidateEnd
+    }
+  })
+  return normalizeSummarySectionText(source.slice(startIndex, endIndex))
+}
+
+const parseStructuredContractSummary = (text, lang = "zh") => {
+  const source = normalizeSummarySectionText(text)
+  if (!source) return null
+  const labels = getContractSummarySectionLabels(lang)
+  const itemTitleMatch = source.match(/(?:^|\n)\s*(\d+\.\s*[^\n]+)/)
+  const about = extractSummarySectionText(source, labels.about, [labels.core, labels.tax, labels.source, ...labels.legacyCutoffs])
+  const core = extractSummarySectionText(source, labels.core, [labels.tax, labels.source, ...labels.legacyCutoffs])
+  const tax = extractSummarySectionText(source, labels.tax, [labels.source, ...labels.legacyCutoffs])
+  const summarySource = extractSummarySectionText(source, labels.source, labels.legacyCutoffs)
+  if (!about && !core && !tax && !summarySource) return null
+  return {
+    itemTitle: String(itemTitleMatch?.[1] || "").trim(),
+    about,
+    core,
+    tax,
+    source: summarySource,
+  }
+}
+
 const createDefaultContract = (lang = getStoredAppLang()) => ({
   title: "",
   language: normalizeAppLang(lang),
@@ -259,6 +323,10 @@ export default function App() {
   const contractSummaryEnabled = Boolean(contractMeta?.contract_summary_enabled)
   const contractSummaryStatus = String(contractMeta?.contract_summary_status || "").trim().toLowerCase()
   const contractSummaryLanguage = normalizeAppLang(contractMeta?.contract_summary_language || uiLang)
+  const structuredContractSummary = useMemo(
+    () => parseStructuredContractSummary(contractSummaryText, contractSummaryLanguage),
+    [contractSummaryLanguage, contractSummaryText]
+  )
   const showContractSummary = contractSummaryEnabled || Boolean(contractSummaryText)
   const contractSummaryStatusLabel = useMemo(() => {
     if (contractSummaryStatus === "ok") return t.contractSummaryStatusOk
@@ -1792,7 +1860,35 @@ export default function App() {
                     <span>{t.contractSummaryStatus}: {contractSummaryStatusLabel}</span>
                     <span>{uiLang === "zh" ? `${contractSummaryText.length} 字` : `${contractSummaryText.length} chars`}</span>
                   </div>
-                  <div className={`summary-content${contractSummaryText ? "" : " is-empty"}`}>{contractSummaryText || contractSummaryNotice}</div>
+                  <div className={`summary-content${contractSummaryText ? "" : " is-empty"}${structuredContractSummary ? " is-structured" : ""}`}>
+                    {contractSummaryText ? (
+                      structuredContractSummary ? (
+                        <div className="structured-summary">
+                          {structuredContractSummary.itemTitle && (
+                            <div className="structured-summary-title">{structuredContractSummary.itemTitle}</div>
+                          )}
+                          <p className="structured-summary-line">
+                            <strong>{t.contractSummarySectionAbout}：</strong>
+                            <span>{structuredContractSummary.about || "-"}</span>
+                          </p>
+                          <p className="structured-summary-line">
+                            <strong>{t.contractSummarySectionCore}：</strong>
+                            <span>{structuredContractSummary.core || "-"}</span>
+                          </p>
+                          <p className="structured-summary-line">
+                            <strong>{t.contractSummarySectionTax}：</strong>
+                            <span>{structuredContractSummary.tax || "-"}</span>
+                          </p>
+                          <p className="structured-summary-line">
+                            <strong>{t.contractSummarySectionSource}：</strong>
+                            <span>{structuredContractSummary.source || "-"}</span>
+                          </p>
+                        </div>
+                      ) : (
+                        contractSummaryText
+                      )
+                    ) : contractSummaryNotice}
+                  </div>
                 </div>
               )}
               <div className="result-summary">

@@ -110,12 +110,23 @@ def _get_memory_runtime_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
                or "classic").strip().lower()
     if mode not in {"classic"}:
         mode = "classic"
+    classic_audit_max_tokens = max(
+        300, int(raw.get("classic_audit_max_tokens")
+                 or CLASSIC_AUDIT_MAX_TOKENS)
+    )
+    classic_audit_retry_max_tokens = max(
+        classic_audit_max_tokens,
+        int(raw.get("classic_audit_retry_max_tokens")
+            or CLASSIC_AUDIT_RETRY_MAX_TOKENS),
+    )
     return {
         "memory_module_enabled": bool(raw.get("memory_module_enabled", True)),
         "memory_mode_when_disabled": mode,
         "memory_disable_fallback_on_error": bool(raw.get("memory_disable_fallback_on_error", True)),
         "memory_max_llm_calls_per_audit": max(1, int(raw.get("memory_max_llm_calls_per_audit") or 12)),
         "memory_max_prompt_chars_per_clause": max(300, int(raw.get("memory_max_prompt_chars_per_clause") or 2400)),
+        "classic_audit_max_tokens": classic_audit_max_tokens,
+        "classic_audit_retry_max_tokens": classic_audit_retry_max_tokens,
     }
 
 
@@ -392,17 +403,14 @@ def _build_contract_summary(
                 "Instructions\n\n"
                 "This document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n"
                 f"1. {summary_title}\n\n"
-                "What the contract is about:\n"
-                "...\n\n"
-                "Core arrangement:\n"
-                "...\n\n"
-                "Tax review note:\n"
-                "...\n\n"
+                "What the contract is about: ...\n\n"
+                "Core arrangement: ...\n\n"
+                "Tax review note: ...\n\n"
                 f"Source file: {source_name or 'Current Contract'}\n\n"
-                "Only use the contract content below. Do not fabricate missing facts.\n\n"
-                f"Page Count:\n{max(0, int(page_count or 0))}\n\n"
-                f"Clause Count:\n{len(list(preview_clauses or []))}\n\n"
-                f"Contract Content:\n{source_text}"
+                "The following contract context is for summary generation only. Do not copy these helper labels into the final output.\n"
+                f"- Page Count: {max(0, int(page_count or 0))}\n"
+                f"- Clause Count: {len(list(preview_clauses or []))}\n"
+                f"- Contract Content: {source_text}"
                 if norm_lang == "en"
                 else "请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n"
                 "合同内容简要摘要\n\n"
@@ -411,17 +419,14 @@ def _build_contract_summary(
                 "使用说明\n\n"
                 "本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n"
                 f"1. {summary_title}\n\n"
-                "合同在说什么：\n"
-                "...\n\n"
-                "核心安排：\n"
-                "...\n\n"
-                "税务审核提示：\n"
-                "...\n\n"
+                "合同在说什么：...\n\n"
+                "核心安排：...\n\n"
+                "税务审核提示：...\n\n"
                 f"来源文件：{source_name or '当前合同'}\n\n"
-                "只能根据下方合同内容生成，不要臆测缺失信息。\n\n"
-                f"合同页数：\n{max(0, int(page_count or 0))}\n\n"
-                f"条款数：\n{len(list(preview_clauses or []))}\n\n"
-                f"合同内容：\n{source_text}"
+                "以下为摘要使用的合同上下文，请不要把以下提示标题写入最终输出。\n"
+                f"- 合同页数：{max(0, int(page_count or 0))}\n"
+                f"- 条款数：{len(list(preview_clauses or []))}\n"
+                f"- 合同内容：{source_text}"
             ),
             "source": "inline_fallback",
             "prompt_id": "contract_audit.contract_summary",
@@ -658,6 +663,7 @@ def _build_classic_audit(
     audit_id: str,
 ) -> Dict[str, Any]:
     norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
+    runtime_cfg = _get_memory_runtime_config(cfg)
     allowed_citation_ids = {
         str(it.get("citation_id") or "").strip()
         for it in evidence_items
@@ -672,8 +678,18 @@ def _build_classic_audit(
             continue
         lines.append(f"- C{idx} [{cid}] {law} {article}".strip())
     whitelist_text = "\n".join(lines) if lines else "-"
-    max_clause_chars = int(_get_memory_runtime_config(
-        cfg).get("memory_max_prompt_chars_per_clause") or 2400)
+    max_clause_chars = int(runtime_cfg.get(
+        "memory_max_prompt_chars_per_clause") or 2400)
+    classic_audit_max_tokens = int(
+        runtime_cfg.get("classic_audit_max_tokens") or CLASSIC_AUDIT_MAX_TOKENS
+    )
+    classic_audit_retry_max_tokens = max(
+        classic_audit_max_tokens,
+        int(
+            runtime_cfg.get("classic_audit_retry_max_tokens")
+            or CLASSIC_AUDIT_RETRY_MAX_TOKENS
+        ),
+    )
     clause_lines = []
     for c in list(preview_clauses or []):
         cid = str(c.get("clause_id") or "")
@@ -762,10 +778,10 @@ def _build_classic_audit(
             "max_tokens": int(max_tokens),
         }
 
-    attempt = _run_once(CLASSIC_AUDIT_MAX_TOKENS)
+    attempt = _run_once(classic_audit_max_tokens)
     retry_used = False
     if attempt["parse_failed"] or attempt["response_empty"]:
-        retry_attempt = _run_once(CLASSIC_AUDIT_RETRY_MAX_TOKENS)
+        retry_attempt = _run_once(classic_audit_retry_max_tokens)
         if (not retry_attempt["parse_failed"]) or (
             retry_attempt["usage"]["completion_tokens"] >= attempt["usage"]["completion_tokens"]
         ):

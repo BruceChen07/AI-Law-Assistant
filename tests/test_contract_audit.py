@@ -302,3 +302,74 @@ def test_audit_contract_does_not_attach_contract_summary(monkeypatch, tmp_path):
     assert str((result.get("audit") or {}).get(
         "contract_summary") or "").strip() == ""
     assert "contract_summary_enabled" not in (result.get("meta") or {})
+
+
+def test_build_classic_audit_uses_configured_max_tokens(monkeypatch):
+    class RetryAwareLLM:
+        def __init__(self):
+            self.max_tokens_calls = []
+
+        def chat(self, messages, overrides=None):
+            current_max_tokens = int((overrides or {}).get("max_tokens") or 0)
+            self.max_tokens_calls.append(current_max_tokens)
+            if len(self.max_tokens_calls) == 1:
+                return (
+                    "not-json",
+                    {
+                        "model": "fake",
+                        "usage": {"prompt_tokens": 120, "completion_tokens": current_max_tokens, "total_tokens": 120 + current_max_tokens},
+                        "choices": [{"finish_reason": "length"}],
+                    },
+                )
+            return (
+                "{\"summary\":\"识别到 0 项风险\",\"risks\":[]}",
+                {
+                    "model": "fake",
+                    "usage": {"prompt_tokens": 120, "completion_tokens": 80, "total_tokens": 200},
+                    "choices": [{"finish_reason": "stop"}],
+                },
+            )
+
+    monkeypatch.setattr(
+        ca,
+        "resolve_bound_prompt_text",
+        lambda *_args, **_kwargs: {
+            "rendered_system_text": "Return strict JSON only.",
+            "rendered_text": "Review these contract clauses and return JSON only.",
+            "source": "test",
+            "prompt_id": "contract_audit.classic_json",
+            "prompt_name": "contract_audit.classic_json",
+        },
+    )
+
+    llm = RetryAwareLLM()
+    result = ca._build_classic_audit(
+        cfg={
+            "memory_runtime_config": {
+                "memory_module_enabled": False,
+                "classic_audit_max_tokens": 1500,
+                "classic_audit_retry_max_tokens": 2400,
+                "memory_max_prompt_chars_per_clause": 1200,
+            }
+        },
+        llm=llm,
+        text="第一条 合作范围 乙方按甲方订单供货。",
+        lang="zh",
+        preview_clauses=[
+            {
+                "clause_id": "c1",
+                "clause_path": "第一条",
+                "clause_text": "乙方按甲方订单供货。",
+                "anchor_id": "clause-c1",
+                "paragraph_no": "1",
+            }
+        ],
+        preview_manifest={"pages": []},
+        evidence_items=[],
+        retrieval_opts={"audit_mode": "rag"},
+        audit_id="audit_configured_token_limits",
+    )
+
+    assert llm.max_tokens_calls == [1500, 2400]
+    assert result["meta"]["classic_retry_used"] is True
+    assert result["meta"]["classic_max_tokens"] == 2400

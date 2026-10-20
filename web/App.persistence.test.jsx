@@ -208,11 +208,13 @@ describe("App audit persistence", () => {
 
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText(/合同内容简要摘要/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("合同在说什么：")).toBeInTheDocument())
     const titles = screen.getAllByText(/整份合同总结|概览/)
     expect(titles[0]).toHaveTextContent("整份合同总结")
     expect(titles[1]).toHaveTextContent("概览")
     expect(screen.getByText(/摘要状态: 已生成/)).toBeInTheDocument()
+    expect(screen.getByText("1. 当前合同")).toBeInTheDocument()
+    expect(screen.getByText("当前合同.docx")).toBeInTheDocument()
   })
 
   it("shows contract summary status when the summary is empty", async () => {
@@ -269,11 +271,13 @@ describe("App audit persistence", () => {
 
     render(<App />)
 
-    await waitFor(() => expect(screen.getByText(/合同内容简要摘要/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText("合同在说什么：")).toBeInTheDocument())
     expect(vi.mocked(getContractSummary)).toHaveBeenCalledWith("doc-contract-summary-fetch", "zh")
     const titles = screen.getAllByText(/整份合同总结|概览/)
     expect(titles[0]).toHaveTextContent("整份合同总结")
     expect(titles[1]).toHaveTextContent("概览")
+    expect(screen.getByText("1. 华润万家购销合同2026年修订版")).toBeInTheDocument()
+    expect(screen.getByText("华润万家购销合同2026年修订-可编辑文字版.docx")).toBeInTheDocument()
   })
 
   it("shows only the current user's snapshot history and supports compare", async () => {
