@@ -55,6 +55,10 @@ def _admin_headers():
 def test_admin_llm_config_reports_env_status():
     headers = _admin_headers()
     with temp_env({
+        # Pin the runtime to the env-managed cloud target so the assertions do
+        # not depend on whether the checked-out config ships a local or cloud
+        # runtime_mode.
+        "LLM_RUNTIME_MODE": "cloud",
         "LLM_PROVIDER": "openai",
         "OPENAI_API_KEY": None,
         "LLM_API_KEY": None,
