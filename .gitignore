@@ -90,3 +90,6 @@ artifacts/ci/
 
 # Local IDE / agent assets
 .trae/skills/
+
+# Refactor baseline snapshots (generated)
+.refactor-baseline/
