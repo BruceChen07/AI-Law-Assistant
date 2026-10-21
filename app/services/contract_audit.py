@@ -338,10 +338,19 @@ def _estimate_text_tokens(text: str) -> int:
 
 
 def _resolve_contract_audit_runtime_llm(cfg: Dict[str, Any]) -> Dict[str, Any]:
-    route_cfg, _route_meta = resolve_llm_route(
+    route_cfg, route_meta = resolve_llm_route(
         cfg or {},
         task_profile="contract_audit_main",
     )
+    route_cfg = dict(route_cfg or {})
+    # Mirror the chat client: pin the routed local target so that ambient
+    # LLM_PROVIDER/LLM_MODEL variables cannot make budget sizing assume a
+    # cloud model and blow the local num_ctx window.
+    if (
+        str(route_meta.get("selected_role") or "") in {"main", "small"}
+        and str(route_meta.get("selected_source") or "") in {"main_model", "small_model"}
+    ):
+        route_cfg["_lock_runtime_target"] = True
     runtime_cfg, _runtime_meta = resolve_runtime_llm_config(route_cfg)
     return runtime_cfg if isinstance(runtime_cfg, dict) else {}
 

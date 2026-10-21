@@ -433,6 +433,34 @@ def test_contract_audit_context_window_uses_local_num_ctx_for_ollama():
     assert context_window == 8192
 
 
+def test_contract_audit_runtime_ignores_env_cloud_provider_in_local_mode(monkeypatch):
+    cfg = {
+        "llm_config": {
+            "provider": "deepseek",
+            "api_base": "https://api.deepseek.com/v1",
+            "model": "deepseek-chat",
+        },
+        "local_llm": {
+            "enabled": True,
+            "routing_enabled": True,
+            "cloud_fallback_enabled": False,
+            "main_model": {
+                "provider": "ollama",
+                "api_base": "http://127.0.0.1:11434/v1",
+                "model": "qwen3.5:9b",
+            },
+        },
+    }
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("LLM_MODEL", "gpt-4o-mini")
+
+    runtime_cfg = ca._resolve_contract_audit_runtime_llm(cfg)
+
+    assert runtime_cfg["provider"] == "ollama"
+    assert runtime_cfg["model"] == "qwen3.5:9b"
+    assert runtime_cfg["api_base"] == "http://127.0.0.1:11434/v1"
+
+
 def test_build_contract_summary_source_text_groups_clauses_and_flags_truncation():
     preview_clauses = [
         {"clause_path": "第一条 合作范围", "clause_text": "乙方按甲方订单供货。"},
