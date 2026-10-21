@@ -122,7 +122,10 @@ def probe_tcp_port(host: str, port: int, timeout: float = 1.0) -> bool:
 
 def probe_http(url: str, timeout: int = READY_HTTP_TIMEOUT) -> tuple[bool, str]:
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as resp:
+        request = urllib.request.Request(url, method="GET")
+        # Bypass system and environment proxies for local readiness probes.
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(request, timeout=timeout) as resp:
             return True, f"http={resp.status}"
     except Exception as exc:
         return False, str(exc)
@@ -133,6 +136,38 @@ def write_pid_file(pid_file: Path, payload: dict) -> None:
     with pid_file.open("w", encoding="utf-8") as file_obj:
         json.dump(payload, file_obj, ensure_ascii=False, indent=2)
         file_obj.write("\n")
+
+
+def write_runtime_snapshot(
+    pid_file: Path,
+    *,
+    services: list["ServiceProcess"],
+    backend_port: int,
+    frontend_port: int,
+    dated_log_dir: Path,
+) -> None:
+    payload = {
+        "launcher_pid": os.getpid(),
+        "backend_pid": None,
+        "frontend_pid": None,
+        "backend_port": backend_port,
+        "frontend_port": frontend_port,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "log_dir": str(dated_log_dir),
+        "launcher_log": str(dated_log_dir / "launcher.log"),
+        "backend_log": "",
+        "frontend_log": "",
+    }
+    for service in services:
+        current_pid = service.process.pid if service.process else None
+        current_log = str(service.log_path)
+        if service.name == "backend":
+            payload["backend_pid"] = current_pid
+            payload["backend_log"] = current_log
+        elif service.name == "frontend":
+            payload["frontend_pid"] = current_pid
+            payload["frontend_log"] = current_log
+    write_pid_file(pid_file, payload)
 
 
 def read_tail_text(path: Path, max_chars: int = 4000) -> str:
@@ -476,30 +511,42 @@ def main() -> int:
     ]
 
     try:
-        for service in services:
-            service.spawn(logger)
+        backend_service = services[0]
+        frontend_service = services[1]
 
-        write_pid_file(
+        backend_service.spawn(logger)
+        write_runtime_snapshot(
             pid_file,
-            {
-                "launcher_pid": os.getpid(),
-                "backend_pid": services[0].process.pid if services[0].process else None,
-                "frontend_pid": services[1].process.pid if services[1].process else None,
-                "backend_port": args.backend_port,
-                "frontend_port": args.frontend_port,
-                "started_at": datetime.now(timezone.utc).isoformat(),
-                "log_dir": str(dated_log_dir),
-                "launcher_log": str(dated_log_dir / "launcher.log"),
-                "backend_log": str(services[0].log_path),
-                "frontend_log": str(services[1].log_path),
-            },
+            services=[backend_service],
+            backend_port=args.backend_port,
+            frontend_port=args.frontend_port,
+            dated_log_dir=dated_log_dir,
         )
-        logger.info("PID file written: %s", pid_file)
+        logger.info("PID file written after backend start: %s", pid_file)
 
-        for service in services:
-            ok = wait_for_service_ready(service, args.startup_timeout, logger)
-            if not ok:
-                raise RuntimeError(f"{service.name} failed to become ready")
+        backend_ok = wait_for_service_ready(
+            backend_service, args.startup_timeout, logger)
+        if not backend_ok:
+            raise RuntimeError(
+                f"{backend_service.name} failed to become ready")
+
+        logger.info(
+            "Backend is ready. Starting frontend after backend warmup.")
+        frontend_service.spawn(logger)
+        write_runtime_snapshot(
+            pid_file,
+            services=[backend_service, frontend_service],
+            backend_port=args.backend_port,
+            frontend_port=args.frontend_port,
+            dated_log_dir=dated_log_dir,
+        )
+        logger.info("PID file updated after frontend start: %s", pid_file)
+
+        frontend_ok = wait_for_service_ready(
+            frontend_service, args.startup_timeout, logger)
+        if not frontend_ok:
+            raise RuntimeError(
+                f"{frontend_service.name} failed to become ready")
 
         logger.info(
             "All services are ready. backend=http://127.0.0.1:%s frontend=http://127.0.0.1:%s",
