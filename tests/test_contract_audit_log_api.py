@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.api.routers.contracts as contracts_router
+from app.api.routers.contracts import audit as contracts_audit
 from app.api.dependencies import (
     get_app_embedder,
     get_app_llm,
@@ -116,14 +117,14 @@ def test_contract_audit_route_writes_stage_logs_automatically(tmp_path, monkeypa
         }
 
     monkeypatch.setattr(
-        contracts_router, "run_contract_pipeline_bundle", _fake_pipeline)
+        contracts_audit, "run_contract_pipeline_bundle", _fake_pipeline)
     monkeypatch.setattr(
-        contracts_router,
+        contracts_audit,
         "insert_document",
         lambda *_args, **kwargs: kwargs.get("doc_id") or "doc-route",
     )
     monkeypatch.setattr(
-        contracts_router, "insert_contract_audit", lambda *_args, **_kwargs: None)
+        contracts_audit, "insert_contract_audit", lambda *_args, **_kwargs: None)
 
     app = FastAPI()
     app.include_router(build_contracts_router(cfg))

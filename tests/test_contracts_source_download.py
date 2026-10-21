@@ -1,12 +1,17 @@
 import io
 import json
+import re
 import zipfile
+from datetime import datetime
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
 from docx import Document
 
 import app.api.routers.contracts as contracts_router
+from app.api.routers.contracts import export as contracts_export
+from app.api.routers.contracts import source as contracts_source
+from app.api.routers.contracts import summary as contracts_summary
 from app.main import app
 
 
@@ -41,7 +46,7 @@ def test_download_contract_source_returns_original_file(tmp_path, monkeypatch):
     source_path = tmp_path / "contract.pdf"
     source_path.write_bytes(b"%PDF-source")
     monkeypatch.setattr(
-        contracts_router,
+        contracts_source,
         "get_document_by_id_for_user",
         lambda *_args, **_kwargs: {
             "file_path": str(source_path),
@@ -64,7 +69,7 @@ def test_download_contract_source_returns_digitized_variant(tmp_path, monkeypatc
     original_path.write_bytes(b"%PDF-source")
     digitized_path.write_bytes(b"docx-content")
     monkeypatch.setattr(
-        contracts_router,
+        contracts_source,
         "get_document_by_id_for_user",
         lambda *_args, **_kwargs: {
             "file_path": str(original_path),
@@ -74,7 +79,7 @@ def test_download_contract_source_returns_digitized_variant(tmp_path, monkeypatc
         },
     )
     monkeypatch.setattr(
-        contracts_router,
+        contracts_source,
         "get_latest_successful_document_digitization_by_document",
         lambda *_args, **_kwargs: {
             "digitized_docx_path": str(digitized_path),
@@ -103,7 +108,7 @@ def test_export_contract_report_comments_uses_digitized_docx_for_pdf_source(tmp_
     doc.save(digitized_path)
 
     monkeypatch.setattr(
-        contracts_router,
+        contracts_export,
         "get_document_by_id_for_user",
         lambda *_args, **_kwargs: {
             "file_path": str(original_path),
@@ -113,14 +118,14 @@ def test_export_contract_report_comments_uses_digitized_docx_for_pdf_source(tmp_
         },
     )
     monkeypatch.setattr(
-        contracts_router,
+        contracts_export,
         "get_latest_successful_document_digitization_by_document",
         lambda *_args, **_kwargs: {
             "digitized_docx_path": str(digitized_path),
         },
     )
     monkeypatch.setattr(
-        contracts_router,
+        contracts_export,
         "get_latest_contract_audit_by_document",
         lambda *_args, **_kwargs: {
             "result_json": json.dumps(
@@ -159,9 +164,11 @@ def test_export_contract_report_comments_uses_digitized_docx_for_pdf_source(tmp_
     )
 
     assert resp.status_code == 200
-    assert "contract_digitized_with_comments_doc-export.docx" in resp.headers.get(
-        "content-disposition", ""
-    )
+    content_disposition = resp.headers.get("content-disposition", "")
+    assert re.search(r'contract_\d{8}_\d{6}\.docx',
+                     content_disposition), content_disposition
+    assert "doc-export" not in content_disposition
+    assert "contract_with_comments" not in content_disposition
 
     with zipfile.ZipFile(io.BytesIO(resp.content), "r") as zf:
         file_list = zf.namelist()
@@ -173,12 +180,25 @@ def test_export_contract_report_comments_uses_digitized_docx_for_pdf_source(tmp_
         assert "w:commentReference" in document_xml
 
 
+def test_build_readable_export_filename_strips_ext_and_sanitizes():
+    ts = datetime(2026, 10, 20, 14, 30, 25)
+    builder = contracts_export._build_readable_export_filename
+    assert builder("合同名称.docx", ts, "docx") == "合同名称_20261020_143025.docx"
+    assert builder(
+        "华润万家购销合同2026年修订-可编辑文字版.docx", ts, "docx"
+    ) == "华润万家购销合同2026年修订-可编辑文字版_20261020_143025.docx"
+    assert builder("a/b:c*d?.docx", ts,
+                   "docx") == "a_b_c_d_20261020_143025.docx"
+    assert builder("", ts, "docx") == "contract_20261020_143025.docx"
+    assert builder("???", ts, "docx") == "contract_20261020_143025.docx"
+
+
 def test_get_contract_summary_returns_structured_summary(tmp_path, monkeypatch):
     source_path = tmp_path / "contract.docx"
     source_path.write_bytes(b"docx-source")
 
     monkeypatch.setattr(
-        contracts_router,
+        contracts_summary,
         "get_document_by_id_for_user",
         lambda *_args, **_kwargs: {
             "file_path": str(source_path),
@@ -188,7 +208,7 @@ def test_get_contract_summary_returns_structured_summary(tmp_path, monkeypatch):
         },
     )
     monkeypatch.setattr(
-        contracts_router,
+        contracts_summary,
         "extract_text_with_config",
         lambda *_args, **_kwargs: (
             "第一条 供货。第二条 付款与开票。",
@@ -196,7 +216,7 @@ def test_get_contract_summary_returns_structured_summary(tmp_path, monkeypatch):
         ),
     )
     monkeypatch.setattr(
-        contracts_router,
+        contracts_summary,
         "_build_preview_clauses",
         lambda _text: [
             {"clause_path": "第一条", "clause_text": "供货。"},
@@ -204,14 +224,24 @@ def test_get_contract_summary_returns_structured_summary(tmp_path, monkeypatch):
         ],
     )
     monkeypatch.setattr(
-        contracts_router,
+        contracts_summary,
         "_build_contract_summary",
         lambda **_kwargs: {
             "enabled": True,
-            "status": "ok",
-            "text": "合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 1 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. demo-contract\n\n合同在说什么：\n这是供货合同。\n\n核心安排：\n约定付款与开票。\n\n税务审核提示：\n需核对发票口径。\n\n来源文件：demo-contract.docx",
+            "status": "partial",
+            "title": "demo-contract",
+            "about": "这是供货合同。",
+            "core": "约定付款与开票。",
+            "tax": "需核对发票口径。",
+            "source_file": "demo-contract.docx",
             "source": "system_default",
             "prompt_id": "contract_audit.contract_summary",
+            "issues": ["output_truncated"],
+            "truncated": True,
+            "cache_hit": False,
+            "source_chars": 8000,
+            "map_reduce": True,
+            "map_chunks": 3,
         },
     )
 
@@ -223,8 +253,18 @@ def test_get_contract_summary_returns_structured_summary(tmp_path, monkeypatch):
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["document_id"] == "doc-summary"
-    assert "合同内容简要摘要" in payload["summary"]
+    assert payload["summary"]["title"] == "demo-contract"
+    assert payload["summary"]["about"] == "这是供货合同。"
+    assert payload["summary"]["core"] == "约定付款与开票。"
+    assert payload["summary"]["tax"] == "需核对发票口径。"
+    assert payload["summary"]["source_file"] == "demo-contract.docx"
     assert payload["meta"]["contract_summary_enabled"] is True
-    assert payload["meta"]["contract_summary_status"] == "ok"
+    assert payload["meta"]["contract_summary_status"] == "partial"
     assert payload["meta"]["contract_summary_language"] == "zh"
     assert payload["meta"]["preview_clause_total"] == 2
+    assert payload["meta"]["contract_summary_issues"] == ["output_truncated"]
+    assert payload["meta"]["contract_summary_truncated"] is True
+    assert payload["meta"]["contract_summary_source_chars"] == 8000
+    assert payload["meta"]["contract_summary_cache_hit"] is False
+    assert payload["meta"]["contract_summary_map_reduce"] is True
+    assert payload["meta"]["contract_summary_map_chunks"] == 3
