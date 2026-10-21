@@ -125,6 +125,21 @@ def _build_mineru_subprocess_env(base_env: Dict[str, str], mineru_cfg: Dict[str,
         "hf_download_timeout_sec", 30) or 30)
     env["HF_HUB_ETAG_TIMEOUT"] = str(max(1, hf_connect_timeout))
     env["HF_HUB_DOWNLOAD_TIMEOUT"] = str(max(1, hf_download_timeout))
+    # MinerU starts a local mineru-api on 127.0.0.1 and then probes it.
+    # Ensure loopback traffic bypasses any inherited proxy settings.
+    no_proxy_tokens = []
+    for key in ("NO_PROXY", "no_proxy"):
+        raw = str(env.get(key) or "").strip()
+        if raw:
+            no_proxy_tokens.extend(
+                [item.strip() for item in raw.split(",") if item.strip()])
+    for host in ("127.0.0.1", "localhost"):
+        if host not in no_proxy_tokens:
+            no_proxy_tokens.append(host)
+    if no_proxy_tokens:
+        merged_no_proxy = ",".join(no_proxy_tokens)
+        env["NO_PROXY"] = merged_no_proxy
+        env["no_proxy"] = merged_no_proxy
     return env
 
 
