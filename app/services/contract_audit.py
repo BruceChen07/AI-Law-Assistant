@@ -11,12 +11,14 @@ import re
 import structlog
 from typing import Dict, Any, Optional, Callable, List
 
+from app.core.llm_env import is_cloud_provider, resolve_runtime_llm_config
+from app.core.llm_router import resolve_llm_route
 from app.core.utils import extract_text_with_config
 from app.services.audit_utils import _safe_int, _normalize_citation_item, _enrich_citations
 from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve_regulation_evidence
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
 from app.services.contract_audit_modules.result_assembler import attach_risk_locations
-from app.services.contract_audit_modules.trace_writer import write_audit_trace, trace_clip
+from app.services.contract_audit_modules.trace_writer import memory_paths, write_audit_trace, trace_clip
 from app.services.contract_preview_assets import build_contract_preview_manifest
 from app.services.prompt_binding import resolve_bound_prompt_text
 
@@ -25,8 +27,23 @@ logger = structlog.get_logger(__name__)
 CLASSIC_AUDIT_MAX_TOKENS = 900
 CLASSIC_AUDIT_RETRY_MAX_TOKENS = 1400
 CLASSIC_MULTIPASS_TRIGGER_CLAUSES = 10
-CONTRACT_SUMMARY_SOURCE_MAX_CHARS = 9000
-CONTRACT_SUMMARY_MAX_TOKENS = 720
+CONTRACT_SUMMARY_SOURCE_MAX_CHARS = 30000
+# Reasoning models spend part of max_tokens on hidden reasoning tokens, so the
+# budget must cover reasoning plus the ~900 tokens of Chinese output.
+CONTRACT_SUMMARY_MAX_TOKENS = 3000
+CONTRACT_SUMMARY_RETRY_MAX_TOKENS = 4000
+CONTRACT_SUMMARY_MAP_CHUNK_CHARS = 6000
+CONTRACT_SUMMARY_MAP_MAX_CHUNKS = 24
+CONTRACT_SUMMARY_MAP_MAX_TOKENS = 1200
+CONTRACT_SUMMARY_MIN_SECTION_CHARS = 120
+CONTRACT_SUMMARY_MIN_TOTAL_CHARS = 350
+CONTRACT_SUMMARY_LONG_CONTRACT_CHARS = 3000
+CONTRACT_SUMMARY_PROMPT_VERSION = "v2"
+CONTRACT_SUMMARY_TARGET_MIN_CHARS = 600
+CONTRACT_SUMMARY_TARGET_MAX_CHARS = 800
+DEFAULT_CLOUD_CONTEXT_WINDOW_TOKENS = 128 * 1024
+DEFAULT_LOCAL_CONTEXT_WINDOW_TOKENS = 4096
+DEFAULT_CONTEXT_WINDOW_OUTPUT_RESERVE_TOKENS = 4096
 SKILL_AUDIT_MODES = {"skill", "skills", "advanced",
                      "advanced_skill", "skill_orchestrated"}
 HybridSearcher = None
@@ -48,35 +65,216 @@ def _chat_with_task_profile(llm, messages, task_profile: str, overrides=None):
     return llm.chat(messages, overrides=next_overrides)
 
 
-def _build_contract_summary_source_text(
-    text: str,
+def _get_contract_summary_runtime_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    """Read contract summary budgets from config with safe defaults."""
+    raw = cfg.get("memory_runtime_config") if isinstance(
+        cfg.get("memory_runtime_config"), dict) else {}
+    source_max_chars = max(
+        4000,
+        _safe_int(raw.get("contract_summary_source_max_chars"),
+                  CONTRACT_SUMMARY_SOURCE_MAX_CHARS),
+    )
+    max_tokens = max(
+        600,
+        _safe_int(raw.get("contract_summary_max_tokens"),
+                  CONTRACT_SUMMARY_MAX_TOKENS),
+    )
+    retry_max_tokens = max(
+        max_tokens,
+        _safe_int(raw.get("contract_summary_retry_max_tokens"),
+                  CONTRACT_SUMMARY_RETRY_MAX_TOKENS),
+    )
+    return {
+        "source_max_chars": source_max_chars,
+        "max_tokens": max_tokens,
+        "retry_max_tokens": retry_max_tokens,
+        "map_reduce_enabled": bool(raw.get("contract_summary_map_reduce_enabled", True)),
+        "map_chunk_chars": max(
+            1500,
+            _safe_int(raw.get("contract_summary_map_chunk_chars"),
+                      CONTRACT_SUMMARY_MAP_CHUNK_CHARS),
+        ),
+        "map_max_chunks": max(
+            1,
+            _safe_int(raw.get("contract_summary_map_max_chunks"),
+                      CONTRACT_SUMMARY_MAP_MAX_CHUNKS),
+        ),
+    }
+
+
+def _group_summary_clause_blocks(
     preview_clauses: List[Dict[str, Any]],
-    max_chars: int = CONTRACT_SUMMARY_SOURCE_MAX_CHARS,
-) -> str:
-    remaining = max(400, int(max_chars or CONTRACT_SUMMARY_SOURCE_MAX_CHARS))
-    blocks: List[str] = []
+) -> List[Dict[str, Any]]:
+    """Group per-line preview clauses into clause-level blocks.
+
+    ``split_contract_clauses`` emits one item per physical line and repeats the
+    heading path for every following line, so consecutive items sharing the same
+    ``clause_path`` are merged back into a single clause block. Keeping clauses
+    intact prevents the heading hierarchy from being flattened before the model
+    sees the contract.
+    """
+    groups: List[Dict[str, Any]] = []
     for clause in list(preview_clauses or []):
-        if remaining <= 180:
-            break
-        title = str(clause.get("clause_path") or clause.get("title")
-                    or clause.get("clause_id") or "").strip()
+        if not isinstance(clause, dict):
+            continue
+        path = str(clause.get("clause_path") or "").strip()
         body = str(clause.get("clause_text")
                    or clause.get("text") or "").strip()
         if not body:
             continue
-        local_limit = min(1200, max(220, remaining - 40))
-        snippet = body[:local_limit].strip()
-        block = f"[{title}]\n{snippet}" if title else snippet
-        if len(block) > remaining:
-            block = block[:remaining].strip()
-        if not block:
+        if groups and path and groups[-1]["path"] == path:
+            groups[-1]["lines"].append(body)
             continue
-        blocks.append(block)
-        remaining -= len(block) + 2
-    source_text = "\n\n".join(blocks).strip()
-    if source_text:
-        return source_text[:max_chars].strip()
-    return str(text or "")[:max_chars].strip()
+        groups.append({"path": path, "lines": [body]})
+    return groups
+
+
+def _render_summary_clause_block(group: Dict[str, Any]) -> str:
+    path = str(group.get("path") or "").strip()
+    lines = [str(x).strip()
+             for x in list(group.get("lines") or []) if str(x).strip()]
+    if not lines:
+        return ""
+    if not path:
+        return "\n".join(lines)
+    header = f"{path} {lines[0]}".strip()
+    rest = lines[1:]
+    return "\n".join([f"【{header}】", *rest]).strip()
+
+
+def _build_contract_summary_source_text(
+    text: str,
+    preview_clauses: List[Dict[str, Any]],
+    max_chars: int = CONTRACT_SUMMARY_SOURCE_MAX_CHARS,
+) -> Dict[str, Any]:
+    """Assemble summary source text on clause boundaries.
+
+    Returns a dict with the assembled text plus truncation metadata. Blocks are
+    never cut mid-clause: once the budget is exhausted the remaining clauses are
+    dropped and flagged as truncated.
+    """
+    limit = max(2000, int(max_chars or CONTRACT_SUMMARY_SOURCE_MAX_CHARS))
+    blocks = [
+        block
+        for block in (
+            _render_summary_clause_block(group)
+            for group in _group_summary_clause_blocks(preview_clauses)
+        )
+        if block
+    ]
+    selected: List[str] = []
+    used = 0
+    truncated = False
+    for block in blocks:
+        sep = 2 if selected else 0
+        if used + sep + len(block) > limit:
+            if not selected:
+                selected.append(block[:limit].rstrip() + "\n……")
+                truncated = True
+            else:
+                truncated = True
+            break
+        selected.append(block)
+        used += sep + len(block)
+
+    source_text = "\n\n".join(selected).strip()
+    if not source_text:
+        raw_text = str(text or "").strip()
+        clipped = raw_text[:limit].strip()
+        return {
+            "text": clipped,
+            "truncated": len(raw_text) > len(clipped),
+            "clause_block_total": len(blocks),
+            "clause_block_included": 1 if clipped else 0,
+            "source_chars": len(clipped),
+        }
+    covered = min(len(selected), len(blocks))
+    return {
+        "text": source_text,
+        "truncated": truncated or covered < len(blocks),
+        "clause_block_total": len(blocks),
+        "clause_block_included": covered,
+        "source_chars": len(source_text),
+    }
+
+
+def _split_summary_source_chunks(
+    source_text: str,
+    preview_clauses: List[Dict[str, Any]],
+    chunk_chars: int,
+    max_chunks: int,
+) -> List[str]:
+    """Split the source text into clause-aligned chunks for map-reduce."""
+    limit = max(1200, int(chunk_chars or CONTRACT_SUMMARY_MAP_CHUNK_CHARS))
+    blocks = [
+        block
+        for block in (
+            _render_summary_clause_block(group)
+            for group in _group_summary_clause_blocks(preview_clauses)
+        )
+        if block
+    ]
+    if not blocks:
+        raw_text = str(source_text or "").strip()
+        if not raw_text:
+            return []
+        return [raw_text[idx: idx + limit] for idx in range(0, len(raw_text), limit)]
+
+    def _greedy(size: int) -> List[str]:
+        chunks: List[str] = []
+        current: List[str] = []
+        used = 0
+        for block in blocks:
+            sep = 2 if current else 0
+            if current and used + sep + len(block) > size:
+                chunks.append("\n\n".join(current))
+                current = []
+                used = 0
+            current.append(block)
+            used += (2 if len(current) > 1 else 0) + len(block)
+        if current:
+            chunks.append("\n\n".join(current))
+        return chunks
+
+    chunks = _greedy(limit)
+    bounded = max(1, int(max_chunks or 1))
+    if len(chunks) <= bounded:
+        return chunks
+    total_chars = sum(len(chunk) + 2 for chunk in chunks)
+    balanced_size = -(-total_chars // bounded)
+    rebalanced = _greedy(max(limit, balanced_size))
+    return rebalanced[:bounded] if len(rebalanced) > bounded else rebalanced
+
+
+def _merge_summary_fact_payloads(payloads: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Merge per-chunk fact payloads, de-duplicating list items."""
+    merged: Dict[str, Any] = {}
+    for payload in list(payloads or []):
+        if not isinstance(payload, dict):
+            continue
+        for key, value in payload.items():
+            name = str(key or "").strip()
+            if not name:
+                continue
+            if isinstance(value, list):
+                bucket = merged.setdefault(name, [])
+                if not isinstance(bucket, list):
+                    continue
+                for item in value:
+                    text = str(item or "").strip()
+                    if text and text not in bucket:
+                        bucket.append(text)
+                continue
+            text = str(value or "").strip()
+            if not text:
+                continue
+            existing = merged.get(name)
+            if not existing:
+                merged[name] = text
+                continue
+            if isinstance(existing, str) and text not in existing:
+                merged[name] = f"{existing}；{text}"
+    return merged
 
 
 def _get_memory_embedder(lang: str = "zh", cfg: Optional[Dict[str, Any]] = None):
@@ -128,6 +326,85 @@ def _get_memory_runtime_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
         "classic_audit_max_tokens": classic_audit_max_tokens,
         "classic_audit_retry_max_tokens": classic_audit_retry_max_tokens,
     }
+
+
+def _estimate_text_tokens(text: str) -> int:
+    source = str(text or "")
+    if not source:
+        return 0
+    cjk = len(re.findall(r"[\u4e00-\u9fff]", source))
+    non_cjk = max(0, len(source) - cjk)
+    return max(1, int(cjk * 1.1 + non_cjk / 3.8))
+
+
+def _resolve_contract_audit_runtime_llm(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    route_cfg, _route_meta = resolve_llm_route(
+        cfg or {},
+        task_profile="contract_audit_main",
+    )
+    runtime_cfg, _runtime_meta = resolve_runtime_llm_config(route_cfg)
+    return runtime_cfg if isinstance(runtime_cfg, dict) else {}
+
+
+def _resolve_contract_audit_context_window_tokens(
+    cfg: Dict[str, Any],
+    runtime_cfg: Dict[str, Any],
+) -> int:
+    runtime = runtime_cfg if isinstance(runtime_cfg, dict) else {}
+    provider = str(runtime.get("provider") or "").strip().lower()
+    local_num_ctx = _safe_int(runtime.get("num_ctx"), 0)
+    raw = cfg.get("memory_runtime_config") if isinstance(
+        cfg.get("memory_runtime_config"), dict) else {}
+    cloud_window = max(
+        4096,
+        _safe_int(
+            raw.get("cloud_context_window_tokens"),
+            DEFAULT_CLOUD_CONTEXT_WINDOW_TOKENS,
+        ),
+    )
+    local_window = max(
+        1024,
+        _safe_int(
+            local_num_ctx or raw.get("local_context_window_tokens"),
+            DEFAULT_LOCAL_CONTEXT_WINDOW_TOKENS,
+        ),
+    )
+    return cloud_window if is_cloud_provider(provider) else local_window
+
+
+def _build_classic_clause_text(
+    text: str,
+    preview_clauses: List[Dict[str, Any]],
+    max_clause_chars: int,
+    context_window_tokens: int,
+    output_reserve_tokens: int,
+) -> str:
+    reserve_tokens = max(256, int(output_reserve_tokens or 0))
+    input_budget_tokens = max(
+        600, int(context_window_tokens or 0) - reserve_tokens)
+    clause_blocks: List[str] = []
+    used_tokens = 0
+    for c in list(preview_clauses or []):
+        cid = str(c.get("clause_id") or "")
+        title = str(c.get("title") or c.get("clause_path") or "")
+        body = str(c.get("clause_text") or c.get(
+            "text") or "")[:max_clause_chars]
+        block = f"[{cid}] {title}\n{body}".strip()
+        if not block:
+            continue
+        block_tokens = _estimate_text_tokens(block) + 8
+        if clause_blocks and used_tokens + block_tokens > input_budget_tokens:
+            break
+        if not clause_blocks and block_tokens > input_budget_tokens:
+            head_chars = max(300, min(len(body), int(max_clause_chars * 0.35)))
+            block = f"[{cid}] {title}\n{body[:head_chars]}".strip()
+            block_tokens = _estimate_text_tokens(block) + 8
+        clause_blocks.append(block)
+        used_tokens += block_tokens
+    if clause_blocks:
+        return "\n\n".join(clause_blocks)
+    fallback_limit = max(300, min(int(max_clause_chars), len(str(text or ""))))
+    return str(text or "")[:fallback_limit]
 
 
 def _requested_audit_mode(retrieval_options: Optional[Dict[str, Any]]) -> str:
@@ -318,28 +595,27 @@ def _extract_usage(raw: Dict[str, Any]) -> Dict[str, int]:
     }
 
 
-def _extract_contract_summary_text(raw_text: str) -> str:
+def _parse_contract_summary_object(raw_text: str) -> Dict[str, str]:
     parsed = _load_llm_json_object(raw_text)
-    if parsed:
-        summary = str(parsed.get("contract_summary")
-                      or parsed.get("summary") or "").strip()
-        if summary:
-            return summary
-    text = str(raw_text or "").strip()
-    if not text:
+
+    def _first_text(*keys: str) -> str:
+        for key in keys:
+            value = parsed.get(key)
+            if value is None:
+                continue
+            if isinstance(value, (dict, list)):
+                continue
+            text = str(value).strip()
+            if text:
+                return text
         return ""
-    text = re.sub(r"^\s*```(?:text|markdown|md)?\s*", "", text,
-                  count=1, flags=re.IGNORECASE)
-    text = re.sub(r"\s*```\s*$", "", text, count=1,
-                  flags=re.IGNORECASE).strip()
-    text = re.sub(
-        r"^\s*(?:contract\s*summary|summary|合同摘要|合同总结|整份合同总结)\s*[:：]\s*",
-        "",
-        text,
-        count=1,
-        flags=re.IGNORECASE,
-    ).strip()
-    return text
+
+    return {
+        "title": _first_text("title", "summary_title", "item_title"),
+        "about": _first_text("about", "contract_about", "what_the_contract_is_about"),
+        "core": _first_text("core", "core_arrangement", "core_terms"),
+        "tax": _first_text("tax", "tax_note", "tax_review_note"),
+    }
 
 
 def _build_contract_summary_title(source_filename: str, lang: str) -> str:
@@ -352,93 +628,208 @@ def _build_contract_summary_title(source_filename: str, lang: str) -> str:
     return stem
 
 
-def _build_contract_summary(
+def _summarize_finish_reason(finish_reason: str) -> str:
+    return str(finish_reason or "").strip().lower()
+
+
+def _resolve_summary_output_budget(
+    summary_cfg: Dict[str, Any],
+    runtime_cfg: Dict[str, Any],
+    context_window_tokens: int,
+) -> Dict[str, Any]:
+    """Resolve differentiated input/output budgets for cloud vs local models."""
+    provider = str((runtime_cfg or {}).get("provider") or "").strip().lower()
+    cloud = is_cloud_provider(provider)
+    window = max(2048, int(context_window_tokens or 0))
+    if cloud:
+        max_tokens = max(900, int(summary_cfg["max_tokens"]))
+        retry_max_tokens = max(max_tokens, int(
+            summary_cfg["retry_max_tokens"]))
+        single_pass_chars = max(4000, int(summary_cfg["source_max_chars"]))
+    else:
+        # Local models have a small context window: keep the output budget at
+        # most a third of the window and shrink the single-pass input so that
+        # prompt + max_tokens never exceed num_ctx.
+        local_out_cap = max(800, window // 3)
+        max_tokens = min(
+            max(900, int(summary_cfg["max_tokens"])), local_out_cap)
+        retry_max_tokens = min(
+            max(max_tokens, int(summary_cfg["retry_max_tokens"])),
+            local_out_cap + 400,
+        )
+        available_tokens = max(700, window - max_tokens - 320)
+        single_pass_chars = max(
+            1200,
+            min(int(summary_cfg["source_max_chars"]),
+                int(available_tokens / 1.15)),
+        )
+    return {
+        "provider": provider,
+        "is_cloud": cloud,
+        "context_window_tokens": window,
+        "max_tokens": max_tokens,
+        "retry_max_tokens": retry_max_tokens,
+        "single_pass_chars": single_pass_chars,
+    }
+
+
+def _resolve_contract_summary_cache_path(
+    cfg: Dict[str, Any],
+    document_id: str,
+    source_sha256: str,
+    lang: str,
+) -> str:
+    """Build the idempotent cache path for a contract summary."""
+    doc_id = str(document_id or "").strip()
+    digest = str(source_sha256 or "").strip().lower()
+    if not doc_id or not digest:
+        return ""
+    try:
+        memory_dir, _db_path = memory_paths(cfg)
+    except Exception:
+        return ""
+    key_material = f"{doc_id}|{digest}|{lang}|{CONTRACT_SUMMARY_PROMPT_VERSION}"
+    key = hashlib.sha256(key_material.encode("utf-8")).hexdigest()[:32]
+    return os.path.join(memory_dir, "contract_summaries", f"{key}.json")
+
+
+def _read_contract_summary_cache(path: str) -> Optional[Dict[str, Any]]:
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if str(payload.get("status") or "").strip().lower() != "ok":
+        return None
+    if not any(str(payload.get(key) or "").strip() for key in ("about", "core", "tax")):
+        return None
+    return payload
+
+
+def _write_contract_summary_cache(path: str, payload: Dict[str, Any]) -> None:
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = f"{path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        logger.warning(
+            "contract_summary_cache_write_failed error=%s", str(exc))
+
+
+def _validate_contract_summary_payload(
+    parsed: Dict[str, str],
+    finish_reason: str,
+    source_chars: int,
+) -> List[str]:
+    """Detect truncated or under-specified summaries instead of reporting ok."""
+    issues: List[str] = []
+    sections = {key: str(parsed.get(key) or "").strip()
+                for key in ("about", "core", "tax")}
+    missing = [key for key, value in sections.items() if not value]
+    if missing:
+        issues.append("missing_sections:" + ",".join(missing))
+    if _summarize_finish_reason(finish_reason) == "length":
+        issues.append("output_truncated")
+    if int(source_chars or 0) >= CONTRACT_SUMMARY_LONG_CONTRACT_CHARS:
+        short = [
+            key for key, value in sections.items()
+            if value and len(value) < CONTRACT_SUMMARY_MIN_SECTION_CHARS
+        ]
+        if short:
+            issues.append("section_too_short:" + ",".join(short))
+        total_chars = sum(len(value) for value in sections.values())
+        if total_chars and total_chars < CONTRACT_SUMMARY_MIN_TOTAL_CHARS:
+            issues.append("summary_too_short")
+    return issues
+
+
+def _request_contract_summary_payload(
+    llm,
+    bound_prompt: Dict[str, Any],
+    max_tokens: int,
+    trace_meta: Dict[str, Any],
+    source_chars: int,
+) -> Dict[str, Any]:
+    result_text, raw = _chat_with_task_profile(
+        llm,
+        [
+            {"role": "system", "content": str(
+                bound_prompt.get("rendered_system_text") or "")},
+            {"role": "user", "content": str(
+                bound_prompt.get("rendered_text") or "")},
+        ],
+        "contract_audit_main",
+        overrides={
+            "max_tokens": int(max_tokens),
+            "enable_thinking": False,
+            "reasoning_effort": "low",
+            "thinking_budget_tokens": 0,
+            "_trace_meta": trace_meta,
+        },
+    )
+    finish_reason = _extract_finish_reason(
+        raw if isinstance(raw, dict) else {})
+    parsed = _parse_contract_summary_object(result_text)
+    issues = _validate_contract_summary_payload(
+        parsed, finish_reason, source_chars)
+    return {
+        "parsed": parsed,
+        "finish_reason": finish_reason,
+        "issues": issues,
+        "raw_text": str(result_text or ""),
+    }
+
+
+def _extract_summary_chunk_facts(
     cfg: Dict[str, Any],
     llm,
-    text: str,
+    chunk_text: str,
+    chunk_index: int,
+    chunk_total: int,
     lang: str,
-    preview_clauses: List[Dict[str, Any]],
-    page_count: int,
+    source_name: str,
+    max_tokens: int,
     audit_id: str,
-    source_filename: str,
 ) -> Dict[str, Any]:
-    enabled = bool(cfg.get("contract_summary_enabled", False))
-    if not enabled:
-        return {"enabled": False, "text": "", "source": "disabled", "status": "disabled"}
-    source_text = _build_contract_summary_source_text(text, preview_clauses)
-    if not source_text:
-        return {"enabled": True, "text": "", "source": "empty_input", "status": "empty_input"}
-    norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
-    source_name = os.path.basename(str(source_filename or "").strip())
-    summary_title = _build_contract_summary_title(source_name, norm_lang)
-    prompt_context = {
-        "lang": norm_lang,
-        "contract_page_count": max(0, int(page_count or 0)),
-        "contract_clause_count": len(list(preview_clauses or [])),
-        "contract_document_count": 1,
-        "contract_summary_title": summary_title,
+    """Map step: extract structured contract facts from one clause chunk."""
+    context = {
+        "lang": lang,
+        "contract_chunk_index": int(chunk_index),
+        "contract_chunk_total": int(chunk_total),
+        "contract_chunk_text": chunk_text,
         "source_filename": source_name,
-        "contract_text": source_text,
     }
     try:
         bound_prompt = resolve_bound_prompt_text(
-            "contract_audit.contract_summary",
+            "contract_audit.contract_summary_map",
             "",
-            prompt_context,
+            context,
             cfg,
         )
-    except KeyError:
-        bound_prompt = {
-            "rendered_system_text": (
-                "You are a contract analysis assistant. Summarize the contract faithfully."
-                if norm_lang == "en"
-                else "你是合同分析助手，请忠实概括整份合同。"
-            ),
-            "rendered_text": (
-                "Summarize the whole contract in 3 to 5 concise sentences for business users.\n\n"
-                "Output exactly in the following format:\n"
-                "Contract Content Brief Summary\n\n"
-                "Quick Read for Tax Reviewers\n\n"
-                f"Total {1} Contract / Supplement Agreement\n\n"
-                "Instructions\n\n"
-                "This document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n"
-                f"1. {summary_title}\n\n"
-                "What the contract is about: ...\n\n"
-                "Core arrangement: ...\n\n"
-                "Tax review note: ...\n\n"
-                f"Source file: {source_name or 'Current Contract'}\n\n"
-                "The following contract context is for summary generation only. Do not copy these helper labels into the final output.\n"
-                f"- Page Count: {max(0, int(page_count or 0))}\n"
-                f"- Clause Count: {len(list(preview_clauses or []))}\n"
-                f"- Contract Content: {source_text}"
-                if norm_lang == "en"
-                else "请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n"
-                "合同内容简要摘要\n\n"
-                "税务审核师快速阅读版\n\n"
-                f"共 {1} 份合同 / 补充协议\n\n"
-                "使用说明\n\n"
-                "本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n"
-                f"1. {summary_title}\n\n"
-                "合同在说什么：...\n\n"
-                "核心安排：...\n\n"
-                "税务审核提示：...\n\n"
-                f"来源文件：{source_name or '当前合同'}\n\n"
-                "以下为摘要使用的合同上下文，请不要把以下提示标题写入最终输出。\n"
-                f"- 合同页数：{max(0, int(page_count or 0))}\n"
-                f"- 条款数：{len(list(preview_clauses or []))}\n"
-                f"- 合同内容：{source_text}"
-            ),
-            "source": "inline_fallback",
-            "prompt_id": "contract_audit.contract_summary",
-            "prompt_name": "contract_audit.contract_summary",
-        }
+    except Exception as exc:
+        logger.warning(
+            "contract_summary_map_prompt_unavailable audit_id=%s error=%s",
+            audit_id,
+            str(exc),
+        )
+        return {}
     trace_meta = {
         "module": "contract_audit",
-        "stage": "contract_summary",
+        "stage": "contract_summary_map",
         "audit_id": audit_id,
-        "lang": norm_lang,
+        "lang": lang,
+        "chunk_index": int(chunk_index),
+        "chunk_total": int(chunk_total),
         "prompt_source": str(bound_prompt.get("source") or "system_default"),
-        "prompt_binding_scene": "contract_audit.contract_summary",
+        "prompt_binding_scene": "contract_audit.contract_summary_map",
         "prompt_binding_id": str(bound_prompt.get("prompt_id") or ""),
         "prompt_binding_name": str(bound_prompt.get("prompt_name") or ""),
     }
@@ -453,48 +844,309 @@ def _build_contract_summary(
             ],
             "contract_audit_main",
             overrides={
-                "max_tokens": CONTRACT_SUMMARY_MAX_TOKENS,
+                "max_tokens": int(max_tokens),
                 "enable_thinking": False,
                 "reasoning_effort": "low",
                 "thinking_budget_tokens": 0,
                 "_trace_meta": trace_meta,
             },
         )
-        summary_text = _extract_contract_summary_text(result_text)
-        summary_text = re.sub(
-            r"\n{3,}", "\n\n", str(summary_text or "").strip())
-        if len(summary_text) > 2400:
-            summary_text = summary_text[:2400].rstrip()
-        status = "ok" if summary_text else "empty"
+    except Exception as exc:
+        logger.warning(
+            "contract_summary_map_failed audit_id=%s chunk=%s error=%s",
+            audit_id,
+            chunk_index,
+            str(exc),
+        )
+        return {}
+    return _load_llm_json_object(result_text)
+
+
+def _build_contract_summary(
+    cfg: Dict[str, Any],
+    llm,
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    page_count: int,
+    audit_id: str,
+    source_filename: str,
+    document_id: str = "",
+    source_sha256: str = "",
+) -> Dict[str, Any]:
+    norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
+    source_name = os.path.basename(str(source_filename or "").strip())
+    summary_title = _build_contract_summary_title(source_name, norm_lang)
+    enabled = bool(cfg.get("contract_summary_enabled", False))
+    base = {
+        "enabled": enabled,
+        "title": "",
+        "about": "",
+        "core": "",
+        "tax": "",
+        "source_file": source_name or summary_title,
+        "status": "disabled",
+        "source": "disabled",
+        "prompt_id": "",
+        "prompt_name": "",
+        "error": "",
+        "issues": [],
+        "truncated": False,
+        "cache_hit": False,
+        "source_chars": 0,
+        "map_reduce": False,
+        "map_chunks": 0,
+    }
+    if not enabled:
+        return base
+
+    summary_cfg = _get_contract_summary_runtime_config(cfg)
+    runtime_cfg = _resolve_contract_audit_runtime_llm(cfg)
+    context_window_tokens = _resolve_contract_audit_context_window_tokens(
+        cfg, runtime_cfg)
+    budget = _resolve_summary_output_budget(
+        summary_cfg, runtime_cfg, context_window_tokens)
+    base["context_window_tokens"] = int(budget["context_window_tokens"])
+
+    cache_path = _resolve_contract_summary_cache_path(
+        cfg, document_id, source_sha256, norm_lang)
+    if cache_path:
+        cached = _read_contract_summary_cache(cache_path)
+        if cached:
+            cached_payload = dict(cached)
+            cached_payload.update({
+                "enabled": True,
+                "cache_hit": True,
+                "source": "cache",
+            })
+            logger.info(
+                "contract_summary_cache_hit",
+                audit_id=audit_id,
+                document_id=document_id,
+            )
+            return cached_payload
+
+    full_source = _build_contract_summary_source_text(
+        text, preview_clauses, max_chars=summary_cfg["source_max_chars"])
+    full_source_text = str(full_source.get("text") or "")
+    if not full_source_text:
+        base.update({"source": "empty_input", "status": "empty_input"})
+        return base
+
+    use_map_reduce = bool(
+        summary_cfg["map_reduce_enabled"]
+        and len(full_source_text) > int(budget["single_pass_chars"])
+    )
+    facts_payload: Dict[str, Any] = {}
+    facts_text = ""
+    contract_text_for_prompt = full_source_text
+    truncated = bool(full_source.get("truncated"))
+    map_chunks: List[str] = []
+
+    if use_map_reduce:
+        # Keep every map chunk inside the model input budget: cloud models can
+        # take the configured chunk size, local models must stay well below the
+        # single-pass budget so the instruction block still fits.
+        if budget["is_cloud"]:
+            map_chunk_chars = int(summary_cfg["map_chunk_chars"])
+        else:
+            map_chunk_chars = max(
+                700, int(int(budget["single_pass_chars"]) * 0.55))
+        map_chunks = _split_summary_source_chunks(
+            full_source_text,
+            preview_clauses,
+            chunk_chars=map_chunk_chars,
+            max_chunks=summary_cfg["map_max_chunks"],
+        )
+        chunk_payloads: List[Dict[str, Any]] = []
+        for index, chunk in enumerate(map_chunks, start=1):
+            payload = _extract_summary_chunk_facts(
+                cfg,
+                llm,
+                chunk,
+                index,
+                len(map_chunks),
+                norm_lang,
+                source_name,
+                min(int(summary_cfg["max_tokens"]),
+                    CONTRACT_SUMMARY_MAP_MAX_TOKENS),
+                audit_id,
+            )
+            if payload:
+                chunk_payloads.append(payload)
+        facts_payload = _merge_summary_fact_payloads(chunk_payloads)
+        if facts_payload:
+            facts_text = json.dumps(
+                facts_payload, ensure_ascii=False, indent=2)
+            contract_text_for_prompt = ""
+        else:
+            # Map step produced nothing usable: degrade to a single-pass
+            # summary over the budget-limited source instead of failing.
+            limited = _build_contract_summary_source_text(
+                text, preview_clauses, max_chars=int(budget["single_pass_chars"]))
+            contract_text_for_prompt = str(limited.get("text") or "")
+            truncated = bool(limited.get("truncated"))
+            use_map_reduce = False
+    else:
+        truncated_note_required = len(full_source_text) > int(
+            budget["single_pass_chars"])
+        if truncated_note_required:
+            limited = _build_contract_summary_source_text(
+                text, preview_clauses, max_chars=int(budget["single_pass_chars"]))
+            contract_text_for_prompt = str(limited.get("text") or "")
+            truncated = bool(limited.get("truncated"))
+
+    if not contract_text_for_prompt and not facts_text:
+        base.update({"source": "empty_input", "status": "empty_input"})
+        return base
+
+    truncated_note = ""
+    if truncated:
+        truncated_note = (
+            "The contract text was truncated because of the context budget; "
+            "do not assert mechanisms that may only appear later in the contract."
+            if norm_lang == "en"
+            else "合同原文因上下文预算被截断；不要推断可能只出现在后文的机制。"
+        )
+
+    prompt_context = {
+        "lang": norm_lang,
+        "contract_page_count": max(0, int(page_count or 0)),
+        "contract_clause_count": len(list(preview_clauses or [])),
+        "contract_document_count": 1,
+        "contract_summary_title": summary_title,
+        "source_filename": source_name,
+        "contract_text": contract_text_for_prompt,
+        "contract_facts": facts_text,
+        "contract_truncated_note": truncated_note,
+        "target_chars_min": CONTRACT_SUMMARY_TARGET_MIN_CHARS,
+        "target_chars_max": CONTRACT_SUMMARY_TARGET_MAX_CHARS,
+    }
+    try:
+        bound_prompt = resolve_bound_prompt_text(
+            "contract_audit.contract_summary",
+            "",
+            prompt_context,
+            cfg,
+        )
+    except KeyError:
+        bound_prompt = {
+            "rendered_system_text": (
+                "You are a senior contract analysis assistant for tax reviewers. "
+                "Summarize the contract faithfully and never fabricate."
+                if norm_lang == "en"
+                else "你是面向税务审核师的资深合同分析助手，请忠实归纳合同内容，不得编造。"
+            ),
+            "rendered_text": (
+                "Return strict JSON only with exactly the fields title, about, core, tax.\n"
+                "about: what the contract is about (150-220 chars).\n"
+                "core: core commercial arrangements (220-320 chars).\n"
+                "tax: tax review notes (200-300 chars).\n"
+                f"{truncated_note}\n"
+                f"Contract content:\n{contract_text_for_prompt or facts_text}"
+                if norm_lang == "en"
+                else "请仅输出严格 JSON，且只包含 title / about / core / tax 四个字段。\n"
+                "about：合同在说什么（150-220 字）。\n"
+                "core：核心安排（220-320 字）。\n"
+                "tax：税务审核提示（200-300 字）。\n"
+                f"{truncated_note}\n"
+                f"合同内容：\n{contract_text_for_prompt or facts_text}"
+            ),
+            "source": "inline_fallback",
+            "prompt_id": "contract_audit.contract_summary",
+            "prompt_name": "contract_audit.contract_summary",
+        }
+
+    trace_meta = {
+        "module": "contract_audit",
+        "stage": "contract_summary",
+        "audit_id": audit_id,
+        "lang": norm_lang,
+        "map_reduce": bool(use_map_reduce),
+        "map_chunks": len(map_chunks),
+        "source_chars": len(contract_text_for_prompt),
+        "facts_chars": len(facts_text),
+        "prompt_source": str(bound_prompt.get("source") or "system_default"),
+        "prompt_binding_scene": "contract_audit.contract_summary",
+        "prompt_binding_id": str(bound_prompt.get("prompt_id") or ""),
+        "prompt_binding_name": str(bound_prompt.get("prompt_name") or ""),
+    }
+
+    try:
+        attempt = _request_contract_summary_payload(
+            llm,
+            bound_prompt,
+            budget["max_tokens"],
+            trace_meta,
+            len(facts_text) + len(contract_text_for_prompt),
+        )
+        if attempt["issues"]:
+            logger.info(
+                "contract_summary_retry audit_id=%s issues=%s",
+                audit_id,
+                ",".join(attempt["issues"]),
+            )
+            retry_attempt = _request_contract_summary_payload(
+                llm,
+                bound_prompt,
+                budget["retry_max_tokens"],
+                trace_meta,
+                len(facts_text) + len(contract_text_for_prompt),
+            )
+            if len(retry_attempt["issues"]) <= len(attempt["issues"]):
+                attempt = retry_attempt
+
+        parsed = attempt["parsed"]
+        issues = list(attempt["issues"])
+        title = str(parsed.get("title") or "").strip() or summary_title
+        about = str(parsed.get("about") or "").strip()
+        core = str(parsed.get("core") or "").strip()
+        tax = str(parsed.get("tax") or "").strip()
+        has_content = bool(about or core or tax)
+        if not has_content:
+            status = "empty"
+        elif issues:
+            status = "partial"
+        else:
+            status = "ok"
         logger.info(
             "contract_summary_generation_done",
             audit_id=audit_id,
             status=status,
-            chars=len(summary_text),
+            chars=len(title) + len(about) + len(core) + len(tax),
+            finish_reason=attempt["finish_reason"],
+            issues=",".join(issues),
+            map_reduce=bool(use_map_reduce),
+            map_chunks=len(map_chunks),
             source=str(bound_prompt.get("source") or "system_default"),
             prompt_id=str(bound_prompt.get("prompt_id") or ""),
         )
-        return {
-            "enabled": True,
-            "text": summary_text,
+        base.update({
+            "title": title,
+            "about": about,
+            "core": core,
+            "tax": tax,
             "status": status,
             "source": str(bound_prompt.get("source") or "system_default"),
             "prompt_id": str(bound_prompt.get("prompt_id") or ""),
             "prompt_name": str(bound_prompt.get("prompt_name") or ""),
-        }
+            "issues": issues,
+            "truncated": truncated,
+            "source_chars": len(contract_text_for_prompt) + len(facts_text),
+            "map_reduce": bool(use_map_reduce),
+            "map_chunks": len(map_chunks),
+        })
+        if status == "ok":
+            _write_contract_summary_cache(cache_path, dict(base))
+        return base
     except Exception as exc:
         logger.warning(
             "contract_summary_generation_failed",
             audit_id=audit_id,
             error=str(exc),
         )
-        return {
-            "enabled": True,
-            "text": "",
-            "status": "error",
-            "source": "error",
-            "error": str(exc),
-        }
+        base.update({"status": "error", "source": "error", "error": str(exc)})
+        return base
 
 
 def _merge_citations(primary: List[Dict[str, Any]], extra: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -664,6 +1316,7 @@ def _build_classic_audit(
 ) -> Dict[str, Any]:
     norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
     runtime_cfg = _get_memory_runtime_config(cfg)
+    runtime_llm_cfg = _resolve_contract_audit_runtime_llm(cfg)
     allowed_citation_ids = {
         str(it.get("citation_id") or "").strip()
         for it in evidence_items
@@ -690,14 +1343,19 @@ def _build_classic_audit(
             or CLASSIC_AUDIT_RETRY_MAX_TOKENS
         ),
     )
-    clause_lines = []
-    for c in list(preview_clauses or []):
-        cid = str(c.get("clause_id") or "")
-        title = str(c.get("title") or c.get("clause_path") or "")
-        body = str(c.get("clause_text") or c.get("text") or "")
-        clause_lines.append(f"[{cid}] {title}\n{body[:max_clause_chars]}")
-    clause_text = "\n\n".join(clause_lines) if clause_lines else str(
-        text or "")[:max_clause_chars]
+    context_window_tokens = _resolve_contract_audit_context_window_tokens(
+        cfg, runtime_llm_cfg)
+    output_reserve_tokens = max(
+        int(classic_audit_retry_max_tokens),
+        DEFAULT_CONTEXT_WINDOW_OUTPUT_RESERVE_TOKENS,
+    )
+    clause_text = _build_classic_clause_text(
+        text=text,
+        preview_clauses=preview_clauses,
+        max_clause_chars=max_clause_chars,
+        context_window_tokens=context_window_tokens,
+        output_reserve_tokens=output_reserve_tokens,
+    )
 
     prompt_context = {
         "lang": norm_lang,
@@ -744,6 +1402,8 @@ def _build_classic_audit(
         "audit_id": audit_id,
         "lang": norm_lang,
         "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
+        "provider": str(runtime_llm_cfg.get("provider") or ""),
+        "context_window_tokens": int(context_window_tokens),
         "prompt_source": str(bound_prompt.get("source") or "system_default"),
         "prompt_binding_scene": "contract_audit.classic_json",
         "prompt_binding_id": str(bound_prompt.get("prompt_id") or ""),
@@ -912,6 +1572,8 @@ def _build_classic_audit(
             "classic_prompt_tokens": prompt_tokens,
             "classic_max_tokens": int(attempt["max_tokens"]),
             "classic_retry_used": retry_used,
+            "classic_context_window_tokens": int(context_window_tokens),
+            "classic_provider": str(runtime_llm_cfg.get("provider") or ""),
             "parse_failed_clauses": 1 if parse_failed else 0,
         },
         "raw": {"mode": "classic"},

@@ -28,6 +28,12 @@ PROMPT_BINDING_SCENES: Dict[str, Dict[str, str]] = {
         "description": "Whole-contract summary prompt used to generate a concise contract overview before the risk summary.",
         "source_module": "app.services.contract_audit._build_contract_summary",
         "default_prompt_key": "contract_audit.contract_summary",
+    },
+    "contract_audit.contract_summary_map": {
+        "label": "Contract Summary Fact Extractor",
+        "description": "Map step of the chunked contract summary used for long contracts or local models.",
+        "source_module": "app.services.contract_audit._extract_summary_chunk_facts",
+        "default_prompt_key": "contract_audit.contract_summary_map",
     }
 }
 
@@ -445,7 +451,7 @@ def sync_default_prompts(cfg: Optional[dict] = None) -> None:
     conn = get_conn(runtime_cfg)
     cur = conn.cursor()
     now = datetime.utcnow().isoformat()
-    cur.execute("SELECT id, prompt_key FROM audit_prompt")
+    cur.execute("SELECT id, prompt_key, managed_scope FROM audit_prompt")
     rows = cur.fetchall()
     existing_by_key = {
         str(row["prompt_key"] or "").strip(): dict(row)
@@ -486,34 +492,52 @@ def sync_default_prompts(cfg: Optional[dict] = None) -> None:
             sample_input_json, ensure_ascii=False, indent=2, sort_keys=True
         )
         if existing:
-            cur.execute(
-                """
-                UPDATE audit_prompt
-                SET prompt_key = COALESCE(prompt_key, ?),
-                    source_module = CASE WHEN source_module = '' THEN ? ELSE source_module END,
-                    managed_scope = CASE WHEN managed_scope = '' THEN 'system' ELSE managed_scope END,
-                    system_text = CASE WHEN system_text IS NULL OR system_text = '' THEN ? ELSE system_text END,
-                    template_text = CASE WHEN template_text IS NULL OR template_text = '' THEN ? ELSE template_text END,
-                    localized_system_texts = CASE WHEN localized_system_texts IS NULL OR localized_system_texts = '' OR localized_system_texts = '{}' THEN ? ELSE localized_system_texts END,
-                    localized_focus_texts = CASE WHEN localized_focus_texts IS NULL OR localized_focus_texts = '' OR localized_focus_texts = '{}' THEN ? ELSE localized_focus_texts END,
-                    localized_template_texts = CASE WHEN localized_template_texts IS NULL OR localized_template_texts = '' OR localized_template_texts = '{}' THEN ? ELSE localized_template_texts END,
-                    placeholder_map_json = CASE WHEN placeholder_map_json IS NULL OR placeholder_map_json = '' OR placeholder_map_json = '{}' THEN ? ELSE placeholder_map_json END,
-                    sample_input_json = CASE WHEN sample_input_json IS NULL OR sample_input_json = '' THEN ? ELSE sample_input_json END
-                WHERE id = ?
-                """,
-                (
-                    prompt_key,
-                    str(item.get("source_module") or ""),
-                    runtime_system_text,
-                    runtime_template_text,
-                    _json_dumps(localized_system_texts),
-                    _json_dumps(localized_focus_texts),
-                    _json_dumps(localized_template_texts),
-                    _json_dumps(placeholder_map),
-                    sample_input_text,
-                    str(existing.get("id") or prompt_key),
-                ),
-            )
+            managed_scope = str(existing.get("managed_scope") or "").strip()
+            is_system_managed = managed_scope in ("", "system")
+            if is_system_managed:
+                cur.execute(
+                    """
+                    UPDATE audit_prompt
+                    SET prompt_key = ?,
+                        source_module = ?,
+                        managed_scope = 'system',
+                        system_text = ?,
+                        template_text = ?,
+                        localized_system_texts = ?,
+                        localized_focus_texts = ?,
+                        localized_template_texts = ?,
+                        placeholder_map_json = ?,
+                        sample_input_json = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        prompt_key,
+                        str(item.get("source_module") or ""),
+                        runtime_system_text,
+                        runtime_template_text,
+                        _json_dumps(localized_system_texts),
+                        _json_dumps(localized_focus_texts),
+                        _json_dumps(localized_template_texts),
+                        _json_dumps(placeholder_map),
+                        sample_input_text,
+                        str(existing.get("id") or prompt_key),
+                    ),
+                )
+            else:
+                # User-customized prompt: only fill empty metadata, preserve content.
+                cur.execute(
+                    """
+                    UPDATE audit_prompt
+                    SET prompt_key = COALESCE(prompt_key, ?),
+                        source_module = CASE WHEN source_module = '' THEN ? ELSE source_module END
+                    WHERE id = ?
+                    """,
+                    (
+                        prompt_key,
+                        str(item.get("source_module") or ""),
+                        str(existing.get("id") or prompt_key),
+                    ),
+                )
             continue
         cur.execute(
             """

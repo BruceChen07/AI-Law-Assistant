@@ -44,18 +44,18 @@
   {
     "prompt_key": "contract_audit.contract_summary",
     "name": "Contract Audit Whole Contract Summary",
-    "description": "Concise whole-contract summary prompt displayed above the risk overview.",
+    "description": "Tax-reviewer quick-read summary prompt: fixed four sections, 600-800 characters, clause-level coverage.",
     "localized_system_texts": {
-      "zh": "你是资深合同分析助手。请基于合同原文输出简洁摘要，不要编造。",
-      "en": "You are a senior contract analysis assistant. Summarize the contract faithfully and concisely."
+      "zh": "你是面向税务审核师的资深合同速读助手。只依据合同内容归纳，不得编造。",
+      "en": "You are a senior contract analyst writing a one-page executive summary for tax reviewers. Use only the contract content and never fabricate."
     },
     "localized_focus_texts": {
       "zh": "",
       "en": ""
     },
     "localized_template_texts": {
-      "zh": "请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 【合同数量】 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. 【摘要标题】\n\n合同在说什么：请用 2 至 3 句概括合同目的、合作背景和交易类型。\n\n核心安排：请用 2 至 3 句概括关键商业条款，优先包括供货/服务、结算付款、开票、返利、保证金、退货、违约、终止等机制；若合同未明确则不要臆测。\n\n税务审核提示：请用 2 至 3 句仅提示最值得税务审核人员优先关注的涉税口径或交易实质问题，不要展开法规分析，不要输出修改建议。\n\n来源文件：【来源文件】\n\n以下为摘要使用的合同上下文，请不要把以下提示标题写入最终输出：\n- 合同页数：【合同页数】\n- 条款数：【条款数】\n- 合同内容：【合同内容】",
-      "en": "Output strictly in the following format. Do not return JSON and do not add extra notes outside the template.\n\nContract Content Brief Summary\n\nQuick Read for Tax Reviewers\n\nTotal [Contract Document Count] Contract / Supplement Agreement\n\nInstructions\n\nThis document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n1. [Summary Title]\n\nWhat the contract is about: Use 2 to 3 sentences to summarize the contract purpose, business background, and transaction type.\n\nCore arrangement: Use 2 to 3 sentences to summarize the key commercial terms, prioritizing supply/service scope, settlement and payment, invoicing, rebates, deposits, returns, breach, and termination mechanisms. Do not speculate when the contract is silent.\n\nTax review note: Use 2 to 3 sentences to highlight only the most important tax-review concerns or transaction-substance issues. Do not provide legal analysis or amendment advice.\n\nSource file: [Source File Name]\n\nThe following contract context is for summary generation only. Do not copy these helper labels into the final output:\n- Page Count: [Contract Page Count]\n- Clause Count: [Contract Clause Count]\n- Contract Content: [Contract Content]"
+      "zh": "请仅依据下面给出的合同内容撰写一页式执行摘要，不得编造，不得引入合同之外的假设。\n\n输出要求：只输出严格 JSON，且仅包含 title / about / core / tax 四个字段；不要输出 source_file 字段；不要输出 Markdown 代码块、注释或任何解释文字。\n\n字段要求（合计约 {{ target_chars_min }}-{{ target_chars_max }} 字）：\n- title：合同名称，不超过 40 字。\n- about（合同在说什么，150-220 字）：先用一句话定位交易类型与双方角色，再按合同实际内容串联完整的合作机制链条（例如商品准入、质量、定价、返利与费用、对账结算、发票、退货、保证金、促销、违约与终止、知识产权、合规等）。\n- core（核心安排，220-320 字）：用分号连接要点式长句，写清定价与含税口径、货款结算与可扣款项、开票与付款前置条件、暂停付款/抵销/退货等单方权利、保证金、违约与终止等关键商业安排。\n- tax（税务审核提示，200-300 字）：先概括涉税条款的集中位置，再点出必须优先核对的税务口径（税率变化时的不含税价处理、不同纳税人及农产品业务的发票类型、税差补偿与计算公式、红冲与作废责任、企业所得税损失赔偿、跨法人扣款与开票主体一致性等），最后给出 2 至 4 条可直接执行的审核动作；不要展开法规条文分析。\n\n写作规则：\n1. 使用连贯书面语，不要使用列表符号、编号或换行。\n2. 每段必须出现合同中的具体机制名词或数据，不要只写“双方约定了相关条款”。\n3. 合同中未出现的机制不要臆测；确有必要说明缺失时写“未约定……”。\n4. 只输出 JSON，字段名必须与要求完全一致。\n\n合同上下文：\n- 合同页数：{{ contract_page_count }}\n- 条款数：{{ contract_clause_count }}\n- 来源文件：{{ source_filename }}\n{% if contract_facts %}\n合同要点（从全文分块抽取，已去重合并）：\n{{ contract_facts }}\n{% endif %}\n{% if contract_text %}\n合同原文（按条款聚合）：\n{{ contract_text }}\n{% endif %}\n{% if contract_truncated_note %}\n注意：{{ contract_truncated_note }}\n{% endif %}",
+      "en": "Write a one-page executive summary using only the contract content below. Never fabricate and never add assumptions outside the contract.\n\nOutput: strict JSON only, with exactly the fields title / about / core / tax. Do not output source_file, Markdown fences, comments, or any explanation.\n\nField requirements (roughly {{ target_chars_min }}-{{ target_chars_max }} characters in total):\n- title: contract name, at most 40 characters.\n- about (What the contract is about, 150-220 chars): first state the transaction type and the roles of both parties in one sentence, then describe the full chain of cooperation mechanisms actually present in the contract (e.g. product admission, quality, pricing, rebates and fees, reconciliation and settlement, invoicing, returns, security deposit, promotion, breach and termination, IP, compliance).\n- core (Core arrangement, 220-320 chars): semicolon-separated key points covering pricing and tax-inclusive treatment, settlement and deductible items, invoicing and payment preconditions, unilateral rights such as payment suspension, set-off and returns, security deposit, breach and termination.\n- tax (Tax review note, 200-300 chars): summarize where the tax clauses concentrate, then list the tax positions that must be verified first (tax-exclusive price treatment when rates change, invoice types for different taxpayer categories and agricultural products, tax-difference compensation formulas, red-letter/cancellation liability, corporate income tax loss indemnity, consistency of cross-entity deductions and invoicing entities), and end with 2 to 4 actionable review steps. Do not expand statutory analysis.\n\nWriting rules:\n1. Use flowing prose; no bullet symbols, numbering, or line breaks inside a field.\n2. Every field must contain concrete mechanisms or figures from the contract; never write only that the parties agreed on related terms.\n3. Do not speculate about mechanisms absent from the contract; when absence matters, write \"not agreed\".\n4. Output JSON only with exactly the required field names.\n\nContract context:\n- Page count: {{ contract_page_count }}\n- Clause count: {{ contract_clause_count }}\n- Source file: {{ source_filename }}\n{% if contract_facts %}\nExtracted contract facts (chunked and de-duplicated):\n{{ contract_facts }}\n{% endif %}\n{% if contract_text %}\nContract text (aggregated by clause):\n{{ contract_text }}\n{% endif %}\n{% if contract_truncated_note %}\nNote: {{ contract_truncated_note }}\n{% endif %}"
     },
     "placeholder_map": {
       "contract_document_count": {
@@ -81,10 +81,26 @@
       "contract_text": {
         "zh": "【合同内容】",
         "en": "[Contract Content]"
+      },
+      "contract_facts": {
+        "zh": "【合同要点】",
+        "en": "[Contract Facts]"
+      },
+      "contract_truncated_note": {
+        "zh": "【截断说明】",
+        "en": "[Truncation Note]"
+      },
+      "target_chars_min": {
+        "zh": "【摘要最小字数】",
+        "en": "[Summary Min Chars]"
+      },
+      "target_chars_max": {
+        "zh": "【摘要最大字数】",
+        "en": "[Summary Max Chars]"
       }
     },
-    "system_text": "{% if lang == 'en' %}You are a senior contract analysis assistant. Summarize the contract faithfully and concisely.{% else %}你是资深合同分析助手。请基于合同原文输出简洁摘要，不要编造。{% endif %}",
-    "template_text": "{% if lang == 'en' %}Output strictly in the following format. Do not return JSON and do not add extra notes outside the template.\n\nContract Content Brief Summary\n\nQuick Read for Tax Reviewers\n\nTotal {{ contract_document_count }} Contract / Supplement Agreement\n\nInstructions\n\nThis document is only used to help reviewers quickly understand the transaction background, key commercial arrangements, and main tax concerns. It does not replace a full review of the original contract, attachments, or actual business process.\n\n1. {{ contract_summary_title }}\n\nWhat the contract is about: Use 2 to 3 sentences to summarize the contract purpose, business background, and transaction type.\n\nCore arrangement: Use 2 to 3 sentences to summarize the key commercial terms, prioritizing supply/service scope, settlement and payment, invoicing, rebates, deposits, returns, breach, and termination mechanisms. Do not speculate when the contract is silent.\n\nTax review note: Use 2 to 3 sentences to highlight only the most important tax-review concerns or transaction-substance issues. Do not provide legal analysis or amendment advice.\n\nSource file: {{ source_filename }}\n\nThe following contract context is for summary generation only. Do not copy these helper labels into the final output:\n- Page Count: {{ contract_page_count }}\n- Clause Count: {{ contract_clause_count }}\n- Contract Content: {{ contract_text }}{% else %}请严格按以下格式输出，不要遗漏标题，不要输出 JSON，不要补充格式之外的说明：\n\n合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 {{ contract_document_count }} 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. {{ contract_summary_title }}\n\n合同在说什么：请用 2 至 3 句概括合同目的、合作背景和交易类型。\n\n核心安排：请用 2 至 3 句概括关键商业条款，优先包括供货/服务、结算付款、开票、返利、保证金、退货、违约、终止等机制；若合同未明确则不要臆测。\n\n税务审核提示：请用 2 至 3 句仅提示最值得税务审核人员优先关注的涉税口径或交易实质问题，不要展开法规分析，不要输出修改建议。\n\n来源文件：{{ source_filename }}\n\n以下为摘要使用的合同上下文，请不要把以下提示标题写入最终输出：\n- 合同页数：{{ contract_page_count }}\n- 条款数：{{ contract_clause_count }}\n- 合同内容：{{ contract_text }}{% endif %}",
+    "system_text": "{% if lang == 'en' %}You are a senior contract analyst writing a one-page executive summary for tax reviewers. Use only the contract content and never fabricate.{% else %}你是面向税务审核师的资深合同速读助手。只依据合同内容归纳，不得编造。{% endif %}",
+    "template_text": "{% if lang == 'en' %}Write a one-page executive summary using only the contract content below. Never fabricate and never add assumptions outside the contract.\n\nOutput: strict JSON only, with exactly the fields title / about / core / tax. Do not output source_file, Markdown fences, comments, or any explanation.\n\nField requirements (roughly {{ target_chars_min }}-{{ target_chars_max }} characters in total):\n- title: contract name, at most 40 characters.\n- about (What the contract is about, 150-220 chars): first state the transaction type and the roles of both parties in one sentence, then describe the full chain of cooperation mechanisms actually present in the contract (e.g. product admission, quality, pricing, rebates and fees, reconciliation and settlement, invoicing, returns, security deposit, promotion, breach and termination, IP, compliance).\n- core (Core arrangement, 220-320 chars): semicolon-separated key points covering pricing and tax-inclusive treatment, settlement and deductible items, invoicing and payment preconditions, unilateral rights such as payment suspension, set-off and returns, security deposit, breach and termination.\n- tax (Tax review note, 200-300 chars): summarize where the tax clauses concentrate, then list the tax positions that must be verified first (tax-exclusive price treatment when rates change, invoice types for different taxpayer categories and agricultural products, tax-difference compensation formulas, red-letter/cancellation liability, corporate income tax loss indemnity, consistency of cross-entity deductions and invoicing entities), and end with 2 to 4 actionable review steps. Do not expand statutory analysis.\n\nWriting rules:\n1. Use flowing prose; no bullet symbols, numbering, or line breaks inside a field.\n2. Every field must contain concrete mechanisms or figures from the contract; never write only that the parties agreed on related terms.\n3. Do not speculate about mechanisms absent from the contract; when absence matters, write \"not agreed\".\n4. Output JSON only with exactly the required field names.\n\nContract context:\n- Page count: {{ contract_page_count }}\n- Clause count: {{ contract_clause_count }}\n- Source file: {{ source_filename }}\n{% if contract_facts %}\nExtracted contract facts (chunked and de-duplicated):\n{{ contract_facts }}\n{% endif %}\n{% if contract_text %}\nContract text (aggregated by clause):\n{{ contract_text }}\n{% endif %}\n{% if contract_truncated_note %}\nNote: {{ contract_truncated_note }}\n{% endif %}{% else %}请仅依据下面给出的合同内容撰写一页式执行摘要，不得编造，不得引入合同之外的假设。\n\n输出要求：只输出严格 JSON，且仅包含 title / about / core / tax 四个字段；不要输出 source_file 字段；不要输出 Markdown 代码块、注释或任何解释文字。\n\n字段要求（合计约 {{ target_chars_min }}-{{ target_chars_max }} 字）：\n- title：合同名称，不超过 40 字。\n- about（合同在说什么，150-220 字）：先用一句话定位交易类型与双方角色，再按合同实际内容串联完整的合作机制链条（例如商品准入、质量、定价、返利与费用、对账结算、发票、退货、保证金、促销、违约与终止、知识产权、合规等）。\n- core（核心安排，220-320 字）：用分号连接要点式长句，写清定价与含税口径、货款结算与可扣款项、开票与付款前置条件、暂停付款/抵销/退货等单方权利、保证金、违约与终止等关键商业安排。\n- tax（税务审核提示，200-300 字）：先概括涉税条款的集中位置，再点出必须优先核对的税务口径（税率变化时的不含税价处理、不同纳税人及农产品业务的发票类型、税差补偿与计算公式、红冲与作废责任、企业所得税损失赔偿、跨法人扣款与开票主体一致性等），最后给出 2 至 4 条可直接执行的审核动作；不要展开法规条文分析。\n\n写作规则：\n1. 使用连贯书面语，不要使用列表符号、编号或换行。\n2. 每段必须出现合同中的具体机制名词或数据，不要只写“双方约定了相关条款”。\n3. 合同中未出现的机制不要臆测；确有必要说明缺失时写“未约定……”。\n4. 只输出 JSON，字段名必须与要求完全一致。\n\n合同上下文：\n- 合同页数：{{ contract_page_count }}\n- 条款数：{{ contract_clause_count }}\n- 来源文件：{{ source_filename }}\n{% if contract_facts %}\n合同要点（从全文分块抽取，已去重合并）：\n{{ contract_facts }}\n{% endif %}\n{% if contract_text %}\n合同原文（按条款聚合）：\n{{ contract_text }}\n{% endif %}\n{% if contract_truncated_note %}\n注意：{{ contract_truncated_note }}\n{% endif %}{% endif %}",
     "sample_input_json": {
       "lang": "zh",
       "contract_document_count": 1,
@@ -92,10 +108,60 @@
       "source_filename": "华润万家购销合同2026年修订-可编辑文字版.docx",
       "contract_page_count": 12,
       "contract_clause_count": 38,
-      "contract_text": "甲乙双方就年度采购合作达成如下约定：乙方按甲方订单供货，甲方按约验收并付款。乙方应按约开具增值税发票，双方约定违约责任与保密义务。"
+      "contract_text": "【第一条 合作范围】乙方向甲方供应约定商品。\n\n【第二条 定价与结算】商品按含税价交易，甲方可从货款中扣除返利及促销费用。",
+      "contract_facts": "",
+      "contract_truncated_note": "",
+      "target_chars_min": 600,
+      "target_chars_max": 800
     },
     "source_module": "app.services.contract_audit._build_contract_summary",
     "scene_key": "contract_audit.contract_summary"
+  },
+  {
+    "prompt_key": "contract_audit.contract_summary_map",
+    "name": "Contract Summary Fact Extractor",
+    "description": "Map step for long or local-model contract summaries: extract structured, tax-relevant facts per clause chunk.",
+    "localized_system_texts": {
+      "zh": "你是合同要素抽取器。只依据给定片段抽取事实，不推测、不评价。",
+      "en": "You are a contract fact extractor. Extract facts only from the given chunk; do not speculate or evaluate."
+    },
+    "localized_focus_texts": {
+      "zh": "",
+      "en": ""
+    },
+    "localized_template_texts": {
+      "zh": "请仅依据给出的合同片段抽取结构化事实，不推测、不评价、不输出解释或修改建议。\n\n输出严格 JSON，字段固定如下；没有内容的字段用空字符串或空数组，不要省略字段：\n{\"parties\": \"合同主体与角色\", \"product_or_service\": \"交易标的、范围与质量标准\", \"term\": \"合作期限、续约与终止条件\", \"pricing\": \"定价方式、含税或不含税口径、税率约定\", \"settlement\": \"对账、结算周期、付款条件与可扣款项\", \"invoicing\": [\"发票类型、开具时点、红冲与作废责任\"], \"tax\": [\"税率变化、税差补偿、不同纳税人处理、涉税赔偿等事实\"], \"rebates_and_fees\": [\"返利、通道费、促销费、物流与损耗补偿等\"], \"returns_and_deposit\": [\"退货条件、退货款处理、保证金及扣罚\"], \"promotion\": [\"促销活动组织、费用承担与结算\"], \"breach_and_termination\": [\"违约责任、赔偿范围、解除与终止后果\"], \"ip_and_compliance\": [\"知识产权、保密、合规与审计要求\"], \"other\": [\"其他影响交易实质或税务处理的事实\"]}\n\n要求：\n1. 保留原文中的主体名称、比例、税率、金额、期限与触发条件。\n2. 每条事实写成独立、可单独引用的短句；数组内不要重复。\n3. 不要给出修改建议，不要输出 JSON 之外的文字。\n\n合同片段 {{ contract_chunk_index }}/{{ contract_chunk_total }}：\n{{ contract_chunk_text }}",
+      "en": "Extract structured facts from the contract chunk only. Do not speculate, evaluate, give explanations, or suggest amendments.\n\nReturn strict JSON with exactly these fields; use an empty string or empty array when a field has no content, and never omit a field:\n{\"parties\": \"parties and roles\", \"product_or_service\": \"subject matter, scope, quality standards\", \"term\": \"term, renewal and termination conditions\", \"pricing\": \"pricing method, tax-inclusive or tax-exclusive basis, rate agreements\", \"settlement\": \"reconciliation, settlement cycle, payment conditions and deductible items\", \"invoicing\": [\"invoice types, issuance timing, red-letter and cancellation liability\"], \"tax\": [\"rate changes, tax-difference compensation, taxpayer-category treatment, tax indemnities\"], \"rebates_and_fees\": [\"rebates, slotting fees, promotion fees, logistics and shrinkage compensation\"], \"returns_and_deposit\": [\"return conditions, refund treatment, security deposit and deductions\"], \"promotion\": [\"promotion organization, cost bearing and settlement\"], \"breach_and_termination\": [\"breach liability, indemnity scope, termination consequences\"], \"ip_and_compliance\": [\"IP, confidentiality, compliance and audit requirements\"], \"other\": [\"other facts affecting transaction substance or tax treatment\"]}\n\nRules:\n1. Keep entity names, ratios, tax rates, amounts, deadlines and triggering conditions from the source.\n2. Write each fact as a self-contained short sentence; do not duplicate items in an array.\n3. Do not suggest amendments and do not output anything outside the JSON.\n\nContract chunk {{ contract_chunk_index }}/{{ contract_chunk_total }}:\n{{ contract_chunk_text }}"
+    },
+    "placeholder_map": {
+      "contract_chunk_index": {
+        "zh": "【片段序号】",
+        "en": "[Chunk Index]"
+      },
+      "contract_chunk_total": {
+        "zh": "【片段总数】",
+        "en": "[Chunk Total]"
+      },
+      "contract_chunk_text": {
+        "zh": "【合同片段】",
+        "en": "[Contract Chunk]"
+      },
+      "source_filename": {
+        "zh": "【来源文件】",
+        "en": "[Source File Name]"
+      }
+    },
+    "system_text": "{% if lang == 'en' %}You are a contract fact extractor. Extract facts only from the given chunk; do not speculate or evaluate.{% else %}你是合同要素抽取器。只依据给定片段抽取事实，不推测、不评价。{% endif %}",
+    "template_text": "{% if lang == 'en' %}Extract structured facts from the contract chunk only. Do not speculate, evaluate, give explanations, or suggest amendments.\n\nReturn strict JSON with exactly these fields; use an empty string or empty array when a field has no content, and never omit a field:\n{\"parties\": \"parties and roles\", \"product_or_service\": \"subject matter, scope, quality standards\", \"term\": \"term, renewal and termination conditions\", \"pricing\": \"pricing method, tax-inclusive or tax-exclusive basis, rate agreements\", \"settlement\": \"reconciliation, settlement cycle, payment conditions and deductible items\", \"invoicing\": [\"invoice types, issuance timing, red-letter and cancellation liability\"], \"tax\": [\"rate changes, tax-difference compensation, taxpayer-category treatment, tax indemnities\"], \"rebates_and_fees\": [\"rebates, slotting fees, promotion fees, logistics and shrinkage compensation\"], \"returns_and_deposit\": [\"return conditions, refund treatment, security deposit and deductions\"], \"promotion\": [\"promotion organization, cost bearing and settlement\"], \"breach_and_termination\": [\"breach liability, indemnity scope, termination consequences\"], \"ip_and_compliance\": [\"IP, confidentiality, compliance and audit requirements\"], \"other\": [\"other facts affecting transaction substance or tax treatment\"]}\n\nRules:\n1. Keep entity names, ratios, tax rates, amounts, deadlines and triggering conditions from the source.\n2. Write each fact as a self-contained short sentence; do not duplicate items in an array.\n3. Do not suggest amendments and do not output anything outside the JSON.\n\nContract chunk {{ contract_chunk_index }}/{{ contract_chunk_total }}:\n{{ contract_chunk_text }}{% else %}请仅依据给出的合同片段抽取结构化事实，不推测、不评价、不输出解释或修改建议。\n\n输出严格 JSON，字段固定如下；没有内容的字段用空字符串或空数组，不要省略字段：\n{\"parties\": \"合同主体与角色\", \"product_or_service\": \"交易标的、范围与质量标准\", \"term\": \"合作期限、续约与终止条件\", \"pricing\": \"定价方式、含税或不含税口径、税率约定\", \"settlement\": \"对账、结算周期、付款条件与可扣款项\", \"invoicing\": [\"发票类型、开具时点、红冲与作废责任\"], \"tax\": [\"税率变化、税差补偿、不同纳税人处理、涉税赔偿等事实\"], \"rebates_and_fees\": [\"返利、通道费、促销费、物流与损耗补偿等\"], \"returns_and_deposit\": [\"退货条件、退货款处理、保证金及扣罚\"], \"promotion\": [\"促销活动组织、费用承担与结算\"], \"breach_and_termination\": [\"违约责任、赔偿范围、解除与终止后果\"], \"ip_and_compliance\": [\"知识产权、保密、合规与审计要求\"], \"other\": [\"其他影响交易实质或税务处理的事实\"]}\n\n要求：\n1. 保留原文中的主体名称、比例、税率、金额、期限与触发条件。\n2. 每条事实写成独立、可单独引用的短句；数组内不要重复。\n3. 不要给出修改建议，不要输出 JSON 之外的文字。\n\n合同片段 {{ contract_chunk_index }}/{{ contract_chunk_total }}：\n{{ contract_chunk_text }}{% endif %}",
+    "sample_input_json": {
+      "lang": "zh",
+      "contract_chunk_index": 1,
+      "contract_chunk_total": 4,
+      "contract_chunk_text": "【9.4 发票类型】乙方为小规模纳税人的，应开具增值税普通发票……",
+      "source_filename": "华润万家购销合同2026年修订-可编辑文字版.docx"
+    },
+    "source_module": "app.services.contract_audit._extract_summary_chunk_facts",
+    "scene_key": "contract_audit.contract_summary_map"
   },
   {
     "prompt_key": "audit_prompt.tax_audit_json",

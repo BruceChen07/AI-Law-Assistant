@@ -165,8 +165,16 @@
         "memory_token_guard_enabled": true,
         "memory_max_llm_calls_per_audit": 12,
         "memory_max_prompt_chars_per_clause": 2400,
+        "cloud_context_window_tokens": 131072,
+        "local_context_window_tokens": 4096,
         "classic_audit_max_tokens": 1200,
-        "classic_audit_retry_max_tokens": 2000
+        "classic_audit_retry_max_tokens": 2000,
+        "contract_summary_source_max_chars": 30000,
+        "contract_summary_max_tokens": 3000,
+        "contract_summary_retry_max_tokens": 4000,
+        "contract_summary_map_reduce_enabled": true,
+        "contract_summary_map_chunk_chars": 6000,
+        "contract_summary_map_max_chunks": 24
     },
     "local_llm": {
         "enabled": true,

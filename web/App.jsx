@@ -34,70 +34,6 @@ const getFileExtension = (name) => {
   return idx >= 0 ? text.slice(idx) : ""
 }
 
-const escapeRegExp = (value) => String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
-const getContractSummarySectionLabels = (lang = "zh") => (
-  normalizeAppLang(lang) === "en"
-    ? {
-        about: "What the contract is about",
-        core: "Core arrangement",
-        tax: "Tax review note",
-        source: "Source file",
-        legacyCutoffs: ["Page Count", "Clause Count", "Contract Content"],
-      }
-    : {
-        about: "合同在说什么",
-        core: "核心安排",
-        tax: "税务审核提示",
-        source: "来源文件",
-        legacyCutoffs: ["合同页数", "条款数", "合同内容"],
-      }
-)
-
-const normalizeSummarySectionText = (value) => String(value || "")
-  .replace(/\r\n/g, "\n")
-  .replace(/\n{3,}/g, "\n\n")
-  .trim()
-
-const extractSummarySectionText = (text, label, nextLabels = []) => {
-  const source = normalizeSummarySectionText(text)
-  if (!source) return ""
-  const startRegex = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(label)}\\s*[:：]\\s*`, "i")
-  const startMatch = startRegex.exec(source)
-  if (!startMatch) return ""
-  const startIndex = startMatch.index + startMatch[0].length
-  let endIndex = source.length
-  nextLabels.forEach((nextLabel) => {
-    const nextRegex = new RegExp(`(?:^|\\n)\\s*${escapeRegExp(nextLabel)}\\s*[:：]`, "im")
-    const remainder = source.slice(startIndex)
-    const nextMatch = nextRegex.exec(remainder)
-    if (nextMatch) {
-      const candidateEnd = startIndex + nextMatch.index
-      if (candidateEnd < endIndex) endIndex = candidateEnd
-    }
-  })
-  return normalizeSummarySectionText(source.slice(startIndex, endIndex))
-}
-
-const parseStructuredContractSummary = (text, lang = "zh") => {
-  const source = normalizeSummarySectionText(text)
-  if (!source) return null
-  const labels = getContractSummarySectionLabels(lang)
-  const itemTitleMatch = source.match(/(?:^|\n)\s*(\d+\.\s*[^\n]+)/)
-  const about = extractSummarySectionText(source, labels.about, [labels.core, labels.tax, labels.source, ...labels.legacyCutoffs])
-  const core = extractSummarySectionText(source, labels.core, [labels.tax, labels.source, ...labels.legacyCutoffs])
-  const tax = extractSummarySectionText(source, labels.tax, [labels.source, ...labels.legacyCutoffs])
-  const summarySource = extractSummarySectionText(source, labels.source, labels.legacyCutoffs)
-  if (!about && !core && !tax && !summarySource) return null
-  return {
-    itemTitle: String(itemTitleMatch?.[1] || "").trim(),
-    about,
-    core,
-    tax,
-    source: summarySource,
-  }
-}
-
 const createDefaultContract = (lang = getStoredAppLang()) => ({
   title: "",
   language: normalizeAppLang(lang),
@@ -319,35 +255,55 @@ export default function App() {
     if (riskFilter === "all") return riskList
     return riskList.filter((risk) => String(risk?.level || "").toLowerCase() === riskFilter)
   }, [riskList, riskFilter])
-  const contractSummaryText = String(contractResult?.contract_summary || "").trim()
+  const contractSummary = (contractResult?.contract_summary && typeof contractResult.contract_summary === "object")
+    ? contractResult.contract_summary
+    : null
+  const contractSummaryTitle = String(contractSummary?.title || "").trim()
+  const contractSummaryAbout = String(contractSummary?.about || "").trim()
+  const contractSummaryCore = String(contractSummary?.core || "").trim()
+  const contractSummaryTax = String(contractSummary?.tax || "").trim()
+  const contractSummarySourceFile = String(contractSummary?.source_file || "").trim()
+  const hasContractSummaryContent = Boolean(
+    contractSummaryTitle || contractSummaryAbout || contractSummaryCore || contractSummaryTax || contractSummarySourceFile
+  )
+  const contractSummaryCharCount = contractSummaryTitle.length + contractSummaryAbout.length + contractSummaryCore.length + contractSummaryTax.length + contractSummarySourceFile.length
   const contractSummaryEnabled = Boolean(contractMeta?.contract_summary_enabled)
   const contractSummaryStatus = String(contractMeta?.contract_summary_status || "").trim().toLowerCase()
   const contractSummaryLanguage = normalizeAppLang(contractMeta?.contract_summary_language || uiLang)
-  const structuredContractSummary = useMemo(
-    () => parseStructuredContractSummary(contractSummaryText, contractSummaryLanguage),
-    [contractSummaryLanguage, contractSummaryText]
-  )
-  const showContractSummary = contractSummaryEnabled || Boolean(contractSummaryText)
+  const showContractSummary = contractSummaryEnabled || hasContractSummaryContent
   const contractSummaryStatusLabel = useMemo(() => {
     if (contractSummaryStatus === "ok") return t.contractSummaryStatusOk
+    if (contractSummaryStatus === "partial") return t.contractSummaryStatusPartial
     if (contractSummaryStatus === "empty") return t.contractSummaryStatusEmpty
     if (contractSummaryStatus === "error") return t.contractSummaryStatusError
     if (contractSummaryStatus === "empty_input") return t.contractSummaryStatusEmptyInput
     if (contractSummaryStatus === "disabled") return t.contractSummaryStatusDisabled
     return contractSummaryEnabled ? t.progressWorking : t.contractSummaryStatusDisabled
-  }, [contractSummaryEnabled, contractSummaryStatus, t.contractSummaryStatusDisabled, t.contractSummaryStatusEmpty, t.contractSummaryStatusEmptyInput, t.contractSummaryStatusError, t.contractSummaryStatusOk, t.progressWorking])
+  }, [contractSummaryEnabled, contractSummaryStatus, t.contractSummaryStatusDisabled, t.contractSummaryStatusEmpty, t.contractSummaryStatusEmptyInput, t.contractSummaryStatusError, t.contractSummaryStatusOk, t.contractSummaryStatusPartial, t.progressWorking])
   const contractSummaryNotice = useMemo(() => {
-    if (contractSummaryText) return ""
+    if (hasContractSummaryContent) return ""
     if (contractSummaryStatus === "error") return t.contractSummaryErrorHint
     if (contractSummaryEnabled) return t.contractSummaryEmptyHint
     return t.emptyContractSummary
-  }, [contractSummaryEnabled, contractSummaryStatus, contractSummaryText, t.contractSummaryEmptyHint, t.contractSummaryErrorHint, t.emptyContractSummary])
+  }, [contractSummaryEnabled, contractSummaryStatus, hasContractSummaryContent, t.contractSummaryEmptyHint, t.contractSummaryErrorHint, t.emptyContractSummary])
   const applyContractSummaryPayload = (payload) => {
-    const summaryText = String(payload?.summary || "").trim()
+    const summary = payload?.summary
     const summaryMeta = payload?.meta && typeof payload.meta === "object" ? payload.meta : {}
+    const incomingStatus = String(summaryMeta.contract_summary_status || "").trim().toLowerCase()
     setContractResult((prev) => {
+      const prevSummary = prev?.contract_summary && typeof prev.contract_summary === "object"
+        ? prev.contract_summary
+        : null
+      const nextSummary = summary && typeof summary === "object" ? summary : {}
+      const summaryFields = ["title", "about", "core", "tax"]
+      const hasIncomingContent = summaryFields.some((key) => String(nextSummary[key] || "").trim())
+      const hasPreviousContent = Boolean(prevSummary)
+        && summaryFields.some((key) => String(prevSummary[key] || "").trim())
+      if (!hasIncomingContent && hasPreviousContent && (incomingStatus === "error" || incomingStatus === "empty")) {
+        return prev
+      }
       const next = prev && typeof prev === "object" ? { ...prev } : {}
-      next.contract_summary = summaryText
+      next.contract_summary = summary
       return next
     })
     setContractMeta((prev) => ({
@@ -783,8 +739,11 @@ export default function App() {
   useEffect(() => {
     if (!documentId || !contractResult || contractLoading) return
     const requestKey = `${documentId}:${uiLang}`
-    const terminalStatuses = new Set(["ok", "empty", "error", "disabled", "empty_input"])
-    if (contractSummaryText && contractSummaryLanguage === uiLang) {
+    // "empty" is intentionally not terminal: an empty result may come from a
+    // truncated generation, so the next mount should be allowed to retry (the
+    // backend serves successful results from its idempotent cache).
+    const terminalStatuses = new Set(["ok", "partial", "error", "disabled", "empty_input"])
+    if (hasContractSummaryContent && contractSummaryLanguage === uiLang) {
       summaryLoadedDocumentIdRef.current = requestKey
       return
     }
@@ -794,7 +753,11 @@ export default function App() {
     }
     if (summaryLoadedDocumentIdRef.current === requestKey) return
 
-    let cancelled = false
+    // Mark the request as started before the state update below. Otherwise the
+    // "working" status change re-runs this effect and fires a duplicate request,
+    // which doubles the LLM cost and can let an empty response win the race.
+    summaryLoadedDocumentIdRef.current = requestKey
+
     const requestSeq = summaryRequestSeqRef.current + 1
     summaryRequestSeqRef.current = requestSeq
     setContractMeta((prev) => ({
@@ -808,11 +771,12 @@ export default function App() {
     const loadSummary = async () => {
       try {
         const payload = await getContractSummary(documentId, uiLang)
-        if (cancelled || summaryRequestSeqRef.current !== requestSeq) return
+        // The effect re-runs by itself (status -> "working"), so stale results
+        // are dropped by sequence instead of by a per-run "cancelled" flag.
+        if (summaryRequestSeqRef.current !== requestSeq) return
         applyContractSummaryPayload(payload)
-        summaryLoadedDocumentIdRef.current = requestKey
       } catch (err) {
-        if (cancelled || summaryRequestSeqRef.current !== requestSeq) return
+        if (summaryRequestSeqRef.current !== requestSeq) return
         const message = String(err?.message || err || "")
         applyContractSummaryPayload({
           summary: "",
@@ -823,15 +787,11 @@ export default function App() {
             contract_summary_language: uiLang,
           },
         })
-        summaryLoadedDocumentIdRef.current = requestKey
       }
     }
 
     void loadSummary()
-    return () => {
-      cancelled = true
-    }
-  }, [documentId, contractLoading, contractResult, contractSummaryLanguage, contractSummaryStatus, contractSummaryText, uiLang])
+  }, [documentId, contractLoading, contractResult, contractSummaryLanguage, contractSummaryStatus, hasContractSummaryContent, uiLang])
 
   useEffect(() => {
     if (!user || !currentTaskId) return
@@ -1858,37 +1818,36 @@ export default function App() {
                   <div className="summary-meta">
                     <span>{t.clauseCount}: {contractMeta?.preview_clause_total ?? previewMeta?.clause_total ?? "-"}</span>
                     <span>{t.contractSummaryStatus}: {contractSummaryStatusLabel}</span>
-                    <span>{uiLang === "zh" ? `${contractSummaryText.length} 字` : `${contractSummaryText.length} chars`}</span>
+                    <span>{uiLang === "zh" ? `${contractSummaryCharCount} 字` : `${contractSummaryCharCount} chars`}</span>
                   </div>
-                  <div className={`summary-content${contractSummaryText ? "" : " is-empty"}${structuredContractSummary ? " is-structured" : ""}`}>
-                    {contractSummaryText ? (
-                      structuredContractSummary ? (
-                        <div className="structured-summary">
-                          {structuredContractSummary.itemTitle && (
-                            <div className="structured-summary-title">{structuredContractSummary.itemTitle}</div>
-                          )}
-                          <p className="structured-summary-line">
-                            <strong>{t.contractSummarySectionAbout}：</strong>
-                            <span>{structuredContractSummary.about || "-"}</span>
-                          </p>
-                          <p className="structured-summary-line">
-                            <strong>{t.contractSummarySectionCore}：</strong>
-                            <span>{structuredContractSummary.core || "-"}</span>
-                          </p>
-                          <p className="structured-summary-line">
-                            <strong>{t.contractSummarySectionTax}：</strong>
-                            <span>{structuredContractSummary.tax || "-"}</span>
-                          </p>
-                          <p className="structured-summary-line">
-                            <strong>{t.contractSummarySectionSource}：</strong>
-                            <span>{structuredContractSummary.source || "-"}</span>
-                          </p>
-                        </div>
-                      ) : (
-                        contractSummaryText
-                      )
+                  <div className={`summary-content${hasContractSummaryContent ? "" : " is-empty"}${contractSummary ? " is-structured" : ""}`}>
+                    {hasContractSummaryContent ? (
+                      <div className="structured-summary">
+                        {contractSummaryTitle && (
+                          <div className="structured-summary-title">{contractSummaryTitle}</div>
+                        )}
+                        <p className="structured-summary-line">
+                          <strong>{t.contractSummarySectionAbout}：</strong>
+                          <span>{contractSummaryAbout || "-"}</span>
+                        </p>
+                        <p className="structured-summary-line">
+                          <strong>{t.contractSummarySectionCore}：</strong>
+                          <span>{contractSummaryCore || "-"}</span>
+                        </p>
+                        <p className="structured-summary-line">
+                          <strong>{t.contractSummarySectionTax}：</strong>
+                          <span>{contractSummaryTax || "-"}</span>
+                        </p>
+                        <p className="structured-summary-line">
+                          <strong>{t.contractSummarySectionSource}：</strong>
+                          <span>{contractSummarySourceFile || "-"}</span>
+                        </p>
+                      </div>
                     ) : contractSummaryNotice}
                   </div>
+                  {contractSummaryStatus === "partial" && hasContractSummaryContent && (
+                    <div className="audit-restore-banner is-warning">{t.contractSummaryPartialHint}</div>
+                  )}
                 </div>
               )}
               <div className="result-summary">

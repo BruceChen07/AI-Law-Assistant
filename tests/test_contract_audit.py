@@ -214,11 +214,11 @@ def test_load_llm_json_object_accepts_wrapped_json_object():
     assert parsed["risks"] == []
 
 
-def test_build_contract_summary_returns_formatted_text_when_enabled():
+def test_build_contract_summary_returns_structured_json_when_enabled():
     class SummaryThenAuditLLM:
         def chat(self, messages, overrides=None):
             return (
-                "合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 1 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. demo\n\n合同在说什么：\n本合同约定年度供货合作安排。\n\n核心安排：\n乙方按订单供货，甲方负责验收付款并开票结算。\n\n税务审核提示：\n需核对发票处理与交易实质是否一致。\n\n来源文件：demo.docx",
+                '{"title":"demo","about":"本合同约定年度供货合作安排。","core":"乙方按订单供货，甲方负责验收付款并开票结算。","tax":"需核对发票处理与交易实质是否一致。"}',
                 {"model": "fake"},
             )
 
@@ -239,10 +239,42 @@ def test_build_contract_summary_returns_formatted_text_when_enabled():
         source_filename="demo.docx",
     )
 
-    assert "合同内容简要摘要" in str(result.get("text") or "")
-    assert "税务审核提示" in str(result.get("text") or "")
     assert result["enabled"] is True
     assert result["status"] == "ok"
+    assert result["title"] == "demo"
+    assert "年度供货" in result["about"]
+    assert "发票" in result["tax"]
+    assert result["source_file"] == "demo.docx"
+
+
+def test_build_contract_summary_derives_title_and_source_file_when_json_omits_title():
+    class SummaryThenAuditLLM:
+        def chat(self, messages, overrides=None):
+            return (
+                '{"about":"本合同约定年度供货合作安排。","core":"乙方按订单供货。","tax":"需核对发票口径。"}',
+                {"model": "fake"},
+            )
+
+    result = ca._build_contract_summary(
+        cfg={
+            "llm_config": {"model": "fake"},
+            "contract_summary_enabled": True,
+        },
+        llm=SummaryThenAuditLLM(),
+        text="第一条 合作范围 乙方按甲方订单供货。",
+        lang="zh",
+        preview_clauses=[
+            {"clause_path": "第一条", "clause_text": "乙方按甲方订单供货。"},
+        ],
+        page_count=1,
+        audit_id="audit_test_summary_title_fallback",
+        source_filename="华润万家购销合同2026年修订-可编辑文字版.docx",
+    )
+
+    assert result["enabled"] is True
+    assert result["status"] == "ok"
+    assert result["title"] == "华润万家购销合同2026年修订-可编辑文字版"
+    assert result["source_file"] == "华润万家购销合同2026年修订-可编辑文字版.docx"
 
 
 def test_audit_contract_does_not_attach_contract_summary(monkeypatch, tmp_path):
@@ -373,3 +405,190 @@ def test_build_classic_audit_uses_configured_max_tokens(monkeypatch):
     assert llm.max_tokens_calls == [1500, 2400]
     assert result["meta"]["classic_retry_used"] is True
     assert result["meta"]["classic_max_tokens"] == 2400
+
+
+def test_contract_audit_context_window_uses_cloud_budget_when_runtime_is_cloud():
+    cfg = {
+        "memory_runtime_config": {
+            "cloud_context_window_tokens": 131072,
+            "local_context_window_tokens": 4096,
+        },
+    }
+    runtime_cfg = {"provider": "deepseek"}
+    context_window = ca._resolve_contract_audit_context_window_tokens(
+        cfg, runtime_cfg)
+    assert context_window == 131072
+
+
+def test_contract_audit_context_window_uses_local_num_ctx_for_ollama():
+    cfg = {
+        "memory_runtime_config": {
+            "cloud_context_window_tokens": 131072,
+            "local_context_window_tokens": 4096,
+        },
+    }
+    runtime_cfg = {"provider": "ollama", "num_ctx": 8192}
+    context_window = ca._resolve_contract_audit_context_window_tokens(
+        cfg, runtime_cfg)
+    assert context_window == 8192
+
+
+def test_build_contract_summary_source_text_groups_clauses_and_flags_truncation():
+    preview_clauses = [
+        {"clause_path": "第一条 合作范围", "clause_text": "乙方按甲方订单供货。"},
+        {"clause_path": "第一条 合作范围", "clause_text": "甲方负责验收。"},
+        {"clause_path": "第二条 结算与开票", "clause_text": "甲方验收后付款。"},
+    ]
+
+    out = ca._build_contract_summary_source_text(
+        "ignored", preview_clauses, max_chars=2000)
+
+    assert "【第一条 合作范围 乙方按甲方订单供货。】" in out["text"]
+    assert "甲方负责验收。" in out["text"]
+    assert out["clause_block_total"] == 2
+    assert out["clause_block_included"] == 2
+    assert out["truncated"] is False
+
+    long_clauses = [
+        {"clause_path": f"第{i}条 条款", "clause_text": "条款正文" * 100}
+        for i in range(1, 6)
+    ]
+    long_out = ca._build_contract_summary_source_text(
+        "ignored", long_clauses, max_chars=2000)
+
+    assert long_out["truncated"] is True
+    assert long_out["clause_block_included"] < long_out["clause_block_total"]
+    assert long_out["source_chars"] <= 2100
+    assert long_out["text"].rstrip().endswith("】")
+
+
+def test_build_contract_summary_marks_partial_when_output_truncated():
+    class TruncatedLLM:
+        def chat(self, messages, overrides=None):
+            return (
+                '{"about":"本合同约定年度供货合作安排。","core":"乙方按订单供货，甲方验收后付款并开票结算。","tax":""}',
+                {"model": "fake", "choices": [{"finish_reason": "length"}]},
+            )
+
+    result = ca._build_contract_summary(
+        cfg={
+            "llm_config": {"model": "fake"},
+            "contract_summary_enabled": True,
+        },
+        llm=TruncatedLLM(),
+        text="第一条 合作范围 乙方按甲方订单供货。第二条 结算与开票 甲方验收后付款，乙方开具发票。",
+        lang="zh",
+        preview_clauses=[
+            {"clause_path": "第一条", "clause_text": "乙方按甲方订单供货。"},
+            {"clause_path": "第二条", "clause_text": "甲方验收后付款，乙方开具发票。"},
+        ],
+        page_count=2,
+        audit_id="audit_test_summary_partial",
+        source_filename="demo.docx",
+    )
+
+    assert result["status"] == "partial"
+    assert "output_truncated" in result["issues"]
+    assert any(issue.startswith("missing_sections")
+               for issue in result["issues"])
+    assert result["about"]
+
+
+def test_build_contract_summary_reuses_cached_result_for_same_document(tmp_path):
+    class CountingLLM:
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, messages, overrides=None):
+            self.calls += 1
+            return (
+                '{"about":"本合同约定年度供货合作安排。","core":"乙方按订单供货，甲方验收后付款。","tax":"需核对发票处理与交易实质是否一致。"}',
+                {"model": "fake"},
+            )
+
+    llm = CountingLLM()
+    kwargs = {
+        "cfg": {
+            "data_dir": str(tmp_path / "data"),
+            "llm_config": {"model": "fake"},
+            "contract_summary_enabled": True,
+        },
+        "llm": llm,
+        "text": "第一条 合作范围 乙方按甲方订单供货。",
+        "lang": "zh",
+        "preview_clauses": [
+            {"clause_path": "第一条", "clause_text": "乙方按甲方订单供货。"},
+        ],
+        "page_count": 1,
+        "audit_id": "audit_test_summary_cache",
+        "source_filename": "demo.docx",
+        "document_id": "doc-cache",
+        "source_sha256": "a" * 64,
+    }
+
+    first = ca._build_contract_summary(**kwargs)
+    second = ca._build_contract_summary(**kwargs)
+
+    assert first["status"] == "ok"
+    assert first["cache_hit"] is False
+    assert second["cache_hit"] is True
+    assert second["source"] == "cache"
+    assert second["about"] == first["about"]
+    assert llm.calls == 1
+
+
+def test_build_contract_summary_uses_map_reduce_for_long_contract(monkeypatch):
+    monkeypatch.setattr(
+        ca,
+        "_resolve_contract_audit_runtime_llm",
+        lambda _cfg: {"provider": "ollama", "num_ctx": 4096},
+    )
+    seen_prompts = []
+    map_calls = []
+
+    class MapReduceLLM:
+        def chat(self, messages, overrides=None):
+            seen_prompts.append(str(messages[-1].get("content") or ""))
+            return (
+                '{"about":"本合同为年度购销主合同，覆盖供货、结算与开票安排。","core":"核心安排包括供货、验收、对账、付款与开票结算。","tax":"需核对税率变化与发票主体是否一致。"}',
+                {"model": "fake"},
+            )
+
+    def fake_map(_cfg, _llm, chunk_text, chunk_index, chunk_total,
+                 _lang, _source_name, _max_tokens, _audit_id):
+        map_calls.append((chunk_index, chunk_total, len(chunk_text)))
+        return {
+            "pricing": [f"第{chunk_index}块含税价交易"],
+            "tax": [f"第{chunk_index}块税率变化风险"],
+        }
+
+    monkeypatch.setattr(ca, "_extract_summary_chunk_facts", fake_map)
+
+    preview_clauses = [
+        {"clause_path": f"第{i}条 条款", "clause_text": "本条约定的交易与结算安排。" * 30}
+        for i in range(1, 25)
+    ]
+    cfg = {
+        "llm_config": {"model": "fake"},
+        "contract_summary_enabled": True,
+    }
+
+    result = ca._build_contract_summary(
+        cfg=cfg,
+        llm=MapReduceLLM(),
+        text="ignored",
+        lang="zh",
+        preview_clauses=preview_clauses,
+        page_count=10,
+        audit_id="audit_test_summary_map_reduce",
+        source_filename="long-contract.docx",
+    )
+
+    assert result["map_reduce"] is True
+    assert result["map_chunks"] >= 2
+    assert len(map_calls) == result["map_chunks"]
+    assert result["status"] == "ok"
+    assert any(
+        "第1块税率变化风险" in prompt and "第2块税率变化风险" in prompt
+        for prompt in seen_prompts
+    )

@@ -198,7 +198,13 @@ describe("App audit persistence", () => {
         contract_summary_status: "ok",
       },
       contractResult: {
-        contract_summary: "合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 1 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. 当前合同\n\n合同在说什么：\n本合同主要约定年度供货合作。\n\n核心安排：\n明确了供货、验收、付款开票以及违约终止机制。\n\n税务审核提示：\n需重点核对发票处理与交易实质是否一致。\n\n来源文件：当前合同.docx",
+        contract_summary: {
+          title: "当前合同",
+          about: "本合同主要约定年度供货合作。",
+          core: "明确了供货、验收、付款开票以及违约终止机制。",
+          tax: "需重点核对发票处理与交易实质是否一致。",
+          source_file: "当前合同.docx",
+        },
         summary: "共识别 2 项风险",
         risks: [{ level: "medium", issue: "付款节点描述偏粗" }],
       },
@@ -213,11 +219,19 @@ describe("App audit persistence", () => {
     expect(titles[0]).toHaveTextContent("整份合同总结")
     expect(titles[1]).toHaveTextContent("概览")
     expect(screen.getByText(/摘要状态: 已生成/)).toBeInTheDocument()
-    expect(screen.getByText("1. 当前合同")).toBeInTheDocument()
+    expect(screen.getByText("当前合同")).toBeInTheDocument()
     expect(screen.getByText("当前合同.docx")).toBeInTheDocument()
   })
 
   it("shows contract summary status when the summary is empty", async () => {
+    vi.mocked(getContractSummary).mockResolvedValue({
+      summary: "",
+      meta: {
+        contract_summary_enabled: true,
+        contract_summary_status: "empty",
+        contract_summary_language: "zh",
+      },
+    })
     saveCurrentAuditSnapshot(buildAuditSnapshot({
       taskId: "task-contract-summary-empty",
       auditId: "task-contract-summary-empty",
@@ -243,9 +257,90 @@ describe("App audit persistence", () => {
     expect(screen.getByText("本次未生成整份合同总结。请结合服务日志检查模型输出是否为空、被截断或解析后为空。")).toBeInTheDocument()
   })
 
+  it("shows a warning when the whole-contract summary is incomplete", async () => {
+    saveCurrentAuditSnapshot(buildAuditSnapshot({
+      taskId: "task-contract-summary-partial",
+      auditId: "task-contract-summary-partial",
+      documentId: "doc-contract-summary-partial",
+      contractMeta: {
+        preview_clause_total: 12,
+        contract_summary_enabled: true,
+        contract_summary_status: "partial",
+      },
+      contractResult: {
+        contract_summary: {
+          title: "当前合同",
+          about: "本合同主要约定年度供货合作。",
+          core: "明确了供货、验收、付款开票以及违约终止机制。",
+          tax: "",
+          source_file: "当前合同.docx",
+        },
+        summary: "共识别 1 项风险",
+        risks: [{ level: "low", issue: "发票描述需复核" }],
+      },
+      previewMode: "text",
+      previewText: "这是恢复的合同正文",
+    }), currentUser)
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText("合同在说什么：")).toBeInTheDocument())
+    expect(screen.getByText(/摘要状态: 内容不完整/)).toBeInTheDocument()
+    expect(screen.getByText("摘要不完整：部分章节缺失或输出被截断，请以合同原文为准并重新生成。")).toBeInTheDocument()
+  })
+
+  it("keeps the existing contract summary when the refetch returns empty", async () => {
+    vi.mocked(getContractSummary).mockResolvedValue({
+      summary: "",
+      meta: {
+        contract_summary_enabled: true,
+        contract_summary_status: "empty",
+        contract_summary_language: "zh",
+      },
+    })
+    vi.mocked(getContractSummary).mockClear()
+
+    saveCurrentAuditSnapshot(buildAuditSnapshot({
+      taskId: "task-contract-summary-keep",
+      auditId: "task-contract-summary-keep",
+      documentId: "doc-contract-summary-keep",
+      contractMeta: {
+        preview_clause_total: 10,
+        contract_summary_enabled: true,
+        contract_summary_status: "ok",
+        contract_summary_language: "en",
+      },
+      contractResult: {
+        contract_summary: {
+          title: "当前合同",
+          about: "本合同主要约定年度供货合作。",
+          core: "明确了供货、验收、付款开票以及违约终止机制。",
+          tax: "需重点核对发票处理与交易实质是否一致。",
+          source_file: "当前合同.docx",
+        },
+        summary: "共识别 1 项风险",
+        risks: [{ level: "low", issue: "发票描述需复核" }],
+      },
+      previewMode: "text",
+      previewText: "这是恢复的合同正文",
+    }), currentUser)
+
+    render(<App />)
+
+    await waitFor(() => expect(vi.mocked(getContractSummary)).toHaveBeenCalledWith("doc-contract-summary-keep", "zh"))
+    expect(screen.getByText("本合同主要约定年度供货合作。")).toBeInTheDocument()
+    expect(screen.getByText("需重点核对发票处理与交易实质是否一致。")).toBeInTheDocument()
+  })
+
   it("fetches and renders the whole-contract summary above the overview when the audit result does not include it", async () => {
     vi.mocked(getContractSummary).mockResolvedValue({
-      summary: "合同内容简要摘要\n\n税务审核师快速阅读版\n\n共 1 份合同 / 补充协议\n\n使用说明\n\n本文件仅用于帮助审核人员迅速了解合同交易背景、核心商业安排及主要涉税关注点，不替代对合同原文、附件及实际业务流程的完整审核。\n\n1. 华润万家购销合同2026年修订版\n\n合同在说什么：\n大型零售商与供应商之间的年度商品购销主合同。\n\n核心安排：\n约定供货、对账、发票、返利及退货机制。\n\n税务审核提示：\n需核对返利折让与开票主体是否一致。\n\n来源文件：华润万家购销合同2026年修订-可编辑文字版.docx",
+      summary: {
+        title: "华润万家购销合同2026年修订版",
+        about: "大型零售商与供应商之间的年度商品购销主合同。",
+        core: "约定供货、对账、发票、返利及退货机制。",
+        tax: "需核对返利折让与开票主体是否一致。",
+        source_file: "华润万家购销合同2026年修订-可编辑文字版.docx",
+      },
       meta: {
         contract_summary_enabled: true,
         contract_summary_status: "ok",
@@ -276,8 +371,88 @@ describe("App audit persistence", () => {
     const titles = screen.getAllByText(/整份合同总结|概览/)
     expect(titles[0]).toHaveTextContent("整份合同总结")
     expect(titles[1]).toHaveTextContent("概览")
-    expect(screen.getByText("1. 华润万家购销合同2026年修订版")).toBeInTheDocument()
+    expect(screen.getByText("华润万家购销合同2026年修订版")).toBeInTheDocument()
     expect(screen.getByText("华润万家购销合同2026年修订-可编辑文字版.docx")).toBeInTheDocument()
+  })
+
+  it("refetches and displays the summary when the restored state is empty", async () => {
+    vi.mocked(getContractSummary).mockResolvedValue({
+      summary: {
+        title: "华润万家购销合同2026年修订版",
+        about: "大型零售商与供应商之间的年度商品购销主合同。",
+        core: "约定供货、对账、发票、返利及退货机制。",
+        tax: "需核对返利折让与开票主体是否一致。",
+        source_file: "华润万家购销合同2026年修订-可编辑文字版.docx",
+      },
+      meta: {
+        contract_summary_enabled: true,
+        contract_summary_status: "ok",
+        contract_summary_language: "zh",
+        preview_clause_total: 22,
+      },
+    })
+
+    saveCurrentAuditSnapshot(buildAuditSnapshot({
+      taskId: "task-contract-summary-heal",
+      auditId: "task-contract-summary-heal",
+      documentId: "doc-contract-summary-heal",
+      contractMeta: {
+        preview_clause_total: 22,
+        contract_summary_enabled: true,
+        contract_summary_status: "empty",
+      },
+      contractResult: {
+        contract_summary: "",
+        summary: "共识别 1 项风险",
+        risks: [{ level: "medium", issue: "返利折让条款需复核" }],
+      },
+      previewMode: "text",
+      previewText: "这是恢复的合同正文",
+    }), currentUser)
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText("合同在说什么：")).toBeInTheDocument())
+    expect(screen.getByText("大型零售商与供应商之间的年度商品购销主合同。")).toBeInTheDocument()
+  })
+
+  it("requests the whole-contract summary once per document instead of on every rerender", async () => {
+    vi.mocked(getContractSummary).mockResolvedValue({
+      summary: {
+        title: "华润万家购销合同2026年修订版",
+        about: "大型零售商与供应商之间的年度商品购销主合同。",
+        core: "约定供货、对账、发票、返利及退货机制。",
+        tax: "需核对返利折让与开票主体是否一致。",
+        source_file: "华润万家购销合同2026年修订-可编辑文字版.docx",
+      },
+      meta: {
+        contract_summary_enabled: true,
+        contract_summary_status: "ok",
+        contract_summary_language: "zh",
+        preview_clause_total: 22,
+      },
+    })
+    vi.mocked(getContractSummary).mockClear()
+
+    saveCurrentAuditSnapshot(buildAuditSnapshot({
+      taskId: "task-contract-summary-single",
+      auditId: "task-contract-summary-single",
+      documentId: "doc-contract-summary-single",
+      contractResult: {
+        summary: "共识别 1 项风险",
+        risks: [{ level: "medium", issue: "返利折让条款需复核" }],
+      },
+      contractMeta: {
+        preview_clause_total: 22,
+      },
+      previewMode: "text",
+      previewText: "这是恢复的合同正文",
+    }), currentUser)
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText("合同在说什么：")).toBeInTheDocument())
+    expect(vi.mocked(getContractSummary)).toHaveBeenCalledTimes(1)
   })
 
   it("shows only the current user's snapshot history and supports compare", async () => {
