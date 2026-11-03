@@ -7,6 +7,7 @@ import time
 import uuid
 import hashlib
 import json
+import math
 import re
 import socket
 import structlog
@@ -18,7 +19,12 @@ from app.core.llm_env import is_cloud_provider, resolve_runtime_llm_config
 from app.core.llm_router import resolve_llm_route
 from app.core.llm_trace import new_trace_id
 from app.core.utils import extract_text_with_config
-from app.services.audit_token_policy import build_contract_audit_budget, plan_clause_groups
+from app.services.audit_token_policy import (
+    build_contract_audit_budget,
+    estimate_text_tokens,
+    get_audit_token_policy,
+    plan_clause_groups,
+)
 from app.services.audit_utils import _safe_int, _normalize_citation_item, _enrich_citations
 from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve_regulation_evidence
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
@@ -1225,14 +1231,63 @@ def _merge_citations(primary: List[Dict[str, Any]], extra: List[Dict[str, Any]])
     return merged
 
 
+def _estimate_clause_tokens(clause: Dict[str, Any]) -> int:
+    return estimate_text_tokens(
+        f"{clause.get('title') or clause.get('clause_path') or ''}\n"
+        f"{clause.get('clause_text') or clause.get('text') or ''}"
+    )
+
+
+def _plan_chunks_by_tokens(
+    clauses: List[Dict[str, Any]],
+    policy: Dict[str, Any],
+    max_calls: int,
+) -> List[List[Dict[str, Any]]]:
+    """按 token 预算分组，避免小合同被切成过多无谓的调用。
+
+    旧逻辑按条款数量等分，``max_calls`` 条一律拆开：21 条款的补充协议会被拆成
+    11 块（每块 2 条款），11 次 LLM 调用在 CPU 上要 4 分钟。这里改为按
+    ``clause_group_target_tokens`` 打包，同时保证单块不超过硬上限。
+    """
+    if not bool(policy.get("enabled")):
+        return []
+    target_tokens = max(600, int(policy.get("clause_group_target_tokens") or 2800))
+    hard_limit = max(1024, int(policy.get("input_hard_limit_tokens") or 5120))
+    total_tokens = sum(_estimate_clause_tokens(item) for item in clauses)
+    if total_tokens <= target_tokens:
+        return [clauses]
+    by_target = math.ceil(total_tokens / target_tokens)
+    by_hard = math.ceil(total_tokens / hard_limit)
+    desired = max(1, by_target, by_hard)
+    call_cap = max(1, int(max_calls or 1))
+    if desired > call_cap:
+        # 宁可变慢也不能让单次 prompt 超过硬上限被截断。
+        logger.warning(
+            "classic_audit_chunk_overflow total_tokens=%s desired_groups=%s cap=%s",
+            total_tokens,
+            desired,
+            call_cap,
+        )
+    chunk_size = max(1, math.ceil(len(clauses) / desired))
+    return [
+        clauses[idx: idx + chunk_size]
+        for idx in range(0, len(clauses), chunk_size)
+    ]
+
+
 def _chunk_preview_clauses(
     preview_clauses: List[Dict[str, Any]],
     max_calls: int,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> List[List[Dict[str, Any]]]:
     clauses = [item for item in list(
         preview_clauses or []) if isinstance(item, dict)]
     if not clauses:
         return []
+    token_plan = _plan_chunks_by_tokens(
+        clauses, policy if isinstance(policy, dict) else {}, max_calls)
+    if token_plan:
+        return token_plan
     if len(clauses) <= CLASSIC_MULTIPASS_TRIGGER_CLAUSES:
         return [clauses]
     bounded_calls = max(1, int(max_calls or 1))
@@ -2497,9 +2552,10 @@ def _run_classic_multipass_audit(
     max_calls = max(1, int(runtime_cfg.get(
         "memory_max_llm_calls_per_audit") or 12))
     clause_chunks = _chunk_preview_clauses(
-        preview_clauses, max_calls=max_calls)
+        preview_clauses, max_calls=max_calls,
+        policy=get_audit_token_policy(cfg))
     if len(clause_chunks) <= 1:
-        return _build_classic_audit(
+        single_result = _build_classic_audit(
             cfg=cfg,
             llm=llm,
             text=text,
@@ -2510,6 +2566,12 @@ def _run_classic_multipass_audit(
             retrieval_opts=retrieval_opts,
             audit_id=audit_id,
         )
+        single_meta = single_result.get("meta") if isinstance(
+            single_result.get("meta"), dict) else {}
+        single_meta.setdefault("classic_chunk_count", 1)
+        single_meta.setdefault("classic_chunk_plan", "single")
+        single_result["meta"] = single_meta
+        return single_result
     chunk_results: List[Dict[str, Any]] = []
 
     def _run_chunk(index: int, clause_chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
