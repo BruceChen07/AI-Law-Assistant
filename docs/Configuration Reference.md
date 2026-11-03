@@ -66,8 +66,20 @@ This document explains the configuration fields in `app/config.example.json`.
 | `device` | string | Runtime device (`cpu` / `cuda`). |
 | `formula` | bool | Enable formula parsing. |
 | `table` | bool | Enable table parsing. |
-| `model_source` | string | Model source platform. |
-| `model_source_fallback_enabled` | bool | Enable automatic fallback from Hugging Face to ModelScope on network failure. |
+| `model_source` | string | Model source: `huggingface`, `modelscope`, or `local`. `local` reads models only from `local_models_dir` and never contacts a model hub. |
+| `local_models_dir` | string | Local model root (default `../models/mineru`), resolved relative to the config file. Holds `pipeline/`, `vlm/`, `mineru.json`, `manifest.json`. |
+| `local_config_path` | string | Optional explicit MinerU tool config path. Empty means `<local_models_dir>/mineru.json`. |
+| `auto_download_on_startup` | bool | On service start, download missing models into `local_models_dir` when `model_source=local`. |
+| `auto_download_background` | bool | Run the startup download in a background thread instead of blocking startup. |
+| `download_source` | string | Primary hub for the startup download (`modelscope` / `huggingface`). |
+| `download_source_fallback` | string | Source used when the primary hub fails. Leave empty for strictly offline hosts. |
+| `download_endpoints` | object | Base URLs per source, e.g. `{"modelscope": "https://www.modelscope.cn"}`. |
+| `download_max_workers` | int | Parallel file download workers. |
+| `download_retries` | int | Per-file retry count for download/integrity failures. |
+| `download_retry_backoff_sec` | int | Base backoff between retries (multiplied by attempt number). |
+| `download_revisions` | object | Per-source git revision, e.g. `{"modelscope": "master"}`. |
+| `download_patterns` | object | File globs per kind, e.g. `{"pipeline": ["models/OCR/*"]}`. Defaults match MinerU 3.x layout. |
+| `model_source_fallback_enabled` | bool | Enable automatic fallback from Hugging Face to ModelScope on network failure. Ignored when `model_source=local`. |
 | `fallback_model_source` | string | Fallback model source, typically `modelscope`. |
 | `hf_retry_count` | int | Additional retry count before switching away from Hugging Face. |
 | `hf_connect_timeout_sec` | int | Hugging Face metadata/connect timeout passed via environment. |
