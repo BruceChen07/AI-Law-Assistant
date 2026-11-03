@@ -1,6 +1,8 @@
-﻿import hashlib
+import hashlib
 import json
+import sys
 import threading
+import types
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -8,6 +10,7 @@ from urllib.parse import unquote, urlparse
 import pytest
 
 from app.core import mineru_models as mm
+from app.core import mineru_ocr
 from app.core.mineru_ocr import _build_mineru_subprocess_env
 
 
@@ -217,7 +220,6 @@ def test_local_model_source_is_preserved(tmp_path):
     assert env["MINERU_TOOLS_CONFIG_JSON"].endswith("mineru.json")
 
 
-
 def test_local_source_sets_mineru_tools_config_env(tmp_path):
     mineru_cfg = {
         "model_source": "local",
@@ -228,3 +230,41 @@ def test_local_source_sets_mineru_tools_config_env(tmp_path):
 
     assert env["MINERU_MODEL_SOURCE"] == "local"
     assert env["MINERU_TOOLS_CONFIG_JSON"].endswith("mineru.json")
+
+
+class _FakeTorch:
+    def __init__(self, cuda_available: bool):
+        self.__version__ = "fake+cpu" if not cuda_available else "fake+cuda"
+        self.cuda = types.SimpleNamespace(is_available=lambda: cuda_available)
+
+
+def _patch_gpu_probe(monkeypatch, cuda_available: bool) -> None:
+    monkeypatch.setattr(mineru_ocr.shutil, "which", lambda name: "nvidia-smi.exe")
+    monkeypatch.setattr(
+        mineru_ocr, "_run_cmd_text",
+        lambda cmd, timeout=8: "GPU 0: NVIDIA GeForce RTX 3060 (UUID: GPU-x)")
+    monkeypatch.setitem(sys.modules, "torch", _FakeTorch(cuda_available))
+
+
+def test_detect_gpu_requires_torch_cuda(monkeypatch):
+    _patch_gpu_probe(monkeypatch, cuda_available=False)
+
+    assert mineru_ocr._detect_gpu() is False
+
+
+def test_detect_gpu_true_when_torch_cuda_available(monkeypatch):
+    _patch_gpu_probe(monkeypatch, cuda_available=True)
+
+    assert mineru_ocr._detect_gpu() is True
+
+
+def test_auto_backend_falls_back_to_pipeline_on_cpu_torch(monkeypatch):
+    _patch_gpu_probe(monkeypatch, cuda_available=False)
+    capabilities = {
+        "has_gpu": mineru_ocr._detect_gpu(),
+        "supported_backends": ["pipeline", "hybrid-auto-engine"],
+    }
+
+    chosen = mineru_ocr.resolve_mineru_backend({"mode": "auto"}, capabilities)
+
+    assert chosen == "pipeline"

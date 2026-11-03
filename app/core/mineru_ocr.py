@@ -189,13 +189,35 @@ def _run_cmd_text(cmd: List[str], timeout: int = 8) -> str:
 
 
 def _detect_gpu() -> bool:
+    """判断 MinerU 是否真的能用 GPU 推理。
+
+    仅有 ``nvidia-smi`` 说明装了驱动，不代表当前解释器的 torch 带 CUDA；
+    CPU 版 torch 配独显是本项目的常见组合，此时必须走 pipeline 后端。
+    """
     if not shutil.which("nvidia-smi"):
         return False
     try:
         out = _run_cmd_text(["nvidia-smi", "-L"], timeout=5)
-        return bool(out.strip()) and "gpu" in out.lower()
     except Exception:
         return False
+    if not out.strip() or "gpu" not in out.lower():
+        return False
+    try:
+        import torch
+    except Exception:
+        logger.warning("mineru_gpu_probe_torch_missing driver_present=True")
+        return False
+    try:
+        available = bool(torch.cuda.is_available())
+    except Exception:
+        logger.warning("mineru_gpu_probe_torch_error", exc_info=True)
+        return False
+    if not available:
+        logger.info(
+            "mineru_gpu_probe driver_present=True torch_cuda=False torch=%s",
+            getattr(torch, "__version__", ""),
+        )
+    return available
 
 
 def _probe_supported_backends() -> List[str]:
