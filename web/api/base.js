@@ -1,5 +1,29 @@
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001"
 
+const LONG_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
+const CONTRACT_AUDIT_TIMEOUT_MS = 60 * 60 * 1000
+
+function fetchWithOptionalTimeout(url, options) {
+  const { timeoutMs, ...fetchOptions } = options || {}
+  const budgetMs = Number(timeoutMs)
+  if (!(budgetMs > 0)) return fetch(url, fetchOptions)
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), budgetMs)
+  return fetch(url, { ...fetchOptions, signal: controller.signal }).finally(() => clearTimeout(timer))
+}
+
+export function getLongRequestTimeoutMs(timeoutSec) {
+  const seconds = Number(timeoutSec)
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.max(LONG_REQUEST_TIMEOUT_MS, seconds * 1000 + 5000)
+  }
+  return LONG_REQUEST_TIMEOUT_MS
+}
+
+export function getContractAuditTimeoutMs() {
+  return CONTRACT_AUDIT_TIMEOUT_MS
+}
+
 export function getToken() {
   return localStorage.getItem("token")
 }
@@ -75,7 +99,7 @@ export async function ensureOk(res) {
 
 export async function requestJson(url, options) {
   try {
-    const res = await fetch(url, options)
+    const res = await fetchWithOptionalTimeout(url, options)
     await ensureOk(res)
     return res.json()
   } catch (err) {
@@ -93,7 +117,7 @@ export async function requestJson(url, options) {
 
 export async function requestBlob(url, options) {
   try {
-    const res = await fetch(url, options)
+    const res = await fetchWithOptionalTimeout(url, options)
     await ensureOk(res)
     return res.blob()
   } catch (err) {
@@ -127,7 +151,9 @@ function parseContentDispositionFilename(value) {
 
 export async function requestBlobResponse(url, options) {
   try {
-    const res = await fetch(url, options)
+    const requestOptions = { ...(options || {}) }
+    delete requestOptions.returnResponseMeta
+    const res = await fetchWithOptionalTimeout(url, requestOptions)
     await ensureOk(res)
     const blob = await res.blob()
     const contentDisposition = String(res.headers.get("content-disposition") || "")

@@ -14,6 +14,7 @@ const APP_LANG_STORAGE_KEY = "ui_lang"
 const AUDIT_PROGRESS_STARTUP_GRACE_MS = 6000
 const RISK_LOCATE_STRONG_CONFIDENCE = 0.78
 const RISK_LOCATE_OVERRIDE_DELTA = 0.12
+const ADMIN_TABS = new Set(["stats", "documents", "users", "prompts", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
@@ -116,7 +117,9 @@ export default function App() {
   const initialUserRef = useRef(getCurrentUser())
   const restoredAuditRef = useRef(loadCurrentAuditSnapshot(initialUserRef.current))
   const restoredAudit = restoredAuditRef.current.snapshot
-  const [view, setView] = useState("main")
+  const initialRouteRef = useRef(readRouteFromHash())
+  const [view, setView] = useState(initialRouteRef.current.view)
+  const [adminTab, setAdminTab] = useState(initialRouteRef.current.adminTab)
   const [user, setUser] = useState(initialUserRef.current)
 
   useEffect(() => {
@@ -180,8 +183,11 @@ export default function App() {
   const [activeRiskIndex, setActiveRiskIndex] = useState(() => Number.isFinite(Number(restoredAudit?.activeRiskIndex)) ? Number(restoredAudit.activeRiskIndex) : -1)
   const [riskFilter, setRiskFilter] = useState(() => restoredAudit?.riskFilter || "all")
   const [expandedEvidence, setExpandedEvidence] = useState(() => restoredAudit?.expandedEvidence || {})
+  const [showEvidence, setShowEvidence] = useState(false)
   const [contractProgress, setContractProgress] = useState(() => Number(restoredAudit?.contractProgress || 0) || 0)
   const [contractProgressStage, setContractProgressStage] = useState(() => restoredAudit?.contractProgressStage || "working")
+  const [contractProgressMessage, setContractProgressMessage] = useState("")
+  const [contractProgressDetail, setContractProgressDetail] = useState(null)
   const [exportingFormat, setExportingFormat] = useState(() => restoredAudit?.exportingFormat || "")
   const [sourceDownloading, setSourceDownloading] = useState(() => !!restoredAudit?.sourceDownloading)
   const [exportError, setExportError] = useState(() => restoredAudit?.exportError || "")
@@ -205,6 +211,7 @@ export default function App() {
   const previewLastBlockByPageRef = useRef({})
   const previewFailedPagesRef = useRef({})
   const previewLoadingPagesRef = useRef({})
+  const auditProgressTimerRef = useRef(null)
   const previewRequestSeqRef = useRef(0)
   const summaryRequestSeqRef = useRef(0)
   const summaryLoadedDocumentIdRef = useRef(
@@ -269,26 +276,6 @@ export default function App() {
     const name = String(filename || "").trim()
     if (!name) return ""
     return name.replace(/\.[^.]+$/, "")
-  }
-  const buildExportFallbackName = (format, mode = "report") => {
-    const ext = String(format || "json").toLowerCase() === "docx" ? "docx" : "json"
-    const sourceName = String(
-      contractResult?.overview?.contract_filename || contractFile?.name || contract?.title || "contract"
-    ).trim()
-    const baseName = toContractTitle(sourceName) || "contract"
-    const now = new Date()
-    const pad = (value) => String(value).padStart(2, "0")
-    const timestamp = [
-      now.getFullYear(),
-      pad(now.getMonth() + 1),
-      pad(now.getDate())
-    ].join("") + "_" + [
-      pad(now.getHours()),
-      pad(now.getMinutes()),
-      pad(now.getSeconds())
-    ].join("")
-    const suffix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
-    return `${baseName}_${timestamp}_${suffix}.${ext}`
   }
   const riskList = useMemo(() => (
     Array.isArray(contractResult?.risks) ? contractResult.risks : []
@@ -371,8 +358,8 @@ export default function App() {
     Array.isArray(auditLegalValidation?.issues) ? auditLegalValidation.issues.filter((item) => item && typeof item === "object") : []
   ), [auditLegalValidation])
   const auditIncomplete = useMemo(() => {
-    if (Boolean(contractResult?.audit_incomplete)) return true
-    if (Boolean(contractMeta?.audit_incomplete)) return true
+    if (contractResult?.audit_incomplete) return true
+    if (contractMeta?.audit_incomplete) return true
     if (auditLegalValidation && auditLegalValidation.ok === false && auditIncompleteIssues.length > 0) return true
     return false
   }, [auditIncompleteIssues.length, auditLegalValidation, contractMeta?.audit_incomplete, contractResult?.audit_incomplete])
@@ -448,6 +435,36 @@ export default function App() {
   const currentSourceIsPdf = currentSourceMime === "application/pdf" || currentSourceExt === ".pdf"
   const digitizedExportLabel = currentSourceIsPdf ? t.exportDigitizedDocxPlain : t.exportDigitizedDocx
   const commentedExportLabel = currentSourceIsPdf ? t.exportCommentedDigitizedDocx : t.exportCommentedDocx
+  const clearAuditProgressPolling = () => {
+    if (auditProgressTimerRef.current) {
+      clearInterval(auditProgressTimerRef.current)
+      auditProgressTimerRef.current = null
+    }
+  }
+
+  const applyServerAuditProgress = (payload) => {
+    if (!payload || typeof payload !== "object") return
+    const nextProgress = Math.max(0, Math.min(100, Number(payload.progress) || 0))
+    setContractProgress(nextProgress)
+    setContractProgressStage(String(payload.stage || "working"))
+    setContractProgressMessage(String(payload.message || ""))
+    setContractProgressDetail(payload.detail && typeof payload.detail === "object" ? payload.detail : null)
+  }
+
+  const startAuditProgressPolling = (auditId) => {
+    clearAuditProgressPolling()
+    if (!auditId) return
+    const pollOnce = async () => {
+      try {
+        const payload = await getAuditProgress(auditId)
+        applyServerAuditProgress(payload)
+      } catch {
+        // The main audit request owns user-facing errors; polling is best effort.
+      }
+    }
+    void pollOnce()
+    auditProgressTimerRef.current = setInterval(pollOnce, 1000)
+  }
   const digitizationStatusLabel = ({
     done: t.digitizationStatusDone,
     failed: t.digitizationStatusFailed,
@@ -1605,7 +1622,15 @@ export default function App() {
   const canOpenAdmin = user.role === "admin" || user.username === "admin"
 
   if (view === "admin") {
-    return <Admin lang={uiLang} onLangChange={onUiLanguageChange} onBack={() => setView("main")} />
+    return (
+      <Admin
+        lang={uiLang}
+        onLangChange={onUiLanguageChange}
+        onBack={() => setView("main")}
+        tab={adminTab}
+        onTabChange={setAdminTab}
+      />
+    )
   }
 
   return (
@@ -1778,7 +1803,7 @@ export default function App() {
               {t.startNewTask}
             </button>
           </div>
-          {contractLoading && (
+          {showAuditProgress && (
             <div className="audit-progress">
               <div className="audit-progress-head">
                 <span>{t.progressTitle}</span>
