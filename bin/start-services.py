@@ -237,6 +237,7 @@ def write_runtime_snapshot(
         "launcher_pid": os.getpid(),
         "backend_pid": None,
         "frontend_pid": None,
+        "llamacpp_pid": None,
         "backend_port": backend_port,
         "frontend_port": frontend_port,
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -244,6 +245,7 @@ def write_runtime_snapshot(
         "launcher_log": str(dated_log_dir / "launcher.log"),
         "backend_log": "",
         "frontend_log": "",
+        "llamacpp_log": "",
     }
     for service in services:
         current_pid = service.process.pid if service.process else None
@@ -254,6 +256,9 @@ def write_runtime_snapshot(
         elif service.name == "frontend":
             payload["frontend_pid"] = current_pid
             payload["frontend_log"] = current_log
+        elif service.name == "llamacpp":
+            payload["llamacpp_pid"] = current_pid
+            payload["llamacpp_log"] = current_log
     write_pid_file(pid_file, payload)
 
 
@@ -424,6 +429,34 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_STATUS_INTERVAL,
         help="Seconds between runtime status reports.",
     )
+    parser.add_argument(
+        "--skip-llamacpp",
+        action="store_true",
+        help="Skip starting llama.cpp server (use only if it is already running).",
+    )
+    parser.add_argument(
+        "--llamacpp-host",
+        default="127.0.0.1",
+        help="llama.cpp server host (default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--llamacpp-port",
+        type=int,
+        default=18080,
+        help="llama.cpp server port (default: 18080).",
+    )
+    parser.add_argument(
+        "--llamacpp-threads",
+        type=int,
+        default=None,
+        help="llama.cpp inference threads (default: CPU cores - 2).",
+    )
+    parser.add_argument(
+        "--llamacpp-ctx-size",
+        type=int,
+        default=16384,
+        help="llama.cpp context window size.",
+    )
     return parser.parse_args()
 
 
@@ -540,6 +573,8 @@ def main() -> int:
     dated_log_dir = repo_root / "logs" / "services" / \
         datetime.now().strftime("%Y-%m-%d")
     logger = configure_logger(dated_log_dir)
+    log_dir = runtime_dir / "logs"
+    models_dir = repo_root / "models" / "llm"
     existing = load_pid_file(pid_file)
 
     if existing:
@@ -556,7 +591,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Step 1: Start llama.cpp (unless skipped or not configured)
     # ------------------------------------------------------------------
-    llamacpp_pid = None
+    llamacpp_service: ServiceProcess | None = None
     cfg = _read_config(repo_root)
 
     if args.skip_llamacpp:
@@ -565,7 +600,7 @@ def main() -> int:
         server_exe = _find_llamacpp_executable(repo_root)
         if not server_exe:
             print("[WARN] llama-server.exe not found. Skipping llama.cpp startup.")
-            print("       Install llama.cpp or pass --skip-llamacpp to continue.")
+            print("       Install llama.cpp so that third_party/llama.cpp/bin-win-cpu-x64/llama-server.exe exists.")
         elif _llamacpp_ready(args.llamacpp_host, args.llamacpp_port):
             print(
                 f"[OK] llama.cpp already running at {args.llamacpp_host}:{args.llamacpp_port}")
@@ -605,20 +640,22 @@ def main() -> int:
                     print(
                         f"  Host:  http://{args.llamacpp_host}:{args.llamacpp_port}")
                     print(f"  Alias: {selected.stem}")
-                    llamacpp_proc = start_process(
-                        cmd, repo_root, os.environ, llamacpp_log)
-                    llamacpp_pid = llamacpp_proc.pid
-                    print(f"  PID: {llamacpp_pid}")
+                    llamacpp_service = ServiceProcess(
+                        name="llamacpp",
+                        cmd=cmd,
+                        cwd=repo_root,
+                        env=os.environ.copy(),
+                        port=args.llamacpp_port,
+                        health_url=f"http://{args.llamacpp_host}:{args.llamacpp_port}/health",
+                        log_path=llamacpp_log,
+                    )
+                    llamacpp_service.spawn(logger)
+                    print(f"  PID: {llamacpp_service.process.pid}")
                     print(f"  Log: {llamacpp_log}")
                     print("  Waiting for server to be ready ...",
                           end=" ", flush=True)
-                    deadline = time.time() + 300
-                    ready = False
-                    while time.time() <= deadline:
-                        if _llamacpp_ready(args.llamacpp_host, args.llamacpp_port):
-                            ready = True
-                            break
-                        time.sleep(2)
+                    ready = wait_for_service_ready(
+                        llamacpp_service, 300, logger)
                     print("READY" if ready else "TIMEOUT")
                     if not ready:
                         print(
@@ -654,36 +691,40 @@ def main() -> int:
         "VITE_API_BASE", f"http://127.0.0.1:{args.backend_port}")
     logger.info("frontend_api_base=%s", frontend_env["VITE_API_BASE"])
 
+    backend_service = ServiceProcess(
+        name="backend",
+        cmd=[backend_python, "-m", "app.main"],
+        cwd=repo_root,
+        env=backend_env,
+        port=args.backend_port,
+        health_url=f"http://127.0.0.1:{args.backend_port}/health",
+        log_path=dated_log_dir / "backend.log",
+    )
+    frontend_service = ServiceProcess(
+        name="frontend",
+        cmd=[npm_exe, "run", "dev", "--", "--host",
+             "0.0.0.0", "--port", str(args.frontend_port)],
+        cwd=web_root,
+        env=frontend_env,
+        port=args.frontend_port,
+        health_url=f"http://127.0.0.1:{args.frontend_port}",
+        log_path=dated_log_dir / "frontend.log",
+    )
     services = [
-        ServiceProcess(
-            name="backend",
-            cmd=[backend_python, "-m", "app.main"],
-            cwd=repo_root,
-            env=backend_env,
-            port=args.backend_port,
-            health_url=f"http://127.0.0.1:{args.backend_port}/health",
-            log_path=dated_log_dir / "backend.log",
-        ),
-        ServiceProcess(
-            name="frontend",
-            cmd=[npm_exe, "run", "dev", "--", "--host",
-                 "0.0.0.0", "--port", str(args.frontend_port)],
-            cwd=web_root,
-            env=frontend_env,
-            port=args.frontend_port,
-            health_url=f"http://127.0.0.1:{args.frontend_port}",
-            log_path=dated_log_dir / "frontend.log",
-        ),
+        service
+        for service in (llamacpp_service, backend_service, frontend_service)
+        if service is not None
     ]
 
     try:
-        backend_service = services[0]
-        frontend_service = services[1]
-
         backend_service.spawn(logger)
         write_runtime_snapshot(
             pid_file,
-            services=[backend_service],
+            services=[
+                service
+                for service in (llamacpp_service, backend_service)
+                if service is not None
+            ],
             backend_port=args.backend_port,
             frontend_port=args.frontend_port,
             dated_log_dir=dated_log_dir,
