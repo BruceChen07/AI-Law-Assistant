@@ -80,6 +80,13 @@ def _build_preview_clauses(text: str):
     return build_preview_clauses(text)
 
 
+def _should_build_preview_manifest(cfg: Dict[str, Any]) -> bool:
+    """审计阶段是否构建预览清单（会触发 MinerU 版面坐标抽取）。"""
+    preview_cfg = cfg.get("contract_preview") if isinstance(
+        cfg.get("contract_preview"), dict) else {}
+    return bool(preview_cfg.get("audit_build_manifest", True))
+
+
 def _attach_risk_locations(audit, clauses, preview_manifest=None):
     return attach_risk_locations(audit, clauses, preview_manifest=preview_manifest)
 
@@ -2530,7 +2537,9 @@ def audit_contract(
     preview_clauses = build_preview_clauses(text)
     preview_manifest = None
     preview_source_path = str(preview_file_path or file_path or "").strip()
-    if preview_source_path:
+    # 构建预览清单会调用 MinerU 生成版面坐标（首次数十秒）。CPU 部署可在
+    # contract_preview.audit_build_manifest=false 时跳过，改由打开预览时按需生成。
+    if preview_source_path and _should_build_preview_manifest(cfg):
         try:
             preview_manifest = build_contract_preview_manifest(
                 cfg=cfg,
@@ -2544,6 +2553,11 @@ def audit_contract(
                 audit_id,
                 preview_source_path,
             )
+    elif preview_source_path:
+        logger.info(
+            "audit_preview_manifest_skipped audit_id=%s reason=config audit_build_manifest=false",
+            audit_id,
+        )
     logger.info(
         "audit_extract_done",
         file=file_path,
