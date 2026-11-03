@@ -1,8 +1,12 @@
-import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetOllamaModels, adminGetLlamaCppModels, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import SkillManager from "./SkillManager"
 import { adminI18n } from "./i18n/adminI18n"
+
+const ADMIN_TABS = new Set(["stats", "documents", "users", "prompts", "model", "skills", "regulations", "token-monitor", "llm-traces"])
+const OLLAMA_MODEL_STORAGE_KEY = "admin.selectedOllamaModel"
+const LLAMACPP_MODEL_STORAGE_KEY = "admin.selectedLlamaCppModel"
 
 const createEmptyPromptForm = () => ({
   prompt_key: "",
@@ -49,8 +53,15 @@ const BUILTIN_PROMPT_LABELS = {
   }
 }
 
-export default function Admin({ onBack, lang, onLangChange }) {
-  const [tab, setTab] = useState("documents")
+export default function Admin({ onBack, lang, onLangChange, tab: externalTab, onTabChange }) {
+  const [tab, setTab] = useState(() => (ADMIN_TABS.has(externalTab) ? externalTab : "documents"))
+  useEffect(() => {
+    if (!ADMIN_TABS.has(externalTab)) return
+    setTab(prev => (prev === externalTab ? prev : externalTab))
+  }, [externalTab])
+  useEffect(() => {
+    if (typeof onTabChange === "function") onTabChange(tab)
+  }, [tab, onTabChange])
   const [documents, setDocuments] = useState([])
   const [users, setUsers] = useState([])
   const [stats, setStats] = useState(null)
@@ -66,6 +77,8 @@ export default function Admin({ onBack, lang, onLangChange }) {
   const [llmTestResult, setLlmTestResult] = useState("")
   const [llmTestError, setLlmTestError] = useState("")
   const [llmTesting, setLlmTesting] = useState(false)
+  const [llmSaving, setLlmSaving] = useState(false)
+  const showLegacyOllamaTools = false
   const [ollamaModels, setOllamaModels] = useState([])
   const [ollamaModelsLoading, setOllamaModelsLoading] = useState(false)
   const [ollamaModelsError, setOllamaModelsError] = useState("")
@@ -464,6 +477,223 @@ export default function Admin({ onBack, lang, onLangChange }) {
       setLoading(false)
     }
   }
+
+  const readRememberedOllamaModel = () => {
+    try {
+      return localStorage.getItem(OLLAMA_MODEL_STORAGE_KEY) || ""
+    } catch {
+      return ""
+    }
+  }
+
+  const readRememberedLlamaCppModel = () => {
+    try {
+      return localStorage.getItem(LLAMACPP_MODEL_STORAGE_KEY) || ""
+    } catch {
+      return ""
+    }
+  }
+
+  const rememberOllamaModel = (modelName) => {
+    try {
+      if (modelName) localStorage.setItem(OLLAMA_MODEL_STORAGE_KEY, modelName)
+    } catch {}
+  }
+
+  const rememberLlamaCppModel = (modelName) => {
+    try {
+      if (modelName) localStorage.setItem(LLAMACPP_MODEL_STORAGE_KEY, modelName)
+    } catch {}
+  }
+
+  const persistLLMConfig = async (nextConfig) => {
+    if (!nextConfig) return null
+    const saved = await adminUpdateLLMConfig({
+      provider: nextConfig.provider,
+      api_base: nextConfig.api_base,
+      api_key: nextConfig.api_key || "",
+      model: nextConfig.model,
+      temperature: Number(nextConfig.temperature ?? 0.2),
+      max_tokens: Number(nextConfig.max_tokens ?? 2048),
+      timeout: Number(nextConfig.timeout ?? 60),
+      headers: nextConfig.headers || {}
+    })
+    setLlmConfig(prev => prev ? {
+      ...prev,
+      ...nextConfig,
+      provider: saved.provider || nextConfig.provider,
+      api_base: saved.api_base || nextConfig.api_base,
+      model: saved.model || nextConfig.model
+    } : nextConfig)
+    return saved
+  }
+
+  const loadOllamaModels = async (forceRefresh = false) => {
+    setOllamaModelsLoading(true)
+    try {
+      const data = await adminGetOllamaModels(forceRefresh ? { force_refresh: "true" } : {})
+      const models = Array.isArray(data.models) ? data.models : []
+      setOllamaModels(models)
+      setOllamaMeta({
+        host: data.host || "http://127.0.0.1:11434",
+        cached: !!data.cached,
+        stale: !!data.stale,
+        current_model: data.current_model || "",
+        recommended_model: data.recommended_model || "",
+        cached_at: data.cached_at || "",
+        expires_at: data.expires_at || ""
+      })
+      setOllamaModelsError(data.error || "")
+      const names = models.map(item => item.name || item.model).filter(Boolean)
+      const remembered = readRememberedOllamaModel()
+      const fallbackModel = names.includes(remembered)
+        ? remembered
+        : names.includes(data.current_model)
+          ? data.current_model
+          : names.includes(data.recommended_model)
+            ? data.recommended_model
+            : ""
+      if (fallbackModel) {
+        setLlmConfig(prev => {
+          if (!prev) return prev
+          const currentModel = String(prev.model || "")
+          if (prev.provider === "ollama" && names.includes(currentModel)) return prev
+          return {
+            ...prev,
+            provider: "ollama",
+            api_base: `${(data.host || "http://127.0.0.1:11434").replace(/\/$/, "")}/v1`,
+            api_key: "",
+            model: fallbackModel
+          }
+        })
+      }
+    } catch (err) {
+      setOllamaModels([])
+      setOllamaModelsError(err.message)
+    } finally {
+      setOllamaModelsLoading(false)
+    }
+  }
+
+  const applyOllamaModel = async (modelName) => {
+    if (!llmConfig || !modelName) return
+    const nextConfig = {
+      ...llmConfig,
+      provider: "ollama",
+      api_base: `${String(ollamaMeta.host || "http://127.0.0.1:11434").replace(/\/$/, "")}/v1`,
+      api_key: "",
+      model: modelName
+    }
+    setLlmSaving(true)
+    setLlmError("")
+    rememberOllamaModel(modelName)
+    try {
+      await persistLLMConfig(nextConfig)
+      setLlmError(t.saved)
+    } catch (err) {
+      setLlmError(err.message)
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
+  const loadLlamaCppModels = async (forceRefresh = false) => {
+    setLlamaCppModelsLoading(true)
+    try {
+      const data = await adminGetLlamaCppModels(forceRefresh ? { force_refresh: "true" } : {})
+      const models = Array.isArray(data.models) ? data.models : []
+      setLlamaCppModels(models)
+      setLlamaCppMeta({
+        host: data.host || "http://127.0.0.1:18080",
+        cached: !!data.cached,
+        stale: !!data.stale,
+        current_model: data.current_model || "",
+        recommended_model: data.recommended_model || "",
+        cached_at: data.cached_at || "",
+        expires_at: data.expires_at || ""
+      })
+      setLlamaCppModelsError(data.error || "")
+      const names = models.map(item => item.name || item.model).filter(Boolean)
+      const remembered = readRememberedLlamaCppModel()
+      const fallbackModel = names.includes(remembered)
+        ? remembered
+        : names.includes(data.current_model)
+          ? data.current_model
+          : names.includes(data.recommended_model)
+            ? data.recommended_model
+            : ""
+      if (fallbackModel) {
+        setLlmConfig(prev => {
+          if (!prev) return prev
+          const currentModel = String(prev.model || "")
+          if (prev.provider === "llama_cpp" && names.includes(currentModel)) return prev
+          if (prev.provider !== "llama_cpp" && prev.model) return prev
+          return {
+            ...prev,
+            api_base: `${String(data.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
+            model: fallbackModel
+          }
+        })
+      }
+    } catch (err) {
+      setLlamaCppModels([])
+      setLlamaCppModelsError(err.message)
+    } finally {
+      setLlamaCppModelsLoading(false)
+    }
+  }
+
+  const applyLlamaCppModel = async (modelName) => {
+    if (!llmConfig || !modelName) return
+    const nextConfig = {
+      ...llmConfig,
+      provider: "llama_cpp",
+      api_base: `${String(llamaCppMeta.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
+      api_key: "",
+      model: modelName
+    }
+    setLlmSaving(true)
+    setLlmError("")
+    rememberLlamaCppModel(modelName)
+    try {
+      await persistLLMConfig(nextConfig)
+      setLlmError(t.saved)
+    } catch (err) {
+      setLlmError(err.message)
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
+  const filteredOllamaModels = useMemo(() => {
+    const keyword = String(ollamaSearch || "").trim().toLowerCase()
+    if (!keyword) return ollamaModels
+    return ollamaModels.filter(item => {
+      const haystack = [
+        item.name,
+        item.model,
+        item.parameter_size,
+        item.family,
+        Array.isArray(item.capabilities) ? item.capabilities.join(" ") : ""
+      ].join(" ").toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [ollamaModels, ollamaSearch])
+
+  const filteredLlamaCppModels = useMemo(() => {
+    const keyword = String(llamaCppSearch || "").trim().toLowerCase()
+    if (!keyword) return llamaCppModels
+    return llamaCppModels.filter(item => {
+      const haystack = [
+        item.name,
+        item.model,
+        item.owner,
+        item.family,
+        item.quantization_level
+      ].join(" ").toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [llamaCppModels, llamaCppSearch])
 
   const loadUIConfig = async () => {
     try {

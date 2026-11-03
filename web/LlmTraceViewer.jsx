@@ -22,10 +22,6 @@ function formatDate(iso, lang = "zh") {
   } catch { return iso }
 }
 
-function dedupeTags(list) {
-  return [...new Set(list.filter(Boolean))]
-}
-
 export default function LlmTraceViewer({ lang }) {
   const t = lang === "en" ? {
     title: "LLM Trace Viewer",
@@ -204,9 +200,6 @@ export default function LlmTraceViewer({ lang }) {
   const handleReset = () => {
     setFilters({ model_name: "", status: "", audit_id: "", date_from: "", date_to: "", stage: "" })
   }
-
-  const stages = useMemo(() => dedupeTags(traces.map(r => r.stage)), [traces])
-  const models = useMemo(() => dedupeTags(traces.map(r => r.model_name)), [traces])
 
   return (
     <div className="llm-trace-viewer">

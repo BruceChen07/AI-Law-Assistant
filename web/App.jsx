@@ -14,6 +14,7 @@ const APP_LANG_STORAGE_KEY = "ui_lang"
 const AUDIT_PROGRESS_STARTUP_GRACE_MS = 6000
 const RISK_LOCATE_STRONG_CONFIDENCE = 0.78
 const RISK_LOCATE_OVERRIDE_DELTA = 0.12
+const ADMIN_TABS = new Set(["stats", "documents", "users", "prompts", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
@@ -114,9 +115,12 @@ export function resolveRiskLocateTarget({ risk, previewPages, pickHighlight }) {
 
 export default function App() {
   const initialUserRef = useRef(getCurrentUser())
+  const initialRouteRef = useRef(readRouteFromHash())
   const restoredAuditRef = useRef(loadCurrentAuditSnapshot(initialUserRef.current))
   const restoredAudit = restoredAuditRef.current.snapshot
-  const [view, setView] = useState("main")
+  const auditProgressTimerRef = useRef(null)
+  const [view, setView] = useState(initialRouteRef.current.view)
+  const [adminTab, setAdminTab] = useState(initialRouteRef.current.adminTab)
   const [user, setUser] = useState(initialUserRef.current)
 
   useEffect(() => {
@@ -182,6 +186,9 @@ export default function App() {
   const [expandedEvidence, setExpandedEvidence] = useState(() => restoredAudit?.expandedEvidence || {})
   const [contractProgress, setContractProgress] = useState(() => Number(restoredAudit?.contractProgress || 0) || 0)
   const [contractProgressStage, setContractProgressStage] = useState(() => restoredAudit?.contractProgressStage || "working")
+  const [contractProgressMessage, setContractProgressMessage] = useState("")
+  const [contractProgressDetail, setContractProgressDetail] = useState(null)
+  const [showEvidence, setShowEvidence] = useState(false)
   const [exportingFormat, setExportingFormat] = useState(() => restoredAudit?.exportingFormat || "")
   const [sourceDownloading, setSourceDownloading] = useState(() => !!restoredAudit?.sourceDownloading)
   const [exportError, setExportError] = useState(() => restoredAudit?.exportError || "")
@@ -371,8 +378,8 @@ export default function App() {
     Array.isArray(auditLegalValidation?.issues) ? auditLegalValidation.issues.filter((item) => item && typeof item === "object") : []
   ), [auditLegalValidation])
   const auditIncomplete = useMemo(() => {
-    if (Boolean(contractResult?.audit_incomplete)) return true
-    if (Boolean(contractMeta?.audit_incomplete)) return true
+    if (contractResult?.audit_incomplete) return true
+    if (contractMeta?.audit_incomplete) return true
     if (auditLegalValidation && auditLegalValidation.ok === false && auditIncompleteIssues.length > 0) return true
     return false
   }, [auditIncompleteIssues.length, auditLegalValidation, contractMeta?.audit_incomplete, contractResult?.audit_incomplete])
@@ -473,6 +480,37 @@ export default function App() {
     const next = Math.max(0, Math.min(100, Number(percent) || 0))
     setContractProgress((p) => Math.max(p, next))
     if (stage) setContractProgressStage(stage)
+  }
+
+  const clearAuditProgressPolling = () => {
+    if (auditProgressTimerRef.current) {
+      clearInterval(auditProgressTimerRef.current)
+      auditProgressTimerRef.current = null
+    }
+  }
+
+  const applyServerAuditProgress = (payload) => {
+    if (!payload || typeof payload !== "object") return
+    const nextProgress = Math.max(0, Math.min(100, Number(payload.progress) || 0))
+    setContractProgress(nextProgress)
+    setContractProgressStage(String(payload.stage || "working"))
+    setContractProgressMessage(String(payload.message || ""))
+    setContractProgressDetail(payload.detail && typeof payload.detail === "object" ? payload.detail : null)
+  }
+
+  const startAuditProgressPolling = (auditId) => {
+    clearAuditProgressPolling()
+    if (!auditId) return
+    const pollOnce = async () => {
+      try {
+        const payload = await getAuditProgress(auditId)
+        applyServerAuditProgress(payload)
+      } catch {
+        // Ignore transient polling errors while the main audit request is still running.
+      }
+    }
+    pollOnce()
+    auditProgressTimerRef.current = setInterval(pollOnce, 1000)
   }
 
   const refreshSnapshotHistory = (targetUser = user) => {
@@ -1515,13 +1553,8 @@ export default function App() {
         throw new Error(t.exportFailed)
       }
       const ext = fmt === "docx" ? "docx" : "json"
-      const prefix = mode === "comments"
-        ? "contract_with_comments"
-        : mode === "digitized_source"
-          ? "contract_digitized_source"
-          : "contract_audit_report"
       const responseFilename = String(response?.filename || "").trim()
-      downloadBlobFile(blob, responseFilename || `${prefix}_${documentId}.${ext}`)
+      downloadBlobFile(blob, responseFilename || buildExportFallbackName(fmt, mode) || `contract_${documentId}.${ext}`)
     } catch (err) {
       setExportError(String(err?.message || err || t.exportFailed))
     } finally {
@@ -1605,7 +1638,7 @@ export default function App() {
   const canOpenAdmin = user.role === "admin" || user.username === "admin"
 
   if (view === "admin") {
-    return <Admin lang={uiLang} onLangChange={onUiLanguageChange} onBack={() => setView("main")} />
+    return <Admin lang={uiLang} onLangChange={onUiLanguageChange} tab={adminTab} onTabChange={setAdminTab} onBack={() => setView("main")} />
   }
 
   return (
@@ -1778,7 +1811,7 @@ export default function App() {
               {t.startNewTask}
             </button>
           </div>
-          {contractLoading && (
+          {showAuditProgress && (
             <div className="audit-progress">
               <div className="audit-progress-head">
                 <span>{t.progressTitle}</span>
