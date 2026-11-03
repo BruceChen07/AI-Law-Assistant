@@ -97,3 +97,52 @@ llama-server.exe --ctx-size 8192 --parallel 1 --cache-reuse 256 --n-gpu-layers 0
 1. **输出长度**：12 次调用平均只生成 162 tokens，`classic_audit_max_tokens=1200` 造成大量无效 kv 预留；把 `max_tokens` 下调到 400–600 可减少调度开销（收益待测）。
 2. **首字延迟**：prompt 处理 74 tok/s 已是 CPU 上限，进一步提速只能量化权重（Q4→Q3）或换更小模型。
 3. **异步化**（上一份报告 P1）：审计期间事件循环仍被独占，本次未改动，进度接口在审计中依然不可用。
+
+## 六、第二轮：真实合同复测（发现并修复分块缺陷）
+
+用 `data/contracts` 下的两份真实合同复测，覆盖 PDF 与 DOCX 两条链路：
+
+| 合同 | 类型 | 条款数 | 字符数 | 修复前 | 修复后 | 提升 |
+|---|---|---:|---:|---:|---:|---:|
+| `原合同 @合同文本-1、华润万家购销合同2026年修订-合同文本.pdf` | PDF（需数字化） | 270 | 22,920 | 652.9 s（12 块） | **572.5 s（9 块）** | −12.3% |
+| `原合同 CRV供应商贸易条款补充协议V1  (1).docx` | DOCX | 21 | 1,317 | 260.1 s（11 块） | **51.6 s（1 块）** | **−80.2%** |
+
+### 根因：分块只看条款条数，不看 token
+
+`_chunk_preview_clauses` 原逻辑是「条款数 > 10 就按 `max_calls=12` 等分」：
+
+- CRV 补充协议只有 21 条、1,317 字，却被切成 **11 块，每块 2 条**，等于用 11 次 LLM 调用审一份 1 页纸，光固定开销就 4 分钟；
+- 华润万家 22,920 字被切成 12 块，每块 22 条，而配置里的 `clause_group_target_tokens` / `input_hard_limit_tokens` 在此路径上**完全没有生效**。
+
+### 修复：按 token 预算打包
+
+分组数改为 `max(ceil(总token/clause_group_target_tokens), ceil(总token/input_hard_limit_tokens))`：
+
+- 小合同若能装进一个 target，就直接 1 块；
+- 大合同按目标 token 打包，同时保证单块不超过硬上限；
+- 若按硬上限需要的块数超过 `max_calls`，宁可多调用也不让 prompt 被截断（会打 `classic_audit_chunk_overflow` 警告）。
+
+效果：CRV 从 11 块降到 1 块（5 倍提速），华润万家从 12 块降到 9 块。
+
+### PDF 剩余空间分析
+
+从 llama-server 的 `print_timing` 看，华润万家每轮调用大致对半开：
+
+| 指标 | 数值 |
+|---|---|
+| prompt 处理 | 约 73 tok/s（1,750–2,884 tokens/次，24–39 s） |
+| 生成 | 约 8 tok/s（78–320 tokens/次，10–40 s） |
+| 单次合计 | 40–75 s |
+| 9 次合计 | 约 250 s prompt + 约 270 s generation |
+
+也就是说，PDF 已经接近这台 CPU 的算力上限，剩下可做的只有：
+
+1. **双槽并发**（`--parallel 2` + `contract_audit.parallel_workers=2`）：prompt 与 generation 可以错峰，理论 10–20%，但单次延迟会翻倍；
+2. **压缩输出**：当前 9 次共生成 2,281 tokens，风险描述偏长；把输出压到 1,500 tokens 可省约 100 s，但要评估可读性；
+3. **减少 evidence 重复下发**：每次调用都会重发同一份法规白名单（约 600 tokens 固定开销），9 次约 5.4k tokens（约 70 s）。可改为「只下发与本块相关的法规」，属于提示词改造。
+
+DOCX 修复后只剩 1 次调用（51.6 s），其中生成 292 tokens 约占 36 s，已经没有结构性优化空间。
+
+### 附带修复
+
+单块审计此前不返回 `classic_chunk_count`，导致 `meta` 里缺失该字段；现已补为 `1`（并新增 `classic_chunk_plan="single"`），便于统计。
