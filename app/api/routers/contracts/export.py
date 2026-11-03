@@ -27,6 +27,16 @@ def _build_readable_export_filename(original_filename: str, ts, ext: str) -> str
     return f"{base}_{ts.strftime('%Y%m%d_%H%M%S')}.{ext}"
 
 
+def _extract_report_risk_items(report: Any) -> list:
+    """Return only dict risk items from a report-like payload."""
+    if not isinstance(report, dict):
+        return []
+    items = report.get("risk_items")
+    if not isinstance(items, list):
+        return []
+    return [item for item in items if isinstance(item, dict)]
+
+
 @router.post("/contracts/{document_id}/report/export")
 def export_contract_report(
     document_id: str,
@@ -130,6 +140,14 @@ def export_contract_report(
         "review_conclusions": [],
         "exception_items": [],
     }
+    final_report = audit.get("final_report") if isinstance(
+        audit.get("final_report"), dict) else {}
+    final_report_risk_items = _extract_report_risk_items(final_report)
+    if final_report_risk_items:
+        risk_items = final_report_risk_items
+        report["risk_items"] = risk_items
+        report["overview"]["issue_count"] = len(risk_items)
+        report["review_summary"]["pending"] = len(risk_items)
     report_dir = os.path.join(cfg["files_dir"], "contract_reports")
     os.makedirs(report_dir, exist_ok=True)
     ext = "json" if fmt == "json" else "docx"
