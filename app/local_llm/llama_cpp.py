@@ -41,6 +41,10 @@ class LlamaCppProvider:
         request_body = service._build_openai_compatible_body(
             model, messages, temperature, max_tokens, cfg
         )
+        # 显式开启 llama.cpp 的 prompt 前缀缓存：同一审计内多个分段共享
+        # system + 法规白名单前缀，命中缓存后只需处理变化的后缀。
+        request_body.setdefault(
+            "cache_prompt", bool(cfg.get("cache_prompt", True)))
         headers = service._build_headers(None, cfg.get("headers"))
         try:
             raw = service._post_json(request_url, request_body, headers, timeout)
@@ -50,6 +54,8 @@ class LlamaCppProvider:
             retry_body = service._build_openai_compatible_body(
                 model, messages, temperature, retry_tokens, cfg
             )
+            retry_body.setdefault(
+                "cache_prompt", bool(cfg.get("cache_prompt", True)))
             logger.warning(
                 "llamacpp_timeout_retry model=%s timeout=%s->%s max_tokens=%s->%s",
                 model,
