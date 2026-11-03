@@ -10,6 +10,7 @@ import json
 import re
 import socket
 import structlog
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, Callable, List
 
 from app.core.config import get_config
@@ -2461,6 +2462,26 @@ def get_regulation_pack_fingerprint(
     }
 
 
+def _resolve_classic_parallel_workers(cfg: Dict[str, Any], chunk_count: int) -> int:
+    """并发分块数：需与 llama.cpp 的 --parallel 槽位数匹配。
+
+    ``contract_audit.parallel_workers`` 优先，其次
+    ``memory_runtime_config.audit_parallel_workers``，默认 1（保持串行语义）。
+    """
+    raw_audit = cfg.get("contract_audit")
+    audit_cfg = raw_audit if isinstance(raw_audit, dict) else {}
+    raw_runtime = cfg.get("memory_runtime_config")
+    runtime_cfg = raw_runtime if isinstance(raw_runtime, dict) else {}
+    workers = _safe_int(
+        audit_cfg.get(
+            "parallel_workers",
+            runtime_cfg.get("audit_parallel_workers"),
+        ),
+        1,
+    )
+    return max(1, min(workers, max(1, int(chunk_count))))
+
+
 def _run_classic_multipass_audit(
     cfg: Dict[str, Any],
     llm,
@@ -2490,20 +2511,40 @@ def _run_classic_multipass_audit(
             audit_id=audit_id,
         )
     chunk_results: List[Dict[str, Any]] = []
-    for index, clause_chunk in enumerate(clause_chunks, start=1):
-        chunk_results.append(
-            _build_classic_audit(
-                cfg=cfg,
-                llm=llm,
-                text=text,
-                lang=lang,
-                preview_clauses=clause_chunk,
-                preview_manifest=preview_manifest,
-                evidence_items=evidence_items,
-                retrieval_opts=retrieval_opts,
-                audit_id=f"{audit_id}_chunk_{index}",
-            )
+
+    def _run_chunk(index: int, clause_chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return _build_classic_audit(
+            cfg=cfg,
+            llm=llm,
+            text=text,
+            lang=lang,
+            preview_clauses=clause_chunk,
+            preview_manifest=preview_manifest,
+            evidence_items=evidence_items,
+            retrieval_opts=retrieval_opts,
+            audit_id=f"{audit_id}_chunk_{index}",
         )
+
+    workers = _resolve_classic_parallel_workers(cfg, len(clause_chunks))
+    if workers <= 1:
+        for index, clause_chunk in enumerate(clause_chunks, start=1):
+            chunk_results.append(_run_chunk(index, clause_chunk))
+    else:
+        logger.info(
+            "classic_audit_parallel workers=%s chunks=%s",
+            workers,
+            len(clause_chunks),
+        )
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="classic-audit"
+        ) as pool:
+            futures = [
+                pool.submit(_run_chunk, index, clause_chunk)
+                for index, clause_chunk in enumerate(clause_chunks, start=1)
+            ]
+            # future.result() 按提交顺序取值，保证分块结果顺序稳定。
+            for future in futures:
+                chunk_results.append(future.result())
     return _aggregate_classic_results(chunk_results, lang=lang)
 
 

@@ -454,8 +454,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llamacpp-ctx-size",
         type=int,
-        default=16384,
-        help="llama.cpp context window size.",
+        default=8192,
+        help="Per-slot llama.cpp context window size.",
+    )
+    parser.add_argument(
+        "--llamacpp-parallel",
+        type=int,
+        default=2,
+        help="Number of llama.cpp server slots (match contract_audit.parallel_workers).",
+    )
+    parser.add_argument(
+        "--llamacpp-cache-reuse",
+        type=int,
+        default=256,
+        help="Minimum chunk size for llama.cpp KV cache reuse (0 disables).",
     )
     return parser.parse_args()
 
@@ -629,10 +641,11 @@ def main() -> int:
                         "--threads-http", "2",
                         "--batch-size", "1024",
                         "--ubatch-size", "512",
-                        "--parallel", "1",
+                        "--parallel", str(max(1, args.llamacpp_parallel)),
                         "--n-gpu-layers", "0",
                         "--jinja",
                         "--cont-batching",
+                        "--cache-reuse", str(max(0, args.llamacpp_cache_reuse)),
                         "--metrics",
                     ]
                     print(f"\n[START] llama.cpp server")

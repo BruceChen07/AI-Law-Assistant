@@ -141,8 +141,8 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Model alias returned by /v1/models. Defaults to the GGUF filename.",
     )
-    parser.add_argument("--ctx-size", type=int, default=16384,
-                        help="Context window size.")
+    parser.add_argument("--ctx-size", type=int, default=8192,
+                        help="Per-slot context window size.")
     parser.add_argument("--threads", type=int, default=max(4,
                         (os.cpu_count() or 8) - 2), help="Inference threads.")
     parser.add_argument("--threads-http", type=int,
@@ -153,8 +153,10 @@ def parse_args() -> argparse.Namespace:
                         default=512, help="Micro batch size.")
     parser.add_argument("--gpu-layers", type=int, default=0,
                         help="Number of layers offloaded to GPU.")
-    parser.add_argument("--parallel", type=int, default=1,
-                        help="Parallel request slots.")
+    parser.add_argument("--parallel", type=int, default=2,
+                        help="Parallel request slots (match contract_audit.parallel_workers).")
+    parser.add_argument("--cache-reuse", type=int, default=256,
+                        help="Minimum chunk size for KV cache reuse (0 disables).")
     parser.add_argument("--no-mmap", action="store_true",
                         help="Disable mmap when storage is unstable.")
     parser.add_argument(
@@ -239,6 +241,8 @@ def main() -> int:
         str(max(0, args.gpu_layers)),
         "--jinja",
         "--cont-batching",
+        "--cache-reuse",
+        str(max(0, args.cache_reuse)),
         "--metrics",
     ]
     if args.no_mmap:
