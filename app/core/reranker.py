@@ -1,9 +1,6 @@
 import logging
 from typing import List, Dict, Any, Optional
 
-import torch
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
-
 logger = logging.getLogger("law_assistant")
 
 
@@ -13,19 +10,50 @@ class RerankerService:
         self.profiles = profiles or {}
         self.models = {}
         self.tokenizers = {}
-        self.device = device or (
-            "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = device or "cpu"
         self.batch_size = batch_size
         self.max_len = max_len
+        self._torch = None
+        self._auto_model = None
+        self._auto_tokenizer = None
+        self._deps_ready = False
         if model_path:
             self._load_model(model_path, "default")
 
+    def _ensure_deps(self) -> bool:
+        if self._deps_ready:
+            return True
+        try:
+            import torch  # type: ignore
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer  # type: ignore
+        except Exception as e:
+            logger.warning("reranker_deps_missing err=%s", str(e))
+            self._torch = None
+            self._auto_model = None
+            self._auto_tokenizer = None
+            self._deps_ready = False
+            return False
+        self._torch = torch
+        self._auto_model = AutoModelForSequenceClassification
+        self._auto_tokenizer = AutoTokenizer
+        try:
+            if self.device == "cuda" and not bool(torch.cuda.is_available()):
+                self.device = "cpu"
+            if self.device == "cpu" and bool(torch.cuda.is_available()):
+                self.device = "cuda"
+        except Exception:
+            self.device = "cpu"
+        self._deps_ready = True
+        return True
+
     def _load_model(self, model_path: str, key: str):
+        if not self._ensure_deps():
+            return
         try:
             logger.info("Loading reranker model from %s on %s",
                         model_path, self.device)
-            tokenizer = AutoTokenizer.from_pretrained(model_path)
-            model = AutoModelForSequenceClassification.from_pretrained(
+            tokenizer = self._auto_tokenizer.from_pretrained(model_path)
+            model = self._auto_model.from_pretrained(
                 model_path)
             model.to(self.device)
             model.eval()
@@ -38,6 +66,8 @@ class RerankerService:
             self.tokenizers.pop(key, None)
 
     def _get_model(self, lang: Optional[str]):
+        if not self._ensure_deps():
+            return None, None
         key = lang or "default"
         if key in self.models and key in self.tokenizers:
             return self.models[key], self.tokenizers[key]
@@ -55,6 +85,9 @@ class RerankerService:
         model, tokenizer = self._get_model(lang)
         if not model or not tokenizer:
             return 0.0
+        torch = self._torch
+        if torch is None:
+            return 0.0
         with torch.no_grad():
             inputs = tokenizer([[query, text]], padding=True, truncation=True,
                                return_tensors="pt", max_length=self.max_len)
@@ -67,6 +100,9 @@ class RerankerService:
         if not model or not tokenizer or not candidates:
             return candidates[:top_k] if top_k else candidates
 
+        torch = self._torch
+        if torch is None:
+            return candidates[:top_k] if top_k else candidates
         pairs = [[query, c.get("content", "")] for c in candidates]
         all_scores = []
 

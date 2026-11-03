@@ -8,10 +8,13 @@ The current implementation has completed:
 
 - Routing
 - JSON guard
-- Local fallback
-- Cloud review for high-risk tax cases
+- Local-only configuration path
 - Memory pipeline fallback
 - Regression automation entrypoint
+- Real local main model smoke validation (`qwen3.6:27b` + `llama3.2:3b`)
+- Enterprise offline deployment branch (`feature/enterprise-local-ollama-only`)
+- Cloud dependency audit (zero runtime external calls confirmed)
+- Hardware fitness benchmark for i5-12500/64GB
 
 The current implementation has not yet completed:
 
@@ -21,22 +24,18 @@ The current implementation has not yet completed:
 
 ## 2. Open Issues
 
-### KI-001 Real Local Main Model Not Yet Verified
+### KI-001 Real Local Main Model Verified
 
 - Severity: High
-- Status: Open
+- Status: **Mitigated**
 - Description:
-  The repository now supports a local main model route, but the current session has not validated a real running Ollama main model service on `http://127.0.0.1:11434/v1`.
+  The repository now supports a local main model route and has been validated against a real running Ollama instance on `http://127.0.0.1:11434/v1` using `qwen3.6:27b` and `llama3.2:3b`.
 - Impact:
-  `TC-001` remains open.
-- Suggested Action:
-  Start the real local service and run:
-
-```bash
-python .\bin\start-local-llm-servers.py
-python .\bin\download-local-llm-models.py
-python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/test_json_guard.py tests/test_local_llm_fallback.py tests/test_tax_contract_parser.py tests/test_tax_matcher.py tests/test_tax_risk.py tests/test_memory_pipeline_fallback.py tests/test_contract_audit_memory_mode.py tests/test_contract_audit.py
-```
+  `TC-001` is now satisfied.
+- Verified Actions:
+  - `ollama list` confirmed both models installed.
+  - `python .\bin\start-local-llm-servers.py` confirmed Ollama API reachable.
+  - `python .\bin\benchmark-local-llm.py` confirmed live inference with latency metrics recorded.
 
 ### KI-002 Long Document Timeout Behavior Not Yet Pressure Tested
 
@@ -45,7 +44,7 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 - Description:
   Memory mode has fallback logic, but there is still no live long-document pressure test using a real CPU-only model.
 - Impact:
-  The system may still show latency spikes or overuse cloud fallback on large contracts.
+  The system may still show latency spikes or degraded output quality on large contracts.
 - Suggested Action:
   Prepare a long contract dataset and run controlled latency tests for:
   - `memory` mode
@@ -76,16 +75,38 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 - Suggested Action:
   Run `python .\bin\download-local-llm-models.py` or override model names in the local config.
 
-### KI-005 Cloud Fallback Cost Control Not Yet Measured
+### KI-005 Enterprise Local-Only Guardrails Not Yet API-Level Verified
 
 - Severity: Medium
 - Status: Open
 - Description:
-  The runtime can now promote high-risk or invalid local results to cloud fallback, but the actual cloud fallback ratio is not yet measured with production-like workloads.
+  The enterprise branch disables cloud fallback by configuration, but a full API-level acceptance pass has not yet verified that all deployed configs keep `llm_config` and `local_llm` pointed only to local Ollama endpoints.
 - Impact:
-  Real operating cost remains uncertain.
+  A misconfigured environment could still accidentally target a non-local provider.
 - Suggested Action:
-  Add fallback counters to dashboards or export trace summaries for analysis.
+  Run admin/API acceptance checks with the enterprise config and confirm every effective model target resolves to `http://127.0.0.1:11434/v1`.
+
+### KI-006 27B Main Model Latency Too High for i5-12500-class CPUs
+
+- Severity: **High**
+- Status: Open
+- Description:
+  On i5-12500 (6P/12T, 64GB), `qwen3.6:27b` achieves only ~2.2 tok/s in pure CPU inference. A 200-token contract audit response takes ~100 seconds. At this throughput, a full multi-clause contract audit will take several minutes.
+- Impact:
+  User-facing responsiveness is severely degraded. Not suitable for concurrent use.
+- Suggested Action:
+  Test lighter main models already installed locally (`qwen2.5-coder:14b` at 9.0 GB or `qwen3.5:9b` at 6.6 GB). Expected throughput improvement: 2-3x with 14B, 4-5x with 9B.
+
+### KI-007 27B Model Loading Causes ~26 GB Disk + Memory Pressure
+
+- Severity: Medium
+- Status: Open
+- Description:
+  `qwen3.6:27b` occupies 17 GB on disk plus ~9 GB in-memory workspace, totaling ~26 GB peak allocation. With `llama3.2:3b` (2 GB) and auxiliary models (embeddings, reranker, translation), total system memory usage approaches 35-40 GB.
+- Impact:
+  Leaves ~25 GB headroom on 64 GB systems — adequate for single-task operation but tight for multitasking or other enterprise workloads.
+- Suggested Action:
+  Monitor Ollama memory usage with `ollama ps` during sustained operations. Consider offloading non-critical auxiliary models during heavy audit sessions.
 
 ## 3. Closed Or Mitigated Issues
 
@@ -93,13 +114,13 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 
 - Status: Mitigated
 - Notes:
-  `JSON Guard` plus fallback logic now covers tax and memory callback paths.
+  `JSON Guard` now covers tax and memory callback paths, reducing local structured-output failures.
 
 ### KI-M2 High-Risk Tax Match Cannot Be Escalated
 
 - Status: Mitigated
 - Notes:
-  `tax_matcher` and `tax_risk` now support high-risk cloud review behavior.
+  The enterprise branch keeps high-risk review local by disabling forced cloud escalation in the default config.
 
 ### KI-M3 Memory Callback Failure Can Abort Useful Output
 
@@ -114,4 +135,4 @@ Phase 4 can be considered fully closed when all items below are satisfied:
 - `TC-001` passes with real local services
 - `TC-007B` passes with real long documents
 - `TC-008` is executed with a full regression result log
-- Known fallback ratio is measured and reviewed
+- Enterprise local-only config is API-level verified end-to-end

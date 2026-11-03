@@ -27,6 +27,19 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
 
 
+def get_app_config(request: Request) -> dict:
+    """Application config, resolved at startup and stored on app.state.
+
+    This is what lets routers stop being closure factories: handlers declare
+    `cfg: dict = Depends(get_app_config)` instead of closing over a `cfg`
+    parameter of `build_router(cfg)`.
+    """
+    cfg = getattr(request.app.state, "cfg", None)
+    if cfg is None:
+        raise HTTPException(status_code=503, detail="config unavailable")
+    return cfg
+
+
 def get_app_llm(request: Request) -> Any:
     llm = getattr(request.app.state, "llm", None)
     if llm is None:

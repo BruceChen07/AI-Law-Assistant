@@ -1,17 +1,56 @@
-import { useState, useEffect, useMemo, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminDeleteLLMApiKey, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminGetOllamaModels, adminGetLlamaCppModels, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { useState, useEffect, useRef } from "react"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
-import LlmTraceViewer from "./LlmTraceViewer"
 import SkillManager from "./SkillManager"
 import { adminI18n } from "./i18n/adminI18n"
 
-const OLLAMA_MODEL_STORAGE_KEY = "admin.selectedOllamaModel"
-const LLAMACPP_MODEL_STORAGE_KEY = "admin.selectedLlamaCppModel"
-const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "skills", "regulations", "token-monitor", "llm-traces"])
+const createEmptyPromptForm = () => ({
+  prompt_key: "",
+  name: "",
+  description: "",
+  display_system_text: "",
+  display_focus_text: "",
+  display_template_text: "",
+  sample_input_json: '{\n  "contract_title": "Service Agreement",\n  "counterparty": "Acme Corp",\n  "effective_date": "2026-08-28"\n}'
+})
 
-export default function Admin({ onBack, lang, tab: externalTab = "documents", onTabChange }) {
-  const normalizedInitialTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
-  const [tab, setTab] = useState(normalizedInitialTab)
+const BUILTIN_PROMPT_LABELS = {
+  "contract_audit.classic_json": {
+    zh: "合同审计结果提示词",
+    en: "Contract Audit Result Prompt"
+  },
+  "audit_prompt.tax_audit_json": {
+    zh: "财税审计提示词",
+    en: "Tax Audit Prompt"
+  },
+  "memory_pipeline.clause_audit": {
+    zh: "条款审计提示词",
+    en: "Clause Audit Prompt"
+  },
+  "memory_pipeline.flush_markdown": {
+    zh: "记忆整理提示词",
+    en: "Memory Summary Prompt"
+  },
+  "tax_risk.issue_generation": {
+    zh: "税务风险建议提示词",
+    en: "Tax Risk Suggestion Prompt"
+  },
+  "tax_matcher.clause_rule_match": {
+    zh: "条款法规匹配提示词",
+    en: "Clause Rule Match Prompt"
+  },
+  "tax_contract_parser.entity_extract": {
+    zh: "合同实体抽取提示词",
+    en: "Contract Entity Extraction Prompt"
+  },
+  "admin.llm_test": {
+    zh: "模型测试提示词",
+    en: "Model Test Prompt"
+  }
+}
+
+export default function Admin({ onBack, lang, onLangChange }) {
+  const [tab, setTab] = useState("documents")
   const [documents, setDocuments] = useState([])
   const [users, setUsers] = useState([])
   const [stats, setStats] = useState(null)
@@ -22,9 +61,6 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   const [deleteConfirm, setDeleteConfirm] = useState(null)
   const [userDeleteConfirm, setUserDeleteConfirm] = useState(null)
   const [llmConfig, setLlmConfig] = useState(null)
-  const [llmHasApiKey, setLlmHasApiKey] = useState(false)
-  const [llmSaving, setLlmSaving] = useState(false)
-  const [llmClearingKey, setLlmClearingKey] = useState(false)
   const [llmError, setLlmError] = useState("")
   const [llmTestPrompt, setLlmTestPrompt] = useState("")
   const [llmTestResult, setLlmTestResult] = useState("")
@@ -98,13 +134,46 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   const [regSearchError, setRegSearchError] = useState("")
   const [regShowAdvanced, setRegShowAdvanced] = useState(false)
   const [regExpanded, setRegExpanded] = useState({})
+  const [prompts, setPrompts] = useState([])
+  const [promptPagination, setPromptPagination] = useState({ page: 1, page_size: 20, total: 0 })
+  const [promptSearch, setPromptSearch] = useState("")
+  const [promptStatusFilter, setPromptStatusFilter] = useState("all")
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [promptMessage, setPromptMessage] = useState("")
+  const [promptError, setPromptError] = useState("")
+  const [promptForm, setPromptForm] = useState(createEmptyPromptForm)
+  const [promptFormErrors, setPromptFormErrors] = useState({})
+  const [promptEditingId, setPromptEditingId] = useState("")
+  const [promptDeleteConfirm, setPromptDeleteConfirm] = useState("")
+  const [promptStatusUpdatingId, setPromptStatusUpdatingId] = useState("")
+  const [promptPreviewSystem, setPromptPreviewSystem] = useState("")
+  const [promptPreviewUser, setPromptPreviewUser] = useState("")
+  const [promptPreviewError, setPromptPreviewError] = useState("")
+  const [promptPreviewLoading, setPromptPreviewLoading] = useState(false)
+  const [promptRestoreLoading, setPromptRestoreLoading] = useState(false)
+  const [promptBindings, setPromptBindings] = useState([])
+  const [promptBindingUpdatingScene, setPromptBindingUpdatingScene] = useState("")
+  const [promptEditingSource, setPromptEditingSource] = useState("custom")
+  const [promptViewingId, setPromptViewingId] = useState("")
+  const [promptViewDetail, setPromptViewDetail] = useState(null)
+  const [promptViewLoading, setPromptViewLoading] = useState(false)
+  const [promptViewError, setPromptViewError] = useState("")
+  const [promptViewPreviewSystem, setPromptViewPreviewSystem] = useState("")
+  const [promptViewPreviewUser, setPromptViewPreviewUser] = useState("")
+  const [promptViewPreviewError, setPromptViewPreviewError] = useState("")
+  const [promptViewPreviewLoading, setPromptViewPreviewLoading] = useState(false)
   
   const fileInputRef = useRef(null)
 
   const user = getCurrentUser()
   const admin = !!(user && (user.role === "admin" || user.username === "admin"))
   const t = adminI18n[lang] || adminI18n.zh
-  const showLegacyOllamaTools = false
+  const getPromptDisplayName = (prompt) => {
+    const key = String(prompt?.prompt_key || prompt?.id || "").trim()
+    const localized = BUILTIN_PROMPT_LABELS[key]
+    return localized?.[lang || "zh"] || String(prompt?.name || "").trim() || "-"
+  }
   const skillLabels = {
     title: t.skillTitle,
     subtitle: t.skillSubtitle,
@@ -250,19 +319,14 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   }
   
   useEffect(() => {
-    const nextTab = ADMIN_TABS.has(externalTab) ? externalTab : "documents"
-    setTab(prev => (prev === nextTab ? prev : nextTab))
-  }, [externalTab])
-
-  useEffect(() => {
-    if (typeof onTabChange === "function") onTabChange(tab)
-  }, [tab, onTabChange])
-  
-  useEffect(() => {
     if (!admin) return
     if (tab === "documents") loadDocuments()
     if (tab === "users") loadUsers()
     if (tab === "stats") loadStats()
+    if (tab === "prompts") {
+      loadPrompts()
+      loadPromptBindings()
+    }
     if (tab === "model") {
       loadLLM()
       loadLlamaCppModels()
@@ -271,7 +335,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
       loadMemoryConfig()
     }
     if (tab === "regulations") {}
-  }, [tab, pagination.page, docCategory])
+  }, [tab, pagination.page, docCategory, promptPagination.page, promptStatusFilter])
 
   useEffect(() => {
     setRegUpload(prev => ({ ...prev, language: lang || "zh" }))
@@ -279,247 +343,53 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     setLlmTestPrompt(prev => prev || t.llmTestDefaultPrompt)
   }, [lang])
 
-  const readRememberedOllamaModel = () => {
-    try {
-      return localStorage.getItem(OLLAMA_MODEL_STORAGE_KEY) || ""
-    } catch {
-      return ""
+  useEffect(() => {
+    if (tab !== "prompts") return
+    if (!promptForm.display_template_text.trim()) {
+      setPromptPreviewSystem("")
+      setPromptPreviewUser("")
+      setPromptPreviewError("")
+      setPromptPreviewLoading(false)
+      return
     }
-  }
-
-  const readRememberedLlamaCppModel = () => {
-    try {
-      return localStorage.getItem(LLAMACPP_MODEL_STORAGE_KEY) || ""
-    } catch {
-      return ""
-    }
-  }
-
-  const rememberOllamaModel = (modelName) => {
-    try {
-      if (modelName) localStorage.setItem(OLLAMA_MODEL_STORAGE_KEY, modelName)
-    } catch {}
-  }
-
-  const rememberLlamaCppModel = (modelName) => {
-    try {
-      if (modelName) localStorage.setItem(LLAMACPP_MODEL_STORAGE_KEY, modelName)
-    } catch {}
-  }
-
-  const syncLlmConfigState = (data, keepApiKeyEmpty = true) => {
-    const provider = data.provider || "llama_cpp"
-    const fallbackApiBase = provider === "llama_cpp"
-      ? "http://127.0.0.1:18080/v1"
-      : "http://127.0.0.1:11434/v1"
-    setLlmConfig({
-      provider,
-      api_base: data.api_base || fallbackApiBase,
-      api_key: keepApiKeyEmpty ? "" : (data.api_key || ""),
-      model: data.model || "",
-      temperature: data.temperature ?? 0.2,
-      max_tokens: data.max_tokens ?? 2048,
-      timeout: data.timeout ?? 60,
-      headers: data.headers || {}
-    })
-    setLlmHasApiKey(!!data.has_api_key)
-  }
-
-  const persistLLMConfig = async (nextConfig) => {
-    const target = nextConfig || llmConfig
-    if (!target || !validateLLM(target)) {
-      throw new Error(t.validateFailed)
-    }
-    const saved = await adminUpdateLLMConfig({
-      provider: target.provider,
-      api_base: target.api_base,
-      api_key: target.api_key || "",
-      model: target.model,
-      temperature: Number(target.temperature),
-      max_tokens: Number(target.max_tokens),
-      timeout: Number(target.timeout),
-      headers: target.headers || {}
-    })
-    syncLlmConfigState(saved)
-    if (saved.provider === "ollama" && saved.model) {
-      rememberOllamaModel(saved.model)
-    }
-    if (saved.provider === "llama_cpp" && saved.model) {
-      rememberLlamaCppModel(saved.model)
-    }
-    return saved
-  }
-
-  const loadOllamaModels = async (forceRefresh = false) => {
-    setOllamaModelsLoading(true)
-    try {
-      const data = await adminGetOllamaModels(forceRefresh ? { force_refresh: "true" } : {})
-      const models = Array.isArray(data.models) ? data.models : []
-      setOllamaModels(models)
-      setOllamaMeta({
-        host: data.host || "http://127.0.0.1:11434",
-        cached: !!data.cached,
-        stale: !!data.stale,
-        current_model: data.current_model || "",
-        recommended_model: data.recommended_model || "",
-        cached_at: data.cached_at || "",
-        expires_at: data.expires_at || ""
-      })
-      setOllamaModelsError(data.error || "")
-      const names = models.map(item => item.name || item.model).filter(Boolean)
-      const remembered = readRememberedOllamaModel()
-      const fallbackModel = names.includes(remembered)
-        ? remembered
-        : names.includes(data.current_model)
-          ? data.current_model
-          : names.includes(data.recommended_model)
-            ? data.recommended_model
-            : ""
-      if (fallbackModel) {
-        setLlmConfig(prev => {
-          if (!prev) return prev
-          const currentModel = String(prev.model || "")
-          const currentValid = names.includes(currentModel)
-          if (prev.provider === "ollama" && currentValid) return prev
-          return {
-            ...prev,
-            provider: "ollama",
-            api_base: `${(data.host || "http://127.0.0.1:11434").replace(/\/$/, "")}/v1`,
-            api_key: "",
-            model: fallbackModel
-          }
+    const timer = setTimeout(async () => {
+      setPromptPreviewLoading(true)
+      setPromptPreviewError("")
+      try {
+        const res = await adminPreviewPrompt({
+          prompt_id: promptEditingId,
+          prompt_key: promptForm.prompt_key,
+          editor_lang: lang || "zh",
+          display_system_text: promptForm.display_system_text,
+          display_focus_text: promptForm.display_focus_text,
+          display_template_text: promptForm.display_template_text,
+          sample_input_json: promptForm.sample_input_json
         })
+        setPromptPreviewSystem(res.rendered_system_text || "")
+        setPromptPreviewUser(res.rendered_text || "")
+      } catch (err) {
+        setPromptPreviewSystem("")
+        setPromptPreviewUser("")
+        setPromptPreviewError(err.message)
+      } finally {
+        setPromptPreviewLoading(false)
       }
-    } catch (err) {
-      setOllamaModels([])
-      setOllamaModelsError(err.message)
-    } finally {
-      setOllamaModelsLoading(false)
-    }
-  }
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [tab, lang, promptEditingId, promptForm.prompt_key, promptForm.display_system_text, promptForm.display_focus_text, promptForm.display_template_text, promptForm.sample_input_json])
 
-  const applyOllamaModel = async (modelName) => {
-    if (!llmConfig || !modelName) return
-    const nextConfig = {
-      ...llmConfig,
-      provider: "ollama",
-      api_base: `${String(ollamaMeta.host || "http://127.0.0.1:11434").replace(/\/$/, "")}/v1`,
-      api_key: "",
-      model: modelName
-    }
-    setLlmSaving(true)
-    setLlmError("")
-    setLlmConfig(nextConfig)
-    rememberOllamaModel(modelName)
-    try {
-      await persistLLMConfig(nextConfig)
-      setLlmError(t.saved)
-    } catch (err) {
-      setLlmError(err.message)
-    } finally {
-      setLlmSaving(false)
-    }
-  }
+  useEffect(() => {
+    if (tab !== "prompts" || !promptEditingId) return
+    openPromptEdit(promptEditingId)
+  }, [lang])
 
-  const loadLlamaCppModels = async (forceRefresh = false) => {
-    setLlamaCppModelsLoading(true)
-    try {
-      const data = await adminGetLlamaCppModels(forceRefresh ? { force_refresh: "true" } : {})
-      const models = Array.isArray(data.models) ? data.models : []
-      setLlamaCppModels(models)
-      setLlamaCppMeta({
-        host: data.host || "http://127.0.0.1:18080",
-        cached: !!data.cached,
-        stale: !!data.stale,
-        current_model: data.current_model || "",
-        recommended_model: data.recommended_model || "",
-        cached_at: data.cached_at || "",
-        expires_at: data.expires_at || ""
-      })
-      setLlamaCppModelsError(data.error || "")
-      const names = models.map(item => item.name || item.model).filter(Boolean)
-      const remembered = readRememberedLlamaCppModel()
-      const fallbackModel = names.includes(remembered)
-        ? remembered
-        : names.includes(data.current_model)
-          ? data.current_model
-          : names.includes(data.recommended_model)
-            ? data.recommended_model
-            : ""
-      if (fallbackModel) {
-        setLlmConfig(prev => {
-          if (!prev) return prev
-          const currentModel = String(prev.model || "")
-          const currentValid = names.includes(currentModel)
-          if (prev.provider === "llama_cpp" && currentValid) return prev
-          if (prev.provider !== "llama_cpp" && prev.model) return prev
-          return {
-            ...prev,
-            api_base: `${String(data.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
-            model: fallbackModel
-          }
-        })
-      }
-    } catch (err) {
-      setLlamaCppModels([])
-      setLlamaCppModelsError(err.message)
-    } finally {
-      setLlamaCppModelsLoading(false)
-    }
-  }
-
-  const applyLlamaCppModel = async (modelName) => {
-    if (!llmConfig || !modelName) return
-    const nextConfig = {
-      ...llmConfig,
-      provider: "llama_cpp",
-      api_base: `${String(llamaCppMeta.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
-      api_key: "",
-      model: modelName
-    }
-    setLlmSaving(true)
-    setLlmError("")
-    setLlmConfig(nextConfig)
-    rememberLlamaCppModel(modelName)
-    try {
-      await persistLLMConfig(nextConfig)
-      setLlmError(t.saved)
-    } catch (err) {
-      setLlmError(err.message)
-    } finally {
-      setLlmSaving(false)
-    }
-  }
-
-  const filteredOllamaModels = useMemo(() => {
-    const keyword = String(ollamaSearch || "").trim().toLowerCase()
-    if (!keyword) return ollamaModels
-    return ollamaModels.filter(item => {
-      const haystack = [
-        item.name,
-        item.model,
-        item.parameter_size,
-        item.family,
-        Array.isArray(item.capabilities) ? item.capabilities.join(" ") : ""
-      ].join(" ").toLowerCase()
-      return haystack.includes(keyword)
-    })
-  }, [ollamaModels, ollamaSearch])
-
-  const filteredLlamaCppModels = useMemo(() => {
-    const keyword = String(llamaCppSearch || "").trim().toLowerCase()
-    if (!keyword) return llamaCppModels
-    return llamaCppModels.filter(item => {
-      const haystack = [
-        item.name,
-        item.model,
-        item.owner,
-        item.family,
-        item.quantization_level
-      ].join(" ").toLowerCase()
-      return haystack.includes(keyword)
-    })
-  }, [llamaCppModels, llamaCppSearch])
+  useEffect(() => {
+    if (tab !== "prompts") return undefined
+    const timer = window.setInterval(() => {
+      loadPromptBindings({ silent: true })
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [tab])
   
   const loadDocuments = async () => {
     setLoading(true)
@@ -567,7 +437,23 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     setLoading(true)
     try {
       const data = await adminGetLLMConfig()
-      syncLlmConfigState(data)
+      setLlmConfig({
+        provider: data.provider || "openai_compatible",
+        provider_label: data.provider_label || data.provider || "openai_compatible",
+        api_base: data.api_base || "",
+        model: data.model || "",
+        temperature: data.temperature ?? 0.2,
+        max_tokens: data.max_tokens ?? 2048,
+        timeout: data.timeout ?? 60,
+        headers: data.headers || {},
+        env_managed: data.env_managed !== false,
+        supported_env_vars: Array.isArray(data.supported_env_vars) ? data.supported_env_vars : [],
+        required_env_vars: Array.isArray(data.required_env_vars) ? data.required_env_vars : [],
+        missing_env_vars: Array.isArray(data.missing_env_vars) ? data.missing_env_vars : [],
+        env_sources: data.env_sources || {},
+        security_issues: Array.isArray(data.security_issues) ? data.security_issues : [],
+        route: data.route || {}
+      })
       setLlmTestPrompt(prev => prev || t.llmTestDefaultPrompt)
       setLlmTestResult("")
       setLlmTestError("")
@@ -623,6 +509,258 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     }
   }
 
+  const loadPrompts = async (override = {}) => {
+    setPromptLoading(true)
+    setPromptError("")
+    try {
+      const page = override.page ?? promptPagination.page
+      const searchValue = String(override.search ?? promptSearch).trim()
+      const statusValue = override.status ?? promptStatusFilter
+      const params = {
+        page,
+        page_size: promptPagination.page_size
+      }
+      if (searchValue) params.search = searchValue
+      if (statusValue && statusValue !== "all") params.status = statusValue
+      const data = await adminListPrompts(params)
+      setPrompts(Array.isArray(data.items) ? data.items : [])
+      setPromptPagination(prev => ({
+        ...prev,
+        page: Number(data.page || page),
+        total: Number(data.total || 0)
+      }))
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
+  const loadPromptBindings = async ({ silent = false } = {}) => {
+    try {
+      const data = await adminListPromptBindings()
+      setPromptBindings(Array.isArray(data.items) ? data.items : [])
+    } catch (err) {
+      if (!silent) setPromptError(err.message)
+    }
+  }
+
+  const refreshPromptWorkspace = async (override = {}) => {
+    await Promise.all([
+      loadPrompts(override),
+      loadPromptBindings()
+    ])
+  }
+
+  const resetPromptEditor = (nextPrompt = null) => {
+    if (nextPrompt) {
+      setPromptEditingId(nextPrompt.id || "")
+      setPromptEditingSource(nextPrompt.source || "custom")
+      setPromptForm({
+        prompt_key: nextPrompt.prompt_key || "",
+        name: nextPrompt.name || "",
+        description: nextPrompt.description || "",
+        display_system_text: nextPrompt.display_system_text || "",
+        display_focus_text: nextPrompt.display_focus_text || "",
+        display_template_text: nextPrompt.display_template_text || "",
+        sample_input_json: nextPrompt.sample_input_json || "{}"
+      })
+      return
+    }
+    setPromptEditingId("")
+    setPromptEditingSource("custom")
+    setPromptForm(createEmptyPromptForm())
+    setPromptPreviewSystem("")
+    setPromptPreviewUser("")
+    setPromptPreviewError("")
+    setPromptDeleteConfirm("")
+  }
+
+  const validatePromptForm = () => {
+    const nextErrors = {}
+    if (!String(promptForm.name || "").trim()) nextErrors.name = t.promptRequired
+    if (!String(promptForm.display_template_text || "").trim()) nextErrors.display_template_text = t.promptRequired
+    setPromptFormErrors(nextErrors)
+    return Object.keys(nextErrors).length === 0
+  }
+
+  const openPromptCreate = () => {
+    setPromptMessage("")
+    setPromptError("")
+    setPromptFormErrors({})
+    resetPromptEditor()
+  }
+
+  const openPromptEdit = async (promptId) => {
+    setPromptLoading(true)
+    setPromptError("")
+    setPromptMessage("")
+    setPromptFormErrors({})
+    try {
+      const data = await adminGetPrompt(promptId, lang || "zh")
+      resetPromptEditor(data)
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptLoading(false)
+    }
+  }
+
+  const closePromptView = () => {
+    setPromptViewingId("")
+    setPromptViewDetail(null)
+    setPromptViewLoading(false)
+    setPromptViewError("")
+    setPromptViewPreviewSystem("")
+    setPromptViewPreviewUser("")
+    setPromptViewPreviewError("")
+    setPromptViewPreviewLoading(false)
+  }
+
+  const openPromptView = async (promptId) => {
+    setPromptViewingId(promptId)
+    setPromptViewDetail(null)
+    setPromptViewLoading(true)
+    setPromptViewError("")
+    setPromptViewPreviewSystem("")
+    setPromptViewPreviewUser("")
+    setPromptViewPreviewError("")
+    setPromptViewPreviewLoading(false)
+    try {
+      const data = await adminGetPrompt(promptId, lang || "zh")
+      setPromptViewDetail(data)
+      setPromptViewPreviewLoading(true)
+      try {
+        const preview = await adminPreviewPrompt({
+          prompt_id: data.id || promptId,
+          prompt_key: data.prompt_key || "",
+          editor_lang: lang || "zh",
+          display_system_text: data.display_system_text || "",
+          display_focus_text: data.display_focus_text || "",
+          display_template_text: data.display_template_text || "",
+          sample_input_json: data.sample_input_json || "{}"
+        })
+        setPromptViewPreviewSystem(preview.rendered_system_text || "")
+        setPromptViewPreviewUser(preview.rendered_text || "")
+      } catch (previewErr) {
+        setPromptViewPreviewError(previewErr.message)
+      } finally {
+        setPromptViewPreviewLoading(false)
+      }
+    } catch (err) {
+      setPromptViewError(err.message)
+    } finally {
+      setPromptViewLoading(false)
+    }
+  }
+
+  const savePrompt = async () => {
+    setPromptMessage("")
+    setPromptError("")
+    if (!validatePromptForm()) {
+      setPromptError(t.promptFormInvalid)
+      return
+    }
+    setPromptSaving(true)
+    try {
+      const payload = {
+        name: String(promptForm.name || "").trim(),
+        description: String(promptForm.description || "").trim(),
+        prompt_key: String(promptForm.prompt_key || "").trim(),
+        editor_lang: lang || "zh",
+        display_system_text: String(promptForm.display_system_text || ""),
+        display_focus_text: String(promptForm.display_focus_text || ""),
+        display_template_text: String(promptForm.display_template_text || ""),
+        sample_input_json: String(promptForm.sample_input_json || "{}").trim() || "{}"
+      }
+      const saved = promptEditingId
+        ? await adminUpdatePrompt(promptEditingId, payload)
+        : await adminCreatePrompt(payload)
+      resetPromptEditor(saved)
+      setPromptMessage(t.promptSaved)
+      await refreshPromptWorkspace()
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptSaving(false)
+    }
+  }
+
+  const restorePromptDefault = async () => {
+    if (!promptEditingId) return
+    setPromptRestoreLoading(true)
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      const restored = await adminRestorePromptDefault(promptEditingId, lang || "zh")
+      resetPromptEditor(restored)
+      setPromptMessage(t.promptRestored)
+      await refreshPromptWorkspace()
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptRestoreLoading(false)
+    }
+  }
+
+  const togglePromptStatus = async (prompt) => {
+    setPromptStatusUpdatingId(prompt.id)
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      await adminUpdatePromptStatus(prompt.id, prompt.status !== "enabled")
+      await refreshPromptWorkspace()
+      if (promptEditingId === prompt.id) {
+        const latest = await adminGetPrompt(prompt.id, lang || "zh")
+        resetPromptEditor(latest)
+      }
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptStatusUpdatingId("")
+    }
+  }
+
+  const removePrompt = async (promptId) => {
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      await adminDeletePrompt(promptId)
+      setPromptDeleteConfirm("")
+      if (promptEditingId === promptId) resetPromptEditor()
+      setPromptMessage(t.promptDeleted)
+      await refreshPromptWorkspace({
+        page: prompts.length === 1 && promptPagination.page > 1
+          ? promptPagination.page - 1
+          : promptPagination.page
+      })
+    } catch (err) {
+      setPromptError(err.message)
+    }
+  }
+
+  const submitPromptSearch = async (e) => {
+    e.preventDefault()
+    setPromptPagination(prev => ({ ...prev, page: 1 }))
+    await refreshPromptWorkspace({ page: 1 })
+  }
+
+  const updatePromptBinding = async (sceneKey, promptId = "") => {
+    if (!sceneKey) return
+    setPromptBindingUpdatingScene(sceneKey)
+    setPromptMessage("")
+    setPromptError("")
+    try {
+      await adminUpdatePromptBinding(sceneKey, promptId)
+      setPromptMessage(t.promptBindingSaved)
+      await refreshPromptWorkspace()
+    } catch (err) {
+      setPromptError(err.message)
+    } finally {
+      setPromptBindingUpdatingScene("")
+    }
+  }
+
   const saveVectorStoreConfig = async () => {
     setVectorStoreSaving(true)
     setVectorStoreMsg("")
@@ -645,54 +783,10 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     }
   }
 
-  const validateLLM = (cfg) => {
-    if (!cfg.api_base || !cfg.api_base.startsWith("http")) return false
-    if (!cfg.model) return false
-    const temperature = Number(cfg.temperature)
-    if (Number.isNaN(temperature) || temperature < 0 || temperature > 2) return false
-    const maxTokens = Number(cfg.max_tokens)
-    if (Number.isNaN(maxTokens) || maxTokens <= 0) return false
-    const timeout = Number(cfg.timeout)
-    if (Number.isNaN(timeout) || timeout <= 0) return false
-    if (cfg.headers && typeof cfg.headers !== "object") return false
-    return true
-  }
-
-  const saveLLM = async () => {
-    if (!llmConfig) return
-    if (!validateLLM(llmConfig)) {
-      setLlmError(t.validateFailed)
-      return
-    }
-    setLlmSaving(true)
-    try {
-      await persistLLMConfig(llmConfig)
-      setLlmError(t.saved)
-    } catch (err) {
-      setLlmError(err.message)
-    } finally {
-      setLlmSaving(false)
-    }
-  }
-
-  const clearLLMApiKey = async () => {
-    setLlmClearingKey(true)
-    try {
-      await adminDeleteLLMApiKey()
-      setLlmHasApiKey(false)
-      setLlmConfig(prev => prev ? { ...prev, api_key: "" } : prev)
-      setLlmError(t.llmApiKeyCleared)
-    } catch (err) {
-      setLlmError(err.message)
-    } finally {
-      setLlmClearingKey(false)
-    }
-  }
-
   const testLLM = async () => {
     if (!llmConfig) return
-    if (!validateLLM(llmConfig)) {
-      setLlmTestError(t.validateFailed)
+    if (Array.isArray(llmConfig.missing_env_vars) && llmConfig.missing_env_vars.length > 0) {
+      setLlmTestError(`${t.llmMissingEnv}: ${llmConfig.missing_env_vars.join(", ")}`)
       return
     }
     const prompt = (llmTestPrompt || t.llmTestDefaultPrompt).trim()
@@ -855,6 +949,28 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
     if (s.length <= 300) return s
     return `${s.slice(0, 300)}...`
   }
+
+  const getPromptStatusLabel = (status) => (
+    status === "enabled" ? t.promptStatusEnabled : t.promptStatusDisabled
+  )
+
+  const currentPromptBinding = Array.isArray(promptBindings) && promptBindings.length > 0
+    ? promptBindings[0]
+    : null
+  const currentBindingSceneKey = currentPromptBinding?.scene_key || ""
+  const currentBindingPromptId = currentPromptBinding?.active_prompt?.id || ""
+  const promptEditingIsSystem = promptEditingSource === "system"
+  const promptEditingStatus = prompts.find(item => item.id === promptEditingId)?.status || "enabled"
+  const promptEditorLanguageLabel = lang === "en" ? t.promptLangEnglish : t.promptLangChinese
+  const promptEditorDisplayName = getPromptDisplayName({
+    id: promptEditingId,
+    prompt_key: promptForm.prompt_key,
+    name: promptForm.name
+  })
+  const promptViewStatus = promptViewDetail?.status || "enabled"
+  const promptViewSourceLabel = promptViewDetail?.source === "system" || promptViewDetail?.managed_scope === "system"
+    ? t.promptSourceSystem
+    : t.promptSourceCustom
   
   if (!admin) {
     return (
@@ -869,12 +985,19 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
   
   return (
     <div className="page admin-shell">
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div className="admin-topbar">
         <h1>{t.title}</h1>
-        <div>
-          <button onClick={onBack || (() => window.history.back())} style={{ marginRight: 8 }}>{t.back}</button>
+        <div className="admin-topbar-actions">
+          <label className="admin-toolbar-pill">
+            <span>{t.uiLanguage}</span>
+            <select value={lang || "zh"} onChange={e => onLangChange?.(e.target.value)}>
+              <option value="zh">{t.langOptionZh}</option>
+              <option value="en">{t.langOptionEn}</option>
+            </select>
+          </label>
+          <button onClick={onBack || (() => window.history.back())}>{t.back}</button>
           <span>{t.welcome}, {user?.username} </span>
-          <button onClick={logout}>Logout</button>
+          <button onClick={logout}>{t.logout}</button>
         </div>
       </div>
       
@@ -882,6 +1005,7 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
         <button className={tab === "stats" ? "active" : ""} onClick={() => setTab("stats")}>{t.tabStats}</button>
         <button className={tab === "documents" ? "active" : ""} onClick={() => setTab("documents")}>{t.tabDocs}</button>
         <button className={tab === "users" ? "active" : ""} onClick={() => setTab("users")}>{t.tabUsers}</button>
+        <button className={tab === "prompts" ? "active" : ""} onClick={() => setTab("prompts")}>{t.tabPrompts}</button>
         <button className={tab === "model" ? "active" : ""} onClick={() => setTab("model")}>{t.tabModel}</button>
         <button className={tab === "skills" ? "active" : ""} onClick={() => setTab("skills")}>{t.tabSkills}</button>
         <button className={tab === "regulations" ? "active" : ""} onClick={() => setTab("regulations")}>{t.tabRegulations}</button>
@@ -1003,6 +1127,328 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
               onClick={() => setPagination(prev => ({ ...prev, page: prev.page + 1 }))}
             >{t.next}</button>
           </div>
+        </div>
+      )}
+
+      {tab === "prompts" && (
+        <div className="card">
+          <div className="prompt-header">
+            <div>
+              <h2>{t.promptMgmt}</h2>
+              <p className="meta">{t.promptBusinessHint}</p>
+            </div>
+            <div className="row">
+              <button onClick={openPromptCreate}>{t.promptCreate}</button>
+              <button onClick={() => refreshPromptWorkspace()}>{t.promptRefresh}</button>
+            </div>
+          </div>
+
+          <div className="prompt-layout">
+            <div className="prompt-panel">
+              <form className="prompt-toolbar" onSubmit={submitPromptSearch}>
+                <input
+                  placeholder={t.promptSearchPlaceholder}
+                  value={promptSearch}
+                  onChange={e => setPromptSearch(e.target.value)}
+                />
+                <select
+                  value={promptStatusFilter}
+                  onChange={e => {
+                    setPromptStatusFilter(e.target.value)
+                    setPromptPagination(prev => ({ ...prev, page: 1 }))
+                  }}
+                >
+                  <option value="all">{t.promptSearchStatusAll}</option>
+                  <option value="enabled">{t.promptSearchStatusEnabled}</option>
+                  <option value="disabled">{t.promptSearchStatusDisabled}</option>
+                </select>
+                <button type="submit">{t.searchBtn}</button>
+              </form>
+
+              {promptError && <div className="prompt-banner error">{promptError}</div>}
+              {promptMessage && <div className="prompt-banner success">{promptMessage}</div>}
+
+              {promptLoading ? <p>{t.loading}</p> : prompts.length === 0 ? (
+                <div className="prompt-empty">{t.promptEmpty}</div>
+              ) : (
+                <>
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>{t.promptName}</th>
+                        <th>{t.promptStatus}</th>
+                        <th>{t.colActions}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {prompts.map(prompt => {
+                        const isSystemPrompt = prompt.source === "system" || prompt.managed_scope === "system"
+                        const isCurrentPrompt = currentBindingPromptId === prompt.id
+                        return (
+                          <tr key={prompt.id} className={promptEditingId === prompt.id || currentBindingPromptId === prompt.id || promptViewingId === prompt.id ? "prompt-row-active" : ""}>
+                            <td>
+                              <div className="title">{getPromptDisplayName(prompt)}</div>
+                              {isCurrentPrompt && (
+                                <div className="prompt-binding-actions">
+                                  <span className="prompt-binding-chip">{t.promptBindingCurrentBadge}</span>
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <span className={`prompt-status-badge ${prompt.status}`}>
+                                {getPromptStatusLabel(prompt.status)}
+                              </span>
+                            </td>
+                            <td>
+                              <div className="prompt-actions-inline">
+                                <button type="button" onClick={() => openPromptEdit(prompt.id)}>{t.promptEdit}</button>
+                                <button
+                                  type="button"
+                                  disabled={!currentBindingSceneKey || prompt.status !== "enabled" || promptBindingUpdatingScene === currentBindingSceneKey || currentBindingPromptId === prompt.id}
+                                  onClick={() => updatePromptBinding(currentBindingSceneKey, prompt.id)}
+                                >
+                                  {currentBindingPromptId === prompt.id ? t.promptBindingCurrentBadge : t.promptBindingSetActive}
+                                </button>
+                                <button type="button" onClick={() => openPromptView(prompt.id)}>{t.promptViewAction}</button>
+                                {!isSystemPrompt && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={promptStatusUpdatingId === prompt.id}
+                                      onClick={() => togglePromptStatus(prompt)}
+                                    >
+                                      {prompt.status === "enabled" ? t.promptDisable : t.promptEnable}
+                                    </button>
+                                    {promptDeleteConfirm === prompt.id ? (
+                                      <>
+                                        <button type="button" onClick={() => removePrompt(prompt.id)}>{t.confirm}</button>
+                                        <button type="button" onClick={() => setPromptDeleteConfirm("")}>{t.cancel}</button>
+                                      </>
+                                    ) : (
+                                      <button type="button" onClick={() => setPromptDeleteConfirm(prompt.id)}>{t.delete}</button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+
+                  <div className="pagination">
+                    <button
+                      disabled={promptPagination.page === 1}
+                      onClick={() => setPromptPagination(prev => ({ ...prev, page: prev.page - 1 }))}
+                    >
+                      {t.previous}
+                    </button>
+                    <span>
+                      {lang === "zh"
+                        ? `第 ${promptPagination.page} / ${Math.max(1, Math.ceil(promptPagination.total / promptPagination.page_size))} 页`
+                        : `Page ${promptPagination.page} of ${Math.max(1, Math.ceil(promptPagination.total / promptPagination.page_size))}`}
+                    </span>
+                    <button
+                      disabled={promptPagination.page * promptPagination.page_size >= promptPagination.total}
+                      onClick={() => setPromptPagination(prev => ({ ...prev, page: prev.page + 1 }))}
+                    >
+                      {t.next}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div className="prompt-panel prompt-editor-panel">
+              <div className="prompt-editor-header">
+                <div>
+                  <h3>{t.promptEditorTitle}</h3>
+                  {promptEditingId && <div className="meta">{promptEditorDisplayName}</div>}
+                  <div className="meta">{t.promptLanguageLabel}: {promptEditorLanguageLabel}</div>
+                  <div className="meta">{t.promptNoCodeHint}</div>
+                  {promptEditingIsSystem && <div className="meta">{t.promptSystemHint}</div>}
+                </div>
+                {promptEditingId && (
+                  <span className={`prompt-status-badge ${promptEditingStatus}`}>
+                    {getPromptStatusLabel(promptEditingStatus)}
+                  </span>
+                )}
+              </div>
+
+              <div className="prompt-form-grid">
+                {!promptEditingIsSystem && (
+                  <label className="prompt-field">
+                    <span>{t.promptName}</span>
+                    <input
+                      value={promptForm.name}
+                      onChange={e => setPromptForm(prev => ({ ...prev, name: e.target.value }))}
+                    />
+                    {promptFormErrors.name && <span className="prompt-field-error">{promptFormErrors.name}</span>}
+                  </label>
+                )}
+
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptRoleText}</span>
+                  <textarea
+                    rows={6}
+                    value={promptForm.display_system_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, display_system_text: e.target.value }))}
+                  />
+                </label>
+
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptFocusText}</span>
+                  <textarea
+                    rows={4}
+                    value={promptForm.display_focus_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, display_focus_text: e.target.value }))}
+                    placeholder={t.promptFocusPlaceholder}
+                  />
+                </label>
+
+                <label className="prompt-field prompt-field-wide">
+                  <span>{t.promptTaskText}</span>
+                  <textarea
+                    rows={12}
+                    value={promptForm.display_template_text}
+                    onChange={e => setPromptForm(prev => ({ ...prev, display_template_text: e.target.value }))}
+                  />
+                  {promptFormErrors.display_template_text && <span className="prompt-field-error">{promptFormErrors.display_template_text}</span>}
+                </label>
+              </div>
+
+              <div className="prompt-actions">
+                <button disabled={promptSaving} onClick={savePrompt}>
+                  {promptSaving ? t.loading : (promptEditingId ? t.promptSaveUpdate : t.promptSaveCreate)}
+                </button>
+                <button type="button" onClick={openPromptCreate}>{t.promptCreate}</button>
+                {promptEditingIsSystem && promptEditingId && (
+                  <button type="button" disabled={promptRestoreLoading} onClick={restorePromptDefault}>
+                    {promptRestoreLoading ? t.loading : t.promptRestoreDefault}
+                  </button>
+                )}
+                {promptEditingId && promptDeleteConfirm === promptEditingId && (
+                  <span className="meta">{t.promptDeleteConfirm}</span>
+                )}
+              </div>
+
+              <div className="prompt-preview-box">
+                <div className="prompt-preview-header">
+                  <strong>{t.promptPreview}</strong>
+                  <span className="meta">
+                    {promptPreviewLoading ? t.loading : t.promptPreviewHint}
+                  </span>
+                </div>
+                {promptPreviewError ? (
+                  <div className="prompt-banner error">{t.promptPreviewFailed}: {promptPreviewError}</div>
+                ) : (promptPreviewSystem || promptPreviewUser) ? (
+                  <div className="prompt-preview-stack">
+                    <div className="prompt-preview-section">
+                      <div className="meta">{t.promptPreviewSystem}</div>
+                      <pre className="prompt-preview-content">{promptPreviewSystem || "-"}</pre>
+                    </div>
+                    <div className="prompt-preview-section">
+                      <div className="meta">{t.promptPreviewUser}</div>
+                      <pre className="prompt-preview-content">{promptPreviewUser || "-"}</pre>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="prompt-empty">{t.promptPreviewEmpty}</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {promptViewingId && (
+            <div className="prompt-inspect-overlay" role="dialog" aria-modal="true">
+              <div className="prompt-inspect-modal">
+                <div className="prompt-inspect-header">
+                  <div className="prompt-inspect-title">
+                    <h3>{t.promptViewTitle}</h3>
+                    <p className="meta">{t.promptViewHint}</p>
+                  </div>
+                  <button type="button" onClick={closePromptView}>{t.promptViewClose}</button>
+                </div>
+
+                {promptViewError ? (
+                  <div className="prompt-banner error">{promptViewError}</div>
+                ) : promptViewLoading ? (
+                  <div className="prompt-empty">{t.loading}</div>
+                ) : promptViewDetail ? (
+                  <div className="prompt-inspect-body">
+                    <div className="prompt-inspect-summary">
+                      <div className="summary-item">
+                        <span className="meta">{t.promptName}</span>
+                        <strong>{getPromptDisplayName(promptViewDetail)}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span className="meta">{t.promptLanguageLabel}</span>
+                        <strong>{promptEditorLanguageLabel}</strong>
+                      </div>
+                      <div className="summary-item">
+                        <span className="meta">{t.promptStatus}</span>
+                        <span className={`prompt-status-badge ${promptViewStatus}`}>
+                          {getPromptStatusLabel(promptViewStatus)}
+                        </span>
+                      </div>
+                      <div className="summary-item">
+                        <span className="meta">{t.promptSource}</span>
+                        <strong>{promptViewSourceLabel}</strong>
+                      </div>
+                      {currentBindingPromptId === promptViewDetail.id && (
+                        <div className="summary-item">
+                          <span className="prompt-binding-chip">{t.promptBindingCurrentBadge}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="prompt-inspect-grid">
+                      <div className="prompt-inspect-section">
+                        <div className="meta">{t.promptRoleText}</div>
+                        <pre className="prompt-preview-content">{promptViewDetail.display_system_text || "-"}</pre>
+                      </div>
+
+                      <div className="prompt-inspect-section">
+                        <div className="meta">{t.promptFocusText}</div>
+                        <pre className="prompt-preview-content">{promptViewDetail.display_focus_text || "-"}</pre>
+                      </div>
+
+                      <div className="prompt-inspect-section prompt-inspect-section-wide">
+                        <div className="meta">{t.promptTaskText}</div>
+                        <pre className="prompt-preview-content">{promptViewDetail.display_template_text || "-"}</pre>
+                      </div>
+                    </div>
+
+                    <div className="prompt-preview-box">
+                      <div className="prompt-preview-header">
+                        <strong>{t.promptViewRenderedTitle}</strong>
+                        <span className="meta">
+                          {promptViewPreviewLoading ? t.loading : t.promptViewRenderedHint}
+                        </span>
+                      </div>
+                      {promptViewPreviewError ? (
+                        <div className="prompt-banner error">{t.promptPreviewFailed}: {promptViewPreviewError}</div>
+                      ) : (promptViewPreviewSystem || promptViewPreviewUser) ? (
+                        <div className="prompt-preview-stack">
+                          <div className="prompt-preview-section">
+                            <div className="meta">{t.promptPreviewSystem}</div>
+                            <pre className="prompt-preview-content">{promptViewPreviewSystem || "-"}</pre>
+                          </div>
+                          <div className="prompt-preview-section">
+                            <div className="meta">{t.promptPreviewUser}</div>
+                            <pre className="prompt-preview-content">{promptViewPreviewUser || "-"}</pre>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="prompt-empty">{t.promptPreviewEmpty}</div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1170,45 +1616,66 @@ export default function Admin({ onBack, lang, tab: externalTab = "documents", on
               </div>
               <div className="row">
                 <label>{t.provider}</label>
-                <select value={llmConfig.provider} onChange={e => setLlmConfig(prev => ({ ...prev, provider: e.target.value }))}>
-                  <option value="llama_cpp">llama_cpp</option>
-                </select>
+                <div>{llmConfig.provider_label} ({llmConfig.provider})</div>
               </div>
               <div className="row">
                 <label>{t.apiBase}</label>
-                <input value={llmConfig.api_base} onChange={e => setLlmConfig(prev => ({ ...prev, api_base: e.target.value }))} />
-              </div>
-              <div className="row">
-                <label>{t.apiKey}</label>
-                <input
-                  type="password"
-                  value={llmConfig.api_key}
-                  disabled={llmConfig.provider === "ollama" || llmConfig.provider === "llama_cpp"}
-                  placeholder={llmHasApiKey && !llmConfig.api_key ? t.llmApiKeySavedMask : ""}
-                  onChange={e => setLlmConfig(prev => ({ ...prev, api_key: e.target.value }))}
-                />
-                {llmHasApiKey && !llmConfig.api_key ? <span className="llm-key-hint">{t.llmApiKeySavedHint}</span> : null}
+                <div>{llmConfig.api_base || "-"}</div>
               </div>
               <div className="row">
                 <label>{t.model}</label>
-                <input value={llmConfig.model} onChange={e => setLlmConfig(prev => ({ ...prev, model: e.target.value }))} />
+                <div>{llmConfig.model || "-"}</div>
               </div>
               <div className="row">
                 <label>{t.temperature}</label>
-                <input type="number" step="0.1" value={llmConfig.temperature} onChange={e => setLlmConfig(prev => ({ ...prev, temperature: e.target.value }))} />
+                <div>{llmConfig.temperature}</div>
               </div>
               <div className="row">
                 <label>{t.maxTokens}</label>
-                <input type="number" value={llmConfig.max_tokens} onChange={e => setLlmConfig(prev => ({ ...prev, max_tokens: e.target.value }))} />
+                <div>{llmConfig.max_tokens}</div>
               </div>
               <div className="row">
                 <label>{t.timeout}</label>
-                <input type="number" value={llmConfig.timeout} onChange={e => setLlmConfig(prev => ({ ...prev, timeout: e.target.value }))} />
+                <div>{llmConfig.timeout}</div>
               </div>
               <div className="row">
-                <button disabled={llmSaving} onClick={saveLLM}>{t.save}</button>
-                <button disabled={llmClearingKey || !llmHasApiKey} onClick={clearLLMApiKey}>{t.llmClearApiKey}</button>
-                {llmError && <span style={{ marginLeft: 12 }}>{llmError}</span>}
+                <label>{t.llmConfigMode}</label>
+                <div>{llmConfig.env_managed ? t.llmConfigModeEnv : t.llmConfigModeMixed}</div>
+              </div>
+              {!!llmConfig.route?.selected_role && (
+                <div className="row">
+                  <label>{t.llmRoute}</label>
+                  <div>{llmConfig.route.selected_role} / {llmConfig.route.selected_source || "-"}</div>
+                </div>
+              )}
+              {Array.isArray(llmConfig.security_issues) && llmConfig.security_issues.length > 0 && (
+                <div className="prompt-banner error">
+                  {llmConfig.security_issues.join(" ")}
+                </div>
+              )}
+              {Array.isArray(llmConfig.missing_env_vars) && llmConfig.missing_env_vars.length > 0 && (
+                <div className="prompt-banner error">
+                  {t.llmMissingEnv}: {llmConfig.missing_env_vars.join(", ")}
+                </div>
+              )}
+              {llmError && <div className="prompt-banner error">{llmError}</div>}
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.llmEnvSupported}</label>
+                </div>
+                <div className="content">
+                  {(llmConfig.supported_env_vars || []).join(", ") || "-"}
+                </div>
+              </div>
+              <div className="llm-test">
+                <div className="row">
+                  <label>{t.llmEnvResolved}</label>
+                </div>
+                <div className="content">
+                  {Object.keys(llmConfig.env_sources || {}).length > 0
+                    ? Object.entries(llmConfig.env_sources).map(([key, value]) => `${key}: ${value}`).join(" | ")
+                    : t.llmEnvResolvedNone}
+                </div>
               </div>
               <div className="llm-test">
                 <div className="row">

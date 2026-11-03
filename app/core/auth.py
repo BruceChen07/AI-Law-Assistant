@@ -1,9 +1,11 @@
 import os
 import uuid
+import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import jwt
 from passlib.context import CryptContext
+from passlib.exc import UnknownHashError
 from app.core.database import get_conn
 
 SECRET_KEY = os.environ.get(
@@ -19,7 +21,10 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    try:
+        return pwd_context.verify(plain_password, hashed_password)
+    except UnknownHashError:
+        return False
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -28,9 +33,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     if expires_delta:
         expire = now + expires_delta
     else:
-        expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    # Ensure tokens minted within the same second are still unique.
-    to_encode.update({"exp": expire, "iat": now, "jti": str(uuid.uuid4())})
+        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire, "jti": str(uuid.uuid4())})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
@@ -135,12 +139,21 @@ def create_session(user_id: str, token: str, ip_address: str = None, user_agent:
     cfg = get_config()
     conn = get_conn(cfg)
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (session_id, user_id, token, ip_address, user_agent, expires_at, now))
-    conn.commit()
-    conn.close()
+    try:
+        cur.execute("""
+            INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session_id, user_id, token, ip_address, user_agent, expires_at, now))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        cur.execute("DELETE FROM sessions WHERE token = ?", (token,))
+        cur.execute("""
+            INSERT INTO sessions (id, user_id, token, ip_address, user_agent, expires_at, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session_id, user_id, token, ip_address, user_agent, expires_at, now))
+        conn.commit()
+    finally:
+        conn.close()
     return session_id
 
 

@@ -16,10 +16,11 @@
 
 - **合同审计**：上传合同（docx/pdf/扫描 pdf），输出风险清单、摘要与证据引用，并支持导出带精准批注的 Word 文档
 - **OCR 增强**：PDF 文本不足时自动回退 OCR，支持多引擎与按文件类型路由
+- **统一 PDF 管线**：新增 `pdf_pipeline` 服务层，统一文本抽取、扫描件 OCR、页面预览、数字化 Word 审计接线
 - **法规管理**：Admin 支持法规上传、条款解析、混合检索与任务追踪
 - **混合检索与跨语种召回**：BM25 + 向量召回 + 可选重排，支持翻译增强查询（translation_config）
 - **记忆式审计管线**：支持条款级轮次审计、引用白名单映射、未验证风险过滤与调试追踪
-- **安全配置**：LLM 密钥优先走安全存储/环境变量，避免在配置文件中明文持久化
+- **安全配置**：LLM 密钥仅从环境变量读取，避免在配置文件中明文持久化
 - **模型与界面配置**：集中式 LLM 参数、UI 开关、运行时热更新
 - **鉴权与管理**：用户登录、角色权限、管理员配置接口
 - **Web UI**：React + Vite 前端，中英文切换
@@ -49,7 +50,7 @@ Models (Embedding + Reranker + LLM)
 | 模型    | BGE-small-zh/en, BGE-reranker     |
 | 前端框架  | React 18, Vite 5                  |
 | 鉴权    | PyJWT, bcrypt, passlib            |
-| 文件解析  | python-docx, pypdf                |
+| 文件解析  | python-docx, pypdf, pypdfium2     |
 
 ## 快速开始
 
@@ -58,7 +59,7 @@ Models (Embedding + Reranker + LLM)
 - Python 3.12+
 - Node.js 22+
 - Windows / Linux / macOS
-- OCR 依赖：tesseract、poppler, mineru（用于扫描 PDF）
+- OCR / PDF 依赖：tesseract、poppler、mineru（用于扫描 PDF）、pypdfium2（用于 PDF 页面预览）
 - 向量数据库：默认使用 SQLite 内存计算。如果是生产环境（百万级以上向量），建议安装 `chromadb` 并在后台配置切换。
 
 ### 1. 克隆项目
@@ -72,7 +73,22 @@ cd AI-Law-Assistant
 
 ```bash
 cd app
-pip install -r requirements.txt
+python -m pip install -U pip
+python -m pip install "pip-tools>=7.4,<8"
+python -m piptools sync requirements.txt dev-requirements.txt
+```
+
+依赖维护规则：
+
+- 仅修改 `app/requirements.in` 和 `app/dev-requirements.in`
+- 禁止手动编辑 `app/requirements.txt` 和 `app/dev-requirements.txt`
+- 变更依赖后执行：
+
+```bash
+cd app
+python -m piptools compile --resolver=backtracking --output-file requirements.txt requirements.in
+python -m piptools compile --resolver=backtracking --output-file dev-requirements.txt dev-requirements.in
+python -m piptools sync requirements.txt dev-requirements.txt
 ```
 
 ### 3. 配置环境
@@ -87,7 +103,7 @@ cp app/config.example.json app/config.json
 Copy-Item app/config.example.json app/config.json
 ```
 
-根据需要修改 `app/config.json`。建议将 LLM 密钥通过环境变量或安全存储管理，不在配置文件中写入明文。
+根据需要修改 `app/config.json`。从当前版本开始，LLM 密钥只允许通过环境变量注入，不应写入配置文件。
 
 ### 4. 初始化数据库
 
@@ -163,8 +179,16 @@ npm run storybook
 ### 模型配置（Admin 页面）
 
 1. 进入 Admin → 「模型配置」
-2. 填写 API 端点、模型、温度、最大 Token 等
-3. 保存后立即生效
+2. 查看当前生效的 provider、模型、接口地址、环境变量来源与缺失项
+3. 如需切换模型服务，请先在 Windows 环境变量中修改，再重启服务
+
+说明：
+
+- Admin 页面不再提供 API Key 输入框
+- Admin 页面不再保存任何密钥
+- 页面内的连通性测试会直接使用当前环境变量配置
+
+完整说明见：[Windows 环境变量化大模型配置指南](file:///d:/Workspace/AI-Law-Assistant/docs/windows-llm-env-setup.zh-CN.md)
 
 ### 记忆模块开关与成本控制（Admin 页面）
 
@@ -248,7 +272,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 ### 企业内网严格离线部署
 
-当前分支已切换为企业私有化离线部署基线，所有模型、OCR、检索与翻译能力均要求通过本机或企业内网服务提供，不再包含公网云端兜底逻辑。
+系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，并可在企业内网场景下以“纯本地、无云端兜底”方式运行。
 
 **离线模型配置示例**（`app/config.json`）：
 
@@ -263,7 +287,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 "local_llm": {
     "enabled": true,
     "routing_enabled": true,
-    "allow_small_to_main_fallback": true,
+    "cloud_fallback_enabled": false,
     "main_model": {
         "provider": "ollama",
         "model": "qwen3.6:27b",
@@ -286,12 +310,13 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
             "memory_flush": "small",
             "entity_extract_small": "small",
             "tax_match_small": "small"
-        }
+        },
+        "high_risk_force_cloud": false
     },
     "execution": {
-        "fallback_on_error": true,
-        "fallback_on_invalid_json": true,
-        "tax_match_main_review_labels": ["non_compliant"],
+        "fallback_on_error": false,
+        "fallback_on_invalid_json": false,
+        "tax_match_cloud_review_labels": ["non_compliant"],
         "tax_match_min_confidence": 0.7,
         "tax_match_max_workers": 2,
         "tax_risk_max_workers": 2
@@ -301,8 +326,8 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 
 **核心能力**：
 - **任务画像路由**：合同审计主流程走 `main` 模型，实体抽取与规则匹配走 `small` 模型
-- **失败回退**：轻量模型异常或返回坏 JSON 时仅允许升级到内网主模型
-- **网络守卫**：`offline_strict` 模式会阻断非内网地址的 LLM 请求
+- **纯本地执行**：所有大模型调用仅访问本机 Ollama，不上传到外部云端
+- **本地容错**：保留 JSON 容错和结果校验，但不再把异常或坏 JSON 升级到云端
 - **JSON 容错**：自动修复 fenced JSON / 尾逗号 / 包裹文本等本地模型常见脏输出
 - **并发约束**：本地模式可独立限制 worker 上限，避免 CPU 过载
 
@@ -329,15 +354,8 @@ python .\bin\start-services.py
 **推荐模型选型**：
 | 角色 | 推荐模型 | 量化 | 硬件要求 |
 |------|---------|------|---------|
-| 主审计模型 | `qwen3.6:27b` | Ollama GGUF | 64 GB RAM 起 |
-| 侧车模型 | `qwen3:4b` | Ollama GGUF | 16 GB RAM 起 |
-| OCR / Translation | 本地目录模型 | 本地资产 | 由企业制品库分发 |
-
-**管理后台新增能力**：
-- `模型配置` 页会自动识别本机 `Ollama` 已下载模型
-- 模型列表使用 5 分钟缓存，支持手动刷新和搜索筛选
-- 用户选择的默认模型会保存到浏览器 `localStorage`，下次进入后台自动恢复
-- 切换模型后会立即写回后端配置并实时生效
+| 主审计模型 | `qwen3.6:27b` | Ollama | 64-128 GB RAM, 16-24 物理核 |
+| 侧车模型 | `llama3.2:3b` | Ollama | 8-12 GB RAM, 4-8 物理核 |
 
 **回归测试**：
 ```bash
@@ -387,7 +405,6 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
     "llm_config": {
         "provider": "ollama",
         "api_base": "http://127.0.0.1:11434/v1",
-        "api_key": "",
         "model": "qwen3.6:27b",
         "temperature": 0.2,
         "max_tokens": 2048,
@@ -440,7 +457,7 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | `ocr_dpi`                | int     | OCR 转换 DPI                |
 | `ocr_engine`             | string  | OCR 引擎（auto/tesseract/其他） |
 | `ocr_engine_order`       | array   | OCR 引擎优先级                 |
-| `llm_config`             | object  | LLM 参数配置                  |
+| `llm_config`             | object  | LLM 非敏感默认参数配置（不含密钥） |
 | `memory_runtime_config`  | object  | 记忆模块运行时开关与预算配置            |
 | `memory_module_enabled`  | boolean | 是否启用经验记忆审计（关闭后走 classic）    |
 | `memory_mode_when_disabled` | string | 禁用记忆后的模式（当前支持 `classic`） |
@@ -473,6 +490,24 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | `APP_PORT`             | 8000        | 服务端口      |
 | `APP_CONFIG`           | config.json | 配置文件路径    |
 | `APP_PORT_AUTO_SWITCH` | 1           | 端口冲突时自动漂移 |
+
+常用 LLM 环境变量：
+
+| 变量 | 说明 |
+| --- | --- |
+| `LLM_PROVIDER` | 当前启用的模型服务，支持 `openai` / `openai_compatible` / `qwen` / `wenxin` / `ollama` |
+| `LLM_API_BASE` | 可选，覆盖当前 provider 的接口地址 |
+| `LLM_MODEL` | 可选，覆盖当前 provider 的模型名 |
+| `OPENAI_API_KEY` | OpenAI API Key |
+| `DASHSCOPE_API_KEY` | 通义千问 / DashScope API Key |
+| `QIANFAN_BEARER_TOKEN` | 文心一言 Bearer Token |
+| `QIANFAN_ACCESS_KEY` / `QIANFAN_SECRET_KEY` | 文心一言 AK/SK，程序运行时自动换取临时访问令牌 |
+| `OLLAMA_HOST` | Ollama 服务地址 |
+| `OLLAMA_MODEL` | Ollama 模型名 |
+
+完整配置步骤与排查指南见：
+
+- [docs/windows-llm-env-setup.zh-CN.md](file:///d:/Workspace/AI-Law-Assistant/docs/windows-llm-env-setup.zh-CN.md)
 
 ### 运行测试
 

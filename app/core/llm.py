@@ -9,11 +9,18 @@ from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urlsplit
 
 import httpx
+from openai import OpenAI, APITimeoutError
 
+from app.core.llm_backends import get_provider
 from app.core.token_utils import estimate_messages_tokens
+from app.core.llm_env import (
+    collect_persisted_secret_issues,
+    detect_env_provider_hint,
+    get_provider_label,
+    is_cloud_provider,
+    resolve_runtime_llm_config,
+)
 from app.core.llm_router import resolve_llm_route
-from app.core.llm_trace import LlmTraceCollector, get_trace_collector
-from app.core.secure_store import get_llm_api_key
 
 logger = logging.getLogger("law_assistant")
 
@@ -32,11 +39,35 @@ class LLMService:
         s = s.strip('"').strip("'").strip()
         return s
 
-    def _get_llm_config(self) -> Dict[str, Any]:
-        llm_cfg = self.cfg.get("llm_config") or {}
-        if isinstance(llm_cfg, dict):
-            return llm_cfg
-        return {}
+    def _is_enabled(self, value: Any, default: bool = False) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+    def _contract_audit_env_cloud_override(
+        self, task_profile: str, route_meta: Dict[str, Any]
+    ) -> Tuple[bool, str, str]:
+        if task_profile not in {
+            "contract_audit_main",
+            "contract_audit_memory",
+            "contract_clause_audit",
+            "contract_audit_skill",
+        }:
+            return False, "", ""
+        if str(route_meta.get("selected_role") or "") not in {"main", "small"}:
+            return False, "", ""
+        local_cfg = self.cfg.get("local_llm") if isinstance(
+            self.cfg, dict) else {}
+        routing_cfg = local_cfg.get(
+            "routing") if isinstance(local_cfg, dict) else {}
+        if not self._is_enabled(routing_cfg.get("contract_audit_force_env_cloud"), False):
+            return False, "", ""
+        provider, source = detect_env_provider_hint()
+        if not source or not is_cloud_provider(provider):
+            return False, "", ""
+        return True, provider, source
 
     def _resolve_chat_target(
         self, overrides: Optional[Dict[str, Any]] = None
@@ -57,28 +88,46 @@ class LLMService:
             task_profile=task_profile,
             model_role=model_role,
         )
+        force_env_cloud, env_provider, env_source = self._contract_audit_env_cloud_override(
+            task_profile, route_meta)
+        if force_env_cloud:
+            cfg = dict((self.cfg or {}).get("llm_config"))
+            route_meta = {
+                **dict(route_meta),
+                "selected_role": "cloud_fallback",
+                "selected_source": "llm_config",
+                "reason": "contract_audit_env_cloud_override",
+                "env_override_provider": env_provider,
+                "env_override_source": env_source,
+            }
         visible_overrides = {
             k: v for k, v in merged_overrides.items()
             if not str(k).startswith("_")
         }
         cfg.update(visible_overrides)
+        cfg["_runtime_task_profile"] = task_profile
+        cfg["_runtime_selected_role"] = str(
+            route_meta.get("selected_role") or "")
+        cfg["_prefer_long_timeout"] = task_profile in {
+            "contract_audit_main",
+            "contract_clause_audit",
+        }
+        # Keep local main/small targets stable at runtime instead of letting
+        # global env vars silently replace provider/api_base/model.
+        cfg["_lock_runtime_target"] = str(route_meta.get("selected_role") or "") in {
+            "main",
+            "small",
+        } and str(route_meta.get("selected_source") or "") in {
+            "main_model",
+            "small_model",
+        }
+        route_meta["runtime_target_locked"] = bool(
+            cfg.get("_lock_runtime_target"))
         route_trace = dict(route_meta)
         route_trace["task_profile"] = task_profile
         merged_trace_meta = dict(trace_meta)
         merged_trace_meta["llm_route"] = route_trace
         return cfg, route_meta, merged_trace_meta
-
-    def _resolve_api_key(self, cfg: Dict[str, Any]) -> str:
-        key = self._clean_text(cfg.get("api_key", ""))
-        if key:
-            return key
-        secure_key = self._clean_text(get_llm_api_key(self.cfg))
-        if secure_key:
-            return secure_key
-        return self._clean_text(os.environ.get("LLM_API_KEY", ""))
-
-    def _provider_uses_local_runtime(self, provider: str) -> bool:
-        return self._clean_text(provider).lower() in {"ollama", "llama_cpp"}
 
     def _build_base_url(self, base: str) -> str:
         s = re.sub(r"\s+", "", self._clean_text(base))
@@ -242,6 +291,8 @@ class LLMService:
                    "Bearer ***", s, flags=re.IGNORECASE)
         s = re.sub(r"sk-[A-Za-z0-9_\-]{16,}", "sk-***", s)
         s = re.sub(r"\b1[3-9]\d{9}\b", "1**********", s)
+        s = re.sub(r"\"(api_key|access_key|secret_key)\"\s*:\s*\"[^\"]+\"",
+                   r'"\1":"***"', s, flags=re.IGNORECASE)
         return s
 
     def _clip(self, text: Any, max_chars: int) -> str:
@@ -269,12 +320,19 @@ class LLMService:
         opts = self._trace_options()
         if not opts["enabled"]:
             return
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        trace_dir = os.path.join(opts["dir"], day)
-        os.makedirs(trace_dir, exist_ok=True)
-        file_path = os.path.join(trace_dir, "llm_trace.jsonl")
-        with open(file_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        try:
+            day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            trace_dir = os.path.join(opts["dir"], day)
+            os.makedirs(trace_dir, exist_ok=True)
+            file_path = os.path.join(trace_dir, "llm_trace.jsonl")
+            with open(file_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as e:
+            logger.warning(
+                "llm_trace_write_failed dir=%s err=%s",
+                opts.get("dir", ""),
+                str(e),
+            )
 
     def _build_chat_kwargs(self, model: str, messages: List[Dict[str, str]], temperature: float, max_tokens: int, cfg: Dict[str, Any]) -> Dict[str, Any]:
         kwargs: Dict[str, Any] = {
@@ -393,430 +451,178 @@ class LLMService:
         except Exception:
             return str(getattr(response, "text", "") or "")
 
-    def _chat_via_ollama(
-        self,
-        api_base: str,
-        model: str,
-        messages: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: int,
-        timeout: int,
-        cfg: Dict[str, Any],
-        extra_headers: Optional[Dict[str, str]],
-        trace_span=None,
-        trace_collector: Optional[LlmTraceCollector] = None,
-    ) -> Tuple[str, Dict[str, Any]]:
-        base_url = self._build_ollama_base_url(api_base)
-        request_url = f"{base_url}/api/chat"
-        request_headers = self._build_headers(None, extra_headers)
-        request_body = self._build_ollama_chat_body(
-            model, messages, temperature, max_tokens, cfg
-        )
-
-        def _try_ollama_request(_url: str, _body: Dict, _hdr: Dict, _to: int, _desc: str = "") -> Dict:
-            nonlocal trace_span, trace_collector
-            if trace_span and trace_collector:
-                trace_collector.record_thinking(trace_span)
-            return self._post_ollama_chat(_url, _body, _hdr, _to)
-
-        try:
-            raw = _try_ollama_request(
-                request_url, request_body, request_headers, timeout, "primary")
-        except httpx.HTTPStatusError as e:
-            err_text = self._extract_http_error_text(e).lower()
-            if e.response is not None and e.response.status_code == 404 and "model" in err_text and "not found" in err_text:
-                if trace_span and trace_collector:
-                    trace_collector.record_error(
-                        trace_span, error_type="model_not_found",
-                        error_message=f"ollama model not found: {model}")
-                raise RuntimeError(f"ollama model not found: {model}") from e
-            if trace_span and trace_collector:
-                trace_collector.record_error(
-                    trace_span, error_type="http_error",
-                    error_message=str(e))
-            raise
-        except httpx.ReadError as e:
-            logger.warning(
-                "ollama_request_read_retry url=%s model=%s timeout=%s err=%s",
-                request_url,
-                model,
-                timeout,
-                str(e),
-            )
-            time.sleep(0.2)
-            try:
-                raw = _try_ollama_request(
-                    request_url, request_body, request_headers, timeout, "read_retry")
-            except Exception as e2:
-                if trace_span and trace_collector:
-                    trace_collector.record_error(
-                        trace_span, error_type="read_error_retry_failed",
-                        error_message=str(e2))
-                raise RuntimeError(
-                    f"ollama request failed after read retry: {str(e2)}"
-                ) from e2
-        except httpx.TimeoutException:
-            # ---- first retry: extended timeout + reduced max_tokens ----
-            if trace_span and trace_collector:
-                trace_collector.record_error(
-                    trace_span, error_type="timeout_retry_1",
-                    error_message=f"timeout after {timeout}s, retrying with extended timeout")
-            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 900)))
-            retry_cfg = dict(cfg)
-            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
-            retry_body = self._build_ollama_chat_body(
-                model, messages, temperature, retry_max_tokens, retry_cfg
-            )
-            logger.warning(
-                "ollama_request_timeout_retry url=%s model=%s timeout=%s->%s max_tokens=%s->%s",
-                request_url,
-                model,
-                timeout,
-                retry_timeout,
-                max_tokens,
-                retry_max_tokens,
-            )
-            try:
-                raw = _try_ollama_request(
-                    request_url, retry_body, request_headers, retry_timeout, "retry_1")
-            except httpx.TimeoutException:
-                # ---- last-chance retry: full timeout + aggressive reduction ----
-                if trace_span and trace_collector:
-                    trace_collector.record_error(
-                        trace_span, error_type="timeout_retry_2",
-                        error_message=f"timeout again after {retry_timeout}s, last-chance retry with reduced tokens")
-                last_timeout = retry_timeout
-                last_max_tokens = max(64, int(max_tokens * 0.3))
-                last_body = self._build_ollama_chat_body(
-                    model, messages, temperature, last_max_tokens, dict(cfg)
-                )
-                logger.warning(
-                    "ollama_request_timeout_last_chance url=%s model=%s timeout=%s max_tokens=%s->%s",
-                    request_url,
-                    model,
-                    last_timeout,
-                    max_tokens,
-                    last_max_tokens,
-                )
-                raw = _try_ollama_request(
-                    request_url, last_body, request_headers, last_timeout, "retry_2")
-            except Exception as e2:
-                if trace_span and trace_collector:
-                    trace_collector.record_error(
-                        trace_span, error_type="timeout_retry_failed",
-                        error_message=str(e2))
-                raise RuntimeError(
-                    f"ollama request failed after timeout retry: {str(e2)}"
-                ) from e2
-        message = raw.get("message") if isinstance(
-            raw.get("message"), dict) else {}
-        content = str(message.get("content") or "")
-        # 捕获思考内容（部分模型如 deepseek-r1 会返回 reasoning_content）
-        thinking_content = str(message.get(
-            "reasoning_content") or message.get("thinking") or "")
-        prompt_tokens = int(raw.get("prompt_eval_count") or 0)
-        completion_tokens = int(raw.get("eval_count") or 0)
-        parsed = {
-            "model": raw.get("model") or model,
-            "done": bool(raw.get("done", True)),
-            "done_reason": raw.get("done_reason") or "",
-            "message": {
-                "role": message.get("role") or "assistant",
-                "content": content,
-            },
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
-            "ollama_raw": raw,
-            "choices": [
-                {
-                    "message": {
-                        "role": message.get("role") or "assistant",
-                        "content": content,
-                    }
-                }
-            ],
-        }
-        # ---- 记录 Trace 响应 ----
-        if trace_span and trace_collector:
-            if thinking_content:
-                trace_collector.record_thinking(
-                    trace_span, thinking_content=thinking_content)
-            trace_collector.record_response(
-                trace_span,
-                content=content,
-                usage=parsed["usage"],
-                ollama_raw=raw,
-            )
-        return content, parsed
-
     def _chat_via_openai_compatible(
         self,
-        api_base: str,
-        model: str,
         messages: List[Dict[str, str]],
-        temperature: float,
-        max_tokens: int,
-        timeout: int,
         cfg: Dict[str, Any],
         api_key: str,
-        extra_headers: Optional[Dict[str, str]],
     ) -> Tuple[str, Dict[str, Any]]:
-        base_url = self._build_base_url(api_base)
-        self._enforce_network_policy(base_url)
-        request_url = f"{base_url}/chat/completions"
-        request_headers = self._build_headers(api_key, extra_headers)
-        request_body = self._build_openai_compatible_body(
-            model, messages, temperature, max_tokens, cfg
-        )
-        try:
-            raw = self._post_json(request_url, request_body,
-                                  request_headers, timeout)
-        except httpx.TimeoutException as e:
-            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
-            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
-            retry_body = self._build_openai_compatible_body(
-                model, messages, temperature, retry_max_tokens, cfg
-            )
-            logger.warning(
-                "openai_compatible_timeout_retry url=%s model=%s timeout=%s->%s max_tokens=%s->%s",
-                request_url,
-                model,
-                timeout,
-                retry_timeout,
-                max_tokens,
-                retry_max_tokens,
-            )
-            try:
-                raw = self._post_json(
-                    request_url, retry_body, request_headers, retry_timeout
-                )
-            except Exception as e2:
-                raise RuntimeError(
-                    f"openai-compatible request failed after timeout retry: {str(e2)}"
-                ) from e2
-        choices = raw.get("choices") if isinstance(
-            raw.get("choices"), list) else []
-        first_choice = choices[0] if choices else {}
-        message = first_choice.get("message") if isinstance(
-            first_choice.get("message"), dict
-        ) else {}
-        content = message.get("content", "")
-        if isinstance(content, list):
-            content = json.dumps(content, ensure_ascii=False)
-        reasoning_content = message.get("reasoning_content", "")
-        if isinstance(reasoning_content, list):
-            reasoning_content = json.dumps(
-                reasoning_content, ensure_ascii=False)
-        provider_name = self._clean_text(
-            cfg.get("provider", "openai_compatible")).lower()
-        used_reasoning_fallback = False
-        thinking_leaked = False
-        # 检查调用方是否显式禁用了思考模式
-        thinking_disabled = "enable_thinking" in cfg and not bool(cfg.get("enable_thinking"))
-        if provider_name == "llama_cpp" and not str(content or "").strip() and str(reasoning_content or "").strip():
-            if thinking_disabled:
-                # enable_thinking=False 但模型仍输出了 reasoning_content → 思考模式泄漏
-                # 此时 reasoning_content 是思维链草稿，不是有效响应，不能作为 content
-                thinking_leaked = True
-                logger.warning(
-                    "llama_cpp_thinking_leaked_rejected model=%s api_base=%s reasoning_chars=%s",
-                    model,
-                    api_base,
-                    len(reasoning_content),
-                )
-            else:
-                # Some llama.cpp + reasoning-capable templates return the full model output in
-                # `reasoning_content` while leaving `content` empty. Fallback here so the
-                # application does not treat a successful inference as a blank response.
-                content = reasoning_content
-                used_reasoning_fallback = True
-                logger.warning(
-                    "llama_cpp_reasoning_content_fallback model=%s api_base=%s",
-                    model,
-                    api_base,
-                )
-        # 检测思维链泄漏到 content 字段（即使不是通过 reasoning_content 回退）
-        _THINKING_PREFIX_PATTERNS = (
-            "here's a thinking", "here is a thinking", "let me think",
-            "thinking process", "my thought process", "i'll think through",
-            "step 1:", "**analysis**", "<think>", "let me analyze",
-        )
-        content_stripped = str(content or "").strip().lower()
-        if content_stripped and any(content_stripped.startswith(p) for p in _THINKING_PREFIX_PATTERNS):
-            thinking_leaked = True
-            logger.warning(
-                "llm_thinking_chain_in_content model=%s api_base=%s content_head=%s",
-                model,
-                api_base,
-                content_stripped[:120],
-            )
-        parsed = dict(raw)
-        if not isinstance(parsed.get("usage"), dict):
-            parsed["usage"] = {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            }
-        if choices:
-            first_parsed_choice = parsed.setdefault("choices", [{}])[0]
-            if not isinstance(first_parsed_choice, dict):
-                first_parsed_choice = {}
-                parsed["choices"][0] = first_parsed_choice
-            first_parsed_message = first_parsed_choice.get("message")
-            if not isinstance(first_parsed_message, dict):
-                first_parsed_message = {}
-                first_parsed_choice["message"] = first_parsed_message
-            if reasoning_content:
-                first_parsed_message["reasoning_content"] = str(
-                    reasoning_content)
-            first_parsed_message["content"] = str(content or "")
-        if used_reasoning_fallback:
-            parsed["_used_reasoning_content_fallback"] = True
-        return str(content or ""), parsed
-
-    def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
-        cfg, route_meta, trace_meta = self._resolve_chat_target(overrides)
-        api_base_raw = cfg.get("api_base", "")
-        api_base = self._build_base_url(str(api_base_raw or ""))
-        provider = self._clean_text(
-            cfg.get("provider", "openai_compatible")).lower()
-        api_key = "" if self._provider_uses_local_runtime(
-            provider) else self._resolve_api_key(cfg)
+        api_base = self._build_base_url(str(cfg.get("api_base", "")))
         model = self._clean_text(cfg.get("model", ""))
         temperature = float(cfg.get("temperature", 0.2))
         max_tokens = int(cfg.get("max_tokens", 2048))
+        timeout = int(cfg.get("timeout", 60))
+        retries = max(1, int(cfg.get("retries", 2)))
         extra_headers = cfg.get("headers") if isinstance(
             cfg.get("headers"), dict) else None
-        if not api_base:
-            raise RuntimeError("llm_config api_base missing")
-        if not model:
-            raise RuntimeError("llm_config model missing")
-        # Resolve "auto" model name from server
-        model = self._resolve_model_name(api_base, provider, model)
+        client = OpenAI(
+            api_key=api_key or None,
+            base_url=api_base,
+            timeout=timeout,
+            max_retries=max(0, retries - 1),
+            default_headers=extra_headers or None,
+        )
+        request_kwargs = self._build_chat_kwargs(
+            model, messages, temperature, max_tokens, cfg)
+        try:
+            resp = self._create_chat_completion(client, request_kwargs)
+            parsed = resp.model_dump()
+            try:
+                content = resp.choices[0].message.content or ""
+            except Exception:
+                content = json.dumps(parsed, ensure_ascii=False)
+            return content, parsed
+        except APITimeoutError:
+            fallback_model = self._clean_text(cfg.get("fallback_model", ""))
+            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
+            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
+            retry_model = fallback_model or model
+            logger.warning(
+                "llm_request_timeout_retry base_url=%s model=%s retry_model=%s timeout=%s->%s max_tokens=%s->%s",
+                api_base,
+                model,
+                retry_model,
+                timeout,
+                retry_timeout,
+                max_tokens,
+                retry_max_tokens,
+            )
+            retry_client = OpenAI(
+                api_key=api_key or None,
+                base_url=api_base,
+                timeout=retry_timeout,
+                max_retries=0,
+                default_headers=extra_headers or None,
+            )
+            retry_request_kwargs = self._build_chat_kwargs(
+                retry_model, messages, temperature, retry_max_tokens, dict(cfg))
+            resp = self._create_chat_completion(
+                retry_client, retry_request_kwargs)
+            parsed = resp.model_dump()
+            try:
+                content = resp.choices[0].message.content or ""
+            except Exception:
+                content = json.dumps(parsed, ensure_ascii=False)
+            return content, parsed
 
-        base_url = api_base
-        self._enforce_network_policy(base_url)
-        timeout = int(cfg.get("timeout", 60))
+    def describe_runtime_config(self, overrides: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        cfg, route_meta, _trace_meta = self._resolve_chat_target(overrides)
+        runtime_cfg, runtime_meta = resolve_runtime_llm_config(cfg)
+        runtime_meta["route"] = route_meta
+        runtime_meta["security_issues"] = collect_persisted_secret_issues(
+            self.cfg)
+        return {
+            "provider": str(runtime_cfg.get("provider", "")),
+            "provider_label": get_provider_label(runtime_cfg.get("provider", "")),
+            "api_base": str(runtime_cfg.get("api_base", "")),
+            "model": str(runtime_cfg.get("model", "")),
+            "temperature": float(runtime_cfg.get("temperature", 0.2)),
+            "max_tokens": int(runtime_cfg.get("max_tokens", 2048)),
+            "timeout": int(runtime_cfg.get("timeout", 60)),
+            "headers": runtime_cfg.get("headers") if isinstance(runtime_cfg.get("headers"), dict) else {},
+            "env_managed": True,
+            "supported_env_vars": list(runtime_meta.get("supported_env_vars") or []),
+            "required_env_vars": list(runtime_meta.get("required_env_vars") or []),
+            "missing_env_vars": list(runtime_meta.get("missing_env_vars") or []),
+            "env_sources": dict(runtime_meta.get("env_sources") or {}),
+            "security_issues": list(runtime_meta.get("security_issues") or []),
+            "route": dict(runtime_meta.get("route") or {}),
+        }
+
+    def chat(self, messages: List[Dict[str, str]], overrides: Optional[Dict[str, Any]] = None) -> Tuple[str, Dict[str, Any]]:
+        cfg, route_meta, trace_meta = self._resolve_chat_target(overrides)
+        runtime_cfg, runtime_meta = resolve_runtime_llm_config(cfg)
+        security_issues = collect_persisted_secret_issues(self.cfg)
+        if security_issues:
+            joined = "; ".join(security_issues)
+            raise RuntimeError(
+                f"Security policy violation: {joined}")
+
+        runtime_cfg["_missing_env_vars"] = list(
+            runtime_meta.get("missing_env_vars") or [])
+        provider_name = self._clean_text(
+            runtime_cfg.get("provider", "openai_compatible")).lower()
+        provider = get_provider(provider_name)
+        model = self._clean_text(runtime_cfg.get("model", ""))
+        api_base = self._build_base_url(str(runtime_cfg.get("api_base", "")))
+        temperature = float(runtime_cfg.get("temperature", 0.2))
+        max_tokens = int(runtime_cfg.get("max_tokens", 2048))
+        timeout = int(runtime_cfg.get("timeout", 60))
+        retries = max(1, int(runtime_cfg.get("retries", 2)))
         input_tokens_est = self._estimate_input_tokens(messages)
         t0 = time.perf_counter()
 
-        # ---- Trace: 创建 Span ----
-        trace_collector = get_trace_collector(self.cfg)
-        audit_id = str(trace_meta.get("audit_id") or "")
-        task_profile = str(route_meta.get("task_profile", "default"))
-        model_role = str(route_meta.get("selected_role", "main"))
-        stage = str(trace_meta.get("stage", "llm_call"))
-        trace_span = None
-        if trace_collector.enabled:
-            trace_span = trace_collector.new_span(
-                trace_id=str(trace_meta.get("trace_id") or ""),
-                audit_id=audit_id,
-                stage=stage,
-                task_profile=task_profile,
-                model_role=model_role,
-                span_metadata={
-                    "lang": str(trace_meta.get("lang", "")),
-                    "module": str(trace_meta.get("module", "llm")),
-                },
-            )
-            trace_collector.record_request(
-                trace_span,
-                provider=provider,
-                api_base=str(cfg.get("api_base", "")),
-                model_name=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                timeout=timeout,
-                input_tokens_est=input_tokens_est,
-            )
-            # 将 trace_id 回写 trace_meta，供调用方关联
-            trace_meta["trace_id"] = trace_span.trace_id
-            trace_meta["span_id"] = trace_span.span_id
+        merged_route_meta = dict(route_meta)
+        merged_route_meta["provider"] = provider_name
+        trace_meta["llm_runtime"] = {
+            "provider": provider_name,
+            "provider_label": runtime_meta.get("provider_label", ""),
+            "env_sources": runtime_meta.get("env_sources", {}),
+            "missing_env_vars": runtime_meta.get("missing_env_vars", []),
+        }
 
         logger.info(
-            "llm_request_start api_base=%s base_url=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s input_tokens_est=%s message_count=%s",
+            "llm_request_start provider=%s api_base=%s model=%s selected_role=%s task_profile=%s temperature=%s max_tokens=%s timeout=%s retries=%s input_tokens_est=%s message_count=%s",
+            provider_name,
             api_base,
-            base_url,
             model,
-            route_meta.get("selected_role", ""),
-            route_meta.get("task_profile", "default"),
+            merged_route_meta.get("selected_role", ""),
+            merged_route_meta.get("task_profile", "default"),
             temperature,
             max_tokens,
             timeout,
+            retries,
             input_tokens_est,
             len(messages)
         )
         logger.debug(
-            "llm_request_debug provider=%s api_key=%s raw_api_base=%r headers=%s message_count=%s",
-            provider,
-            self._mask_secret(api_key),
-            cfg.get("api_base", ""),
-            list((extra_headers or {}).keys()),
+            "llm_request_debug provider=%s env_sources=%s raw_api_base=%r headers=%s message_count=%s",
+            provider_name,
+            list((runtime_meta.get("env_sources") or {}).keys()),
+            runtime_cfg.get("api_base", ""),
+            list((runtime_cfg.get("headers") or {}).keys()),
             len(messages)
         )
+
         try:
-            if provider == "ollama":
-                content, parsed = self._chat_via_ollama(
-                    api_base,
-                    model,
-                    messages,
-                    temperature,
-                    max_tokens,
-                    timeout,
-                    cfg,
-                    extra_headers,
-                    trace_span=trace_span,
-                    trace_collector=trace_collector,
-                )
-            else:
-                content, parsed = self._chat_via_openai_compatible(
-                    api_base,
-                    model,
-                    messages,
-                    temperature,
-                    max_tokens,
-                    timeout,
-                    cfg,
-                    api_key,
-                    extra_headers,
-                )
+            content, parsed = provider.chat(self, messages, runtime_cfg)
         except Exception as e:
             logger.exception(
-                "llm_request_failed provider=%s api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
-                provider,
+                "llm_request_failed provider=%s api_base=%s model=%s timeout=%s raw_api_base=%r missing_envs=%s",
+                provider_name,
                 api_base,
-                base_url,
                 model,
                 timeout,
-                cfg.get("api_base", ""),
-                self._mask_secret(api_key),
-                list((extra_headers or {}).keys())
+                runtime_cfg.get("api_base", ""),
+                list(runtime_meta.get("missing_env_vars") or []),
             )
-            # ---- Trace: 记录失败 ----
-            if trace_span and trace_collector.enabled:
-                latency_ms = int((time.perf_counter() - t0) * 1000)
-                trace_collector.finish_span(
-                    trace_span, status="failed", duration_ms=latency_ms)
             dns_hint = ""
             low_err = str(e).lower()
             if "getaddrinfo failed" in low_err or "name or service not known" in low_err:
-                host = urlsplit(base_url).netloc
+                host = urlsplit(api_base).netloc
                 dns_hint = f" (dns resolve failed for host: {host})"
             self._write_trace({
                 "ts": datetime.now(timezone.utc).isoformat(),
                 "ok": False,
                 "model": model,
                 "meta": trace_meta,
-                "route": route_meta,
+                "route": merged_route_meta,
                 "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
                 "error": self._clip(self._mask_text(str(e)), self._trace_options()["max_chars"]),
             })
             raise RuntimeError(
                 f"llm request failed: {str(e)}{dns_hint}") from e
+
         usage = parsed.get("usage") if isinstance(
             parsed.get("usage"), dict) else {}
         prompt_tokens = int(usage.get("prompt_tokens") or 0)
@@ -831,13 +637,9 @@ class LLMService:
             LLMService._model_cache[api_base] = response_model
             model = response_model
 
-        # ---- Trace: 记录成功 ----
-        if trace_span and trace_collector.enabled:
-            trace_collector.finish_span(
-                trace_span, status="success", duration_ms=latency_ms)
-
         logger.info(
-            "llm_request_done model=%s input_tokens_est=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s",
+            "llm_request_done provider=%s model=%s input_tokens_est=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s",
+            provider_name,
             model,
             input_tokens_est,
             prompt_tokens,
@@ -850,14 +652,19 @@ class LLMService:
             "ok": True,
             "model": model,
             "meta": trace_meta,
-            "route": route_meta,
+            "route": merged_route_meta,
             "latency_ms": latency_ms,
             "input_tokens_est": input_tokens_est,
             "usage": usage,
             "messages": self._sanitize_messages(messages, self._trace_options()["max_chars"]),
             "response": self._clip(self._mask_text(content), self._trace_options()["max_chars"]),
         })
-        parsed["_route"] = route_meta
+        parsed["_route"] = merged_route_meta
+        parsed["_runtime"] = {
+            "provider": provider_name,
+            "provider_label": runtime_meta.get("provider_label", ""),
+            "env_sources": runtime_meta.get("env_sources", {}),
+        }
         return content, parsed
 
     def chat_with_profile(

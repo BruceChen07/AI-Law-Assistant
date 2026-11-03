@@ -1,73 +1,83 @@
-# OCR 依赖安装与故障排除指南
+# MinerU 原生 OCR 安装与排障指南
 
 ## 适用范围
-- 目标依赖：tesseract 与 poppler
-- 用途：PDF 转图片与 OCR 识别
+- 目标方案：`mineru-only`
+- 运行方式：原生安装，不使用 Docker
+- 作用范围：PDF OCR、图片 OCR、合同文本回退抽取
 
-## macOS 安装
-1. 运行脚本
-```
-bash bin/install_ocr_macos.sh
-```
-2. 验证
-```
-tesseract --version
-pdftoppm -v
-```
+## 核心依赖
+- Python 3.12+
+- `mineru==3.1.5`
+- `pillow>=11.0.0`
+- `pypdf>=5.6.0`
+
+说明：
+- 当前项目已移除 `tesseract`、`pytesseract`、`pdf2image`、`poppler` 的运行时强依赖
+- 图片文件会先转换成临时 PDF，再统一交由 MinerU 提取
+- PDF 视觉预览在没有额外栅格化依赖时会自动降级为文本预览
 
 ## Windows 安装
-1. 以管理员权限运行
-```
+```bat
 bin\install_ocr_windows.bat
 ```
-2. 重新打开终端后验证
-```
-tesseract --version
-pdftoppm -v
+
+## macOS 安装
+```bash
+bash bin/install_ocr_macos.sh
 ```
 
-## 环境变量配置
-- macOS 使用 Homebrew 安装后自动加入 PATH
-- Windows 如未生效，需将以下路径加入系统 PATH
-  - C:\Program Files\Tesseract-OCR
-  - C:\Program Files\poppler\Library\bin
-
-## OCR 引擎配置
-在 app/config.json 中配置
-```
-"ocr_engine": "auto",
-"ocr_engine_order": ["tesseract", "mineru"],
-"ocr_engine_by_type": {"pdf": "tesseract"},
-"ocr_engines": {"mineru": {"module": "mineru", "function": "ocr_pdf"}}
+## Linux 安装
+```bash
+bash bin/install_ocr_deps.sh
 ```
 
-## 验证与测试
-1. 依赖检测与基准测试
+## OCR 配置
+在 `app/config.json` 中配置为：
+
+```json
+{
+  "ocr_engine": "mineru",
+  "ocr_engine_order": ["mineru"],
+  "ocr_engine_by_type": {
+    "pdf": "mineru",
+    "image": "mineru"
+  },
+  "ocr_engines": {
+    "mineru": {
+      "module": "app.core.mineru_ocr",
+      "function": "ocr_document"
+    }
+  },
+  "mineru": {
+    "mode": "auto",
+    "fallback_backends": ["pipeline"],
+    "method": "auto",
+    "device": "cpu",
+    "formula": false,
+    "table": false,
+    "model_source": "huggingface",
+    "timeout": 900
+  }
+}
 ```
+
+## 验证命令
+```bash
 python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_report.json
-```
-2. 生成测试报告
-```
-python bin/generate_test_report.py reports/test_report.json
 ```
 
 ## 常见问题
-1. tesseract 或 pdftoppm 找不到
-检查 PATH 是否包含对应安装目录并重新打开终端
-2. pdf2image 报错无法转换
-确认 poppler 已安装且 pdftoppm 可执行
-3. OCR 速度慢
-尝试降低 ocr_dpi，或使用更快的 OCR 引擎
-4. 中文识别不准确
-确认 tesseract 语言包已安装，配置 ocr_languages 为 chi_sim+eng
+1. `mineru` 命令找不到
+- 确认当前终端已激活虚拟环境，或将虚拟环境的 `Scripts/bin` 加入 `PATH`
 
-## Docker 方案
-1. 构建并启动
-```
-docker compose up --build
-```
-2. 容器内验证
-```
-docker compose exec backend tesseract --version
-docker compose exec backend pdftoppm -v
-```
+2. 图片 OCR 没有结果
+- 检查 `Pillow` 是否安装成功
+- 检查图片是否能正常转换为 PDF
+
+3. PDF 预览不是图片模式
+- 这是 `mineru-only` 轻量部署下的预期行为
+- 当前方案优先保证文本抽取与坐标分析，不再强依赖系统级 PDF 栅格化工具
+
+4. MinerU 下载模型失败
+- 检查网络或内网镜像
+- 企业环境建议预置离线 wheel 包和模型缓存

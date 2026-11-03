@@ -1,5 +1,80 @@
 import { API_BASE, getAuthHeaders, getLongRequestTimeoutMs, requestBlob, requestJson } from "./base"
 
+export async function adminListPrompts(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  return requestJson(`${API_BASE}/api/admin/prompts?${query}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetPrompt(promptId, editorLang = "zh") {
+  const query = new URLSearchParams({ editor_lang: editorLang || "zh" }).toString()
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}?${query}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminCreatePrompt(payload) {
+  return requestJson(`${API_BASE}/api/admin/prompts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function adminUpdatePrompt(promptId, payload) {
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function adminDeletePrompt(promptId) {
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminRestorePromptDefault(promptId, editorLang = "zh") {
+  const query = new URLSearchParams({ editor_lang: editorLang || "zh" }).toString()
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}/restore-default?${query}`, {
+    method: "POST",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminUpdatePromptStatus(promptId, enabled) {
+  return requestJson(`${API_BASE}/api/admin/prompts/${promptId}/status`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ enabled: !!enabled })
+  })
+}
+
+export async function adminPreviewPrompt(payload) {
+  return requestJson(`${API_BASE}/api/admin/prompts/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+}
+
+export async function adminListPromptBindings() {
+  return requestJson(`${API_BASE}/api/admin/prompt-bindings`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminUpdatePromptBinding(sceneKey, promptId) {
+  return requestJson(`${API_BASE}/api/admin/prompt-bindings/${encodeURIComponent(sceneKey)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify({ prompt_id: promptId || "" })
+  })
+}
+
 export async function adminListDocuments(params = {}) {
   const query = new URLSearchParams(params).toString()
   return requestJson(`${API_BASE}/api/admin/documents?${query}`, {
@@ -87,21 +162,6 @@ export async function adminGetStats() {
 
 export async function adminGetLLMConfig() {
   return requestJson(`${API_BASE}/api/admin/llm-config`, {
-    headers: { ...getAuthHeaders() }
-  })
-}
-
-export async function adminUpdateLLMConfig(payload) {
-  return requestJson(`${API_BASE}/api/admin/llm-config`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-    body: JSON.stringify(payload)
-  })
-}
-
-export async function adminDeleteLLMApiKey() {
-  return requestJson(`${API_BASE}/api/admin/llm-config/api-key`, {
-    method: "DELETE",
     headers: { ...getAuthHeaders() }
   })
 }

@@ -24,7 +24,9 @@
     grid-template-columns: 1fr;
   }
   .workbench-grid {
+    --workbench-panel-height: auto;
     grid-template-columns: 1fr;
+    grid-auto-rows: auto;
   }
   .contract-header {
     flex-direction: column;

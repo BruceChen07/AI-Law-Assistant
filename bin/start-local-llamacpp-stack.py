@@ -13,7 +13,7 @@ DEFAULT_SMALL_PORT = 18081
 def parse_args() -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(
-        description="Launch local llama.cpp runtime(s) without any Ollama dependency."
+        description="Launch pure local llama.cpp runtime instances."
     )
     parser.add_argument(
         "--single-instance",
@@ -104,7 +104,7 @@ def main() -> int:
     if args.single_instance:
         # --- Single-instance mode: only main model ---
         print("=== Single-Instance llama.cpp Startup ===")
-        print("Runtime policy: pure llama.cpp, single model (no Ollama dependency)")
+        print("Runtime policy: pure llama.cpp, single model")
         print(f"Main model:  {main_model_path}")
 
         main_cmd = _runtime_cmd(
@@ -150,7 +150,7 @@ def main() -> int:
         return 1
 
     print("=== Dual-Instance llama.cpp Startup ===")
-    print("Runtime policy: pure llama.cpp, dual model (no Ollama dependency)")
+    print("Runtime policy: pure llama.cpp, dual model")
     print(f"Main model:  {main_model_path}")
     print(f"Small model: {small_model_path}")
 

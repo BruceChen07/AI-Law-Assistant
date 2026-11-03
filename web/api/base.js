@@ -1,96 +1,4 @@
-export let API_BASE = import.meta.env.VITE_API_BASE || ""
-const API_REQUEST_TIMEOUT_MS = 8000
-const API_LONG_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
-const API_CONTRACT_AUDIT_TIMEOUT_MS = 60 * 60 * 1000
-
-function dedupe(items) {
-  return [...new Set(items.filter(Boolean))]
-}
-
-function isAbsoluteUrl(value) {
-  return /^https?:\/\//i.test(String(value || ""))
-}
-
-function toPath(url) {
-  const raw = String(url || "")
-  if (!isAbsoluteUrl(raw)) return raw
-  try {
-    const parsed = new URL(raw)
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`
-  } catch {
-    return raw
-  }
-}
-
-function buildCandidateBases() {
-  const configured = String(import.meta.env.VITE_API_BASE || "").trim()
-  const currentOrigin = typeof window !== "undefined" ? window.location.origin : ""
-  const currentPort = typeof window !== "undefined" ? window.location.port : ""
-  return dedupe([
-    configured,
-    currentPort && currentPort !== "5173" ? currentOrigin : "",
-    API_BASE,
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-    "http://localhost:8001",
-    "http://127.0.0.1:8001"
-  ])
-}
-
-function buildCandidateUrls(url) {
-  const raw = String(url || "")
-  if (!raw) return []
-  const path = toPath(raw)
-  const bases = buildCandidateBases()
-  if (!path.startsWith("/")) {
-    return dedupe([raw])
-  }
-  return dedupe(bases.map(base => `${String(base).replace(/\/$/, "")}${path}`))
-}
-
-async function fetchWithTimeout(url, options = {}) {
-  const { timeoutMs, ...fetchOptions } = options || {}
-  const controller = new AbortController()
-  const effectiveTimeoutMs = Number(timeoutMs) > 0 ? Number(timeoutMs) : API_REQUEST_TIMEOUT_MS
-  const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs)
-  try {
-    return await fetch(url, { ...fetchOptions, signal: controller.signal })
-  } catch (err) {
-    if (err?.name === "AbortError") {
-      const timeoutError = new Error(`request timeout after ${Math.ceil(effectiveTimeoutMs / 1000)}s`)
-      timeoutError.name = "RequestTimeoutError"
-      timeoutError.cause = err
-      throw timeoutError
-    }
-    throw err
-  } finally {
-    clearTimeout(timer)
-  }
-}
-
-async function requestWithFallback(url, options = {}) {
-  const attemptUrls = buildCandidateUrls(url)
-  let lastError = null
-  for (const attemptUrl of attemptUrls) {
-    try {
-      const res = await fetchWithTimeout(attemptUrl, options)
-      const ok = res.ok
-      if (ok) {
-        try {
-          const parsed = new URL(attemptUrl)
-          API_BASE = parsed.origin
-        } catch {}
-      }
-      return res
-    } catch (err) {
-      if (err?.name === "RequestTimeoutError") {
-        throw err
-      }
-      lastError = err
-    }
-  }
-  throw lastError || new Error("request failed")
-}
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001"
 
 export function getToken() {
   return localStorage.getItem("token")
@@ -101,66 +9,142 @@ export function getAuthHeaders() {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+export class ApiError extends Error {
+  constructor(payload = {}) {
+    const message = String(
+      payload.user_message
+      || payload.message
+      || payload.title
+      || "Request failed"
+    )
+    super(message)
+    this.name = "ApiError"
+    this.status = Number(payload.status || 0)
+    this.code = String(payload.code || "")
+    this.category = String(payload.category || "")
+    this.title = String(payload.title || "")
+    this.user_message = String(payload.user_message || "")
+    this.operator_scenarios = Array.isArray(payload.operator_scenarios) ? payload.operator_scenarios : []
+    this.operator_actions = Array.isArray(payload.operator_actions) ? payload.operator_actions : []
+    this.retryable = typeof payload.retryable === "boolean" ? payload.retryable : true
+    this.raw_reason = String(payload.raw_reason || "")
+  }
+}
+
+function buildApiErrorPayload(status, text, parsed) {
+  const detail = parsed?.detail
+  if (detail && typeof detail === "object") {
+    return {
+      ...detail,
+      status,
+      message: String(detail.message || detail.user_message || text || "Request failed"),
+      raw_reason: String(detail.raw_reason || text || detail.message || "")
+    }
+  }
+  if (typeof detail === "string" && detail.trim()) {
+    return {
+      status,
+      message: detail,
+      raw_reason: detail
+    }
+  }
+  if (typeof parsed?.message === "string" && parsed.message.trim()) {
+    return {
+      status,
+      message: parsed.message,
+      raw_reason: parsed.message
+    }
+  }
+  return {
+    status,
+    message: String(text || "Request failed"),
+    raw_reason: String(text || "")
+  }
+}
+
 export async function ensureOk(res) {
   if (res.ok) return
   const text = await res.text()
-  let message = text
+  let parsed = null
   try {
-    const parsed = JSON.parse(text)
-    const detail = parsed?.detail
-    if (typeof detail === "string" && detail.trim()) {
-      message = detail
-    } else if (detail && typeof detail === "object") {
-      message = String(detail.message || detail.user_message || text)
-    } else if (typeof parsed?.message === "string" && parsed.message.trim()) {
-      message = parsed.message
-    }
+    parsed = JSON.parse(text)
   } catch {
-    message = text
   }
-  throw new Error(message)
+  throw new ApiError(buildApiErrorPayload(res.status, text, parsed))
 }
 
 export async function requestJson(url, options) {
-  const res = await requestWithFallback(url, options)
-  await ensureOk(res)
-  return res.json()
+  try {
+    const res = await fetch(url, options)
+    await ensureOk(res)
+    return res.json()
+  } catch (err) {
+    if (err?.name === "AbortError") throw err
+    if (err instanceof ApiError) throw err
+    throw new ApiError({
+      status: 0,
+      code: "NETWORK_REQUEST_FAILED",
+      category: "network",
+      message: String(err?.message || err || "Failed to fetch"),
+      raw_reason: String(err?.message || err || "Failed to fetch")
+    })
+  }
 }
 
 export async function requestBlob(url, options) {
-  const { returnResponseMeta, ...requestOptions } = options || {}
-  const res = await requestWithFallback(url, requestOptions)
-  await ensureOk(res)
-  const blob = await res.blob()
-  if (!returnResponseMeta) return blob
-  const contentDisposition = String(res.headers.get("content-disposition") || "")
-  const encodedMatch = contentDisposition.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
-  const plainMatch = contentDisposition.match(/filename\s*=\s*("?)([^";]+)\1/i)
-  let filename = ""
-  if (encodedMatch?.[1]) {
+  try {
+    const res = await fetch(url, options)
+    await ensureOk(res)
+    return res.blob()
+  } catch (err) {
+    if (err?.name === "AbortError") throw err
+    if (err instanceof ApiError) throw err
+    throw new ApiError({
+      status: 0,
+      code: "NETWORK_REQUEST_FAILED",
+      category: "network",
+      message: String(err?.message || err || "Failed to fetch"),
+      raw_reason: String(err?.message || err || "Failed to fetch")
+    })
+  }
+}
+
+function parseContentDispositionFilename(value) {
+  const text = String(value || "").trim()
+  if (!text) return ""
+  const utf8Match = text.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
     try {
-      filename = decodeURIComponent(encodedMatch[1])
+      return decodeURIComponent(String(utf8Match[1]).trim())
     } catch {
-      filename = encodedMatch[1]
     }
-  } else if (plainMatch?.[2]) {
-    filename = plainMatch[2]
   }
-  return {
-    blob,
-    filename,
-    contentType: String(res.headers.get("content-type") || "")
-  }
+  const quotedMatch = text.match(/filename=\"([^\"]+)\"/i)
+  if (quotedMatch?.[1]) return String(quotedMatch[1]).trim()
+  const plainMatch = text.match(/filename=([^;]+)/i)
+  return plainMatch?.[1] ? String(plainMatch[1]).trim() : ""
 }
 
-export function getLongRequestTimeoutMs(timeoutSec) {
-  const seconds = Number(timeoutSec)
-  if (Number.isFinite(seconds) && seconds > 0) {
-    return Math.max(API_REQUEST_TIMEOUT_MS, seconds * 1000 + 5000)
+export async function requestBlobResponse(url, options) {
+  try {
+    const res = await fetch(url, options)
+    await ensureOk(res)
+    const blob = await res.blob()
+    const contentDisposition = String(res.headers.get("content-disposition") || "")
+    return {
+      blob,
+      filename: parseContentDispositionFilename(contentDisposition),
+      contentType: String(res.headers.get("content-type") || blob.type || ""),
+    }
+  } catch (err) {
+    if (err?.name === "AbortError") throw err
+    if (err instanceof ApiError) throw err
+    throw new ApiError({
+      status: 0,
+      code: "NETWORK_REQUEST_FAILED",
+      category: "network",
+      message: String(err?.message || err || "Failed to fetch"),
+      raw_reason: String(err?.message || err || "Failed to fetch")
+    })
   }
-  return API_LONG_REQUEST_TIMEOUT_MS
-}
-
-export function getContractAuditTimeoutMs() {
-  return API_CONTRACT_AUDIT_TIMEOUT_MS
 }

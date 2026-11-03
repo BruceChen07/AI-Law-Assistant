@@ -66,7 +66,12 @@ This document explains the configuration fields in `app/config.example.json`.
 | `device` | string | Runtime device (`cpu` / `cuda`). |
 | `formula` | bool | Enable formula parsing. |
 | `table` | bool | Enable table parsing. |
-| `model_source` | string | Model source mode, recommended `local_files`. |
+| `model_source` | string | Model source platform. |
+| `model_source_fallback_enabled` | bool | Enable automatic fallback from Hugging Face to ModelScope on network failure. |
+| `fallback_model_source` | string | Fallback model source, typically `modelscope`. |
+| `hf_retry_count` | int | Additional retry count before switching away from Hugging Face. |
+| `hf_connect_timeout_sec` | int | Hugging Face metadata/connect timeout passed via environment. |
+| `hf_download_timeout_sec` | int | Hugging Face download timeout passed via environment. |
 | `timeout` | int | OCR timeout (seconds). |
 
 ## 6) LLM
@@ -75,33 +80,19 @@ This document explains the configuration fields in `app/config.example.json`.
 
 | Key | Type | Description |
 |---|---|---|
-| `provider` | string | LLM protocol type, recommended internal OpenAI-compatible gateway or local Ollama. |
+| `provider` | string | Non-sensitive default provider (`openai`, `openai_compatible`, `qwen`, `wenxin`, `ollama`). |
 | `api_base` | string | Base URL of chat-completions API. |
-| `api_key` | string | API key. Prefer secure store/environment in production. |
 | `model` | string | Model name. |
 | `temperature` | float | Sampling temperature. |
 | `max_tokens` | int | Max response tokens. |
 | `timeout` | int | Request timeout in seconds. |
 | `headers` | object | Extra HTTP headers. |
 
-### `network_policy`
+Security note:
 
-| Key | Type | Description |
-|---|---|---|
-| `enabled` | bool | Enable network policy guard before each LLM request. |
-| `mode` | string | `offline_strict` blocks non-intranet hosts. |
-| `allow_private_ip_ranges` | bool | Allow RFC1918/private IP ranges. |
-| `allowed_hosts` | string[] | Explicit allowlist of enterprise hostnames/IPs. |
-| `allowed_domain_suffixes` | string[] | Explicit allowlist of enterprise domain suffixes. |
-
-### `secret_store`
-
-| Key | Type | Description |
-|---|---|---|
-| `enabled` | bool | Enable secure key storage. |
-| `backend` | string | Secret backend (`keyring`, etc.). |
-| `service_name` | string | Keyring service namespace. |
-| `llm_api_key_name` | string | Key name used for storing LLM key. |
+- Do not store API keys in `app/config.json`
+- API keys are loaded from environment variables only
+- Admin UI only displays effective runtime config and environment status
 
 ## 7) Retrieval & Translation
 
@@ -173,7 +164,25 @@ This document explains the configuration fields in `app/config.example.json`.
 | `docx_pdf_gate_min_chars` | int | Minimum chars threshold for PDF gate. |
 | `docx_pdf_keep_file` | bool | Whether to keep intermediate PDF file. |
 
-## 11) Memory Audit Behavior
+## 11) PDF Pipeline
+
+### `pdf_pipeline`
+
+| Key | Type | Description |
+|---|---|---|
+| `enabled` | bool | Enable unified PDF pipeline orchestration. |
+| `hybrid_enabled` | bool | Enable hybrid PDF route metadata and scanned-page heuristics. |
+| `force_scanned` | bool | Force PDF OCR/scanned behavior. |
+| `scan_min_chars_per_page` | int | Minimum chars per page before a page is treated as text-bearing. |
+| `scan_ratio_for_ocr` | float | Scanned-page ratio threshold to prefer OCR fallback. |
+| `scan_ratio_for_digitize` | float | Scanned-page ratio threshold to allow auto digitization when enabled. |
+| `auto_digitize` | bool | Auto-digitize scanned PDFs in generic extraction paths. |
+| `prefer_digitized_for_audit` | bool | Prefer digitized DOCX as audit input in contract audit routes. |
+| `preview_render_enabled` | bool | Enable raster preview generation for PDFs. |
+| `preview_render_engine` | string | Preview render engine name (`pdfium`). |
+| `preview_max_edge` | int | Maximum long edge in pixels for preview images. |
+
+## 12) Memory Audit Behavior
 
 | Key | Type | Description |
 |---|---|---|
@@ -183,7 +192,7 @@ This document explains the configuration fields in `app/config.example.json`.
 | `memory_filter_unverifiable_risks` | bool | Filter risks that cannot be mapped to valid citations. |
 | `memory_filtered_risk_log_limit` | int | Max count of filtered-risk hits kept in debug/meta. |
 
-## 12) Contract Audit Debug Lifecycle
+## 13) Contract Audit Debug Lifecycle
 
 | Key | Type | Description |
 |---|---|---|
@@ -192,7 +201,7 @@ This document explains the configuration fields in `app/config.example.json`.
 | `contract_audit_debug_archive_before_delete` | bool | Archive old debug folders to zip before deletion. |
 | `contract_audit_debug_archive_dir` | string | Archive output directory; empty means use module-local `_archive`. |
 
-## 13) Upload & CORS
+## 14) Upload & CORS
 
 | Key | Type | Description |
 |---|---|---|
@@ -215,8 +224,24 @@ This setup uses translated Chinese query for RAG and avoids redundant English se
 - Enable `rag_trace_enabled` (and optionally `llm_trace_enabled`) for troubleshooting.
 - Keep `contract_audit_debug_retention_days` small (e.g. `7`) to control disk usage.
 
-### Enterprise offline mode
-- Set `network_policy.mode: "offline_strict"`.
-- Keep `local_llm.enabled: true` and `allow_small_to_main_fallback: true`.
-- Set all model directories to pre-staged local paths.
-- Run `bin/validate_offline_compliance.py` before delivery.
+### Production mode
+- Use environment variables for all LLM secrets and keep config files secret-free.
+- Set strict CORS origins.
+- Tune trace/debug retention and archive settings based on compliance/storage policy.
+
+## LLM Environment Variables
+
+Recommended variables:
+
+| Variable | Description |
+|---|---|
+| `LLM_PROVIDER` | Active provider selector. |
+| `LLM_API_BASE` | Optional global base URL override. |
+| `LLM_MODEL` | Optional global model override. |
+| `LLM_API_KEY` | Generic API key for OpenAI-compatible providers. |
+| `OPENAI_API_KEY` / `OPENAI_BASE_URL` / `OPENAI_MODEL` | OpenAI variables. |
+| `DASHSCOPE_API_KEY` / `DASHSCOPE_BASE_URL` / `DASHSCOPE_MODEL` | Qwen / DashScope variables. |
+| `QIANFAN_BEARER_TOKEN` / `QIANFAN_API_KEY` | Wenxin bearer-style auth variables. |
+| `QIANFAN_ACCESS_KEY` / `QIANFAN_SECRET_KEY` | Wenxin AK/SK pair for runtime token exchange. |
+| `QIANFAN_BASE_URL` / `QIANFAN_MODEL` | Wenxin endpoint and model. |
+| `OLLAMA_HOST` / `OLLAMA_MODEL` | Ollama endpoint and model. |

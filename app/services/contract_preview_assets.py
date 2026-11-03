@@ -4,7 +4,7 @@ import logging
 import os
 import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Tuple
 
 from docx import Document as DocxDocument
@@ -13,16 +13,8 @@ from pypdf import PdfReader
 
 from app.core.mineru_ocr import run_mineru_extract
 from app.core.utils import extract_text_with_config
+from app.services.pdf_pipeline import build_pdf_page_blocks, get_pdf_pipeline_config, render_pdf_preview_pages
 from app.services.audit_utils import _safe_int, _safe_float
-
-try:
-    from pdf2image import convert_from_path
-except ImportError as e:
-    logging.getLogger("law_assistant").warning(
-        "preview_pdf2image_unavailable err=%s",
-        str(e),
-    )
-    convert_from_path = None
 
 
 logger = logging.getLogger("law_assistant")
@@ -132,50 +124,26 @@ def _build_text_pages(text: str, lines_per_page: int) -> List[Dict[str, Any]]:
     return pages
 
 
-def _render_pdf_pages(file_path: str, out_dir: str, dpi: int, max_pages: int) -> List[Dict[str, Any]]:
-    if convert_from_path is None:
-        raise RuntimeError("pdf2image not available")
-    images = convert_from_path(
-        file_path,
-        dpi=max(72, _safe_int(dpi, 160)),
-        first_page=1,
-        last_page=max(1, _safe_int(max_pages, 30)),
-        fmt="png",
-    )
-    pages: List[Dict[str, Any]] = []
-    for i, image in enumerate(images, 1):
-        image_file = os.path.join(out_dir, f"page_{i}.png")
-        image.save(image_file, "PNG")
-        pages.append({
-            "page_no": i,
-            "width": int(getattr(image, "width", 0) or 0),
-            "height": int(getattr(image, "height", 0) or 0),
-            "blocks": [],
-            "image_file": image_file,
-        })
-    return pages
+def _render_pdf_pages(cfg: Dict[str, Any], file_path: str, out_dir: str, dpi: int, max_pages: int) -> List[Dict[str, Any]]:
+    pipeline_cfg = get_pdf_pipeline_config(cfg)
+    if not bool(pipeline_cfg.get("preview_render_enabled", True)):
+        raise RuntimeError(
+            "pdf preview rendering is disabled by pdf_pipeline config")
+    if str(pipeline_cfg.get("preview_render_engine") or "pdfium") != "pdfium":
+        raise RuntimeError("unsupported pdf preview render engine")
+    if not bool(pipeline_cfg.get("render_engine_available")):
+        raise RuntimeError("pypdfium2 is not installed")
+    max_edge = int(pipeline_cfg.get("preview_max_edge", 1800))
+    return render_pdf_preview_pages(file_path, out_dir, dpi, max_pages, max_edge=max_edge)
 
 
 def _extract_pdf_text_blocks(file_path: str, max_pages: int) -> Tuple[Dict[int, List[Dict[str, Any]]], int]:
-    reader = PdfReader(file_path)
-    total = min(len(reader.pages), max(1, _safe_int(max_pages, 30)))
-    out: Dict[int, List[Dict[str, Any]]] = {}
-    for i in range(total):
-        text = reader.pages[i].extract_text() or ""
-        lines = [ln.strip() for ln in text.splitlines() if ln and ln.strip()]
-        blocks = []
-        denom = max(len(lines), 1)
-        for j, line in enumerate(lines, 1):
-            y = (j - 1) / denom
-            h = 1 / denom
-            blocks.append({
-                "block_id": f"p{i + 1}-l{j}",
-                "text": line,
-                "bbox": [0.04, round(y, 6), 0.92, round(h, 6)],
-                "is_heading": _looks_like_heading_line(line),
-            })
-        out[i + 1] = blocks
-    return out, total
+    blocks, total = build_pdf_page_blocks(file_path, max_pages=max_pages)
+    for page_blocks in blocks.values():
+        for item in page_blocks:
+            item["is_heading"] = _looks_like_heading_line(
+                str(item.get("text") or ""))
+    return blocks, total
 
 
 def _load_json(path: str) -> Any:
@@ -660,7 +628,8 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
 
     if enabled and ext == ".pdf":
         try:
-            pages = _render_pdf_pages(file_path, cache_dir, dpi, max_pages)
+            pages = _render_pdf_pages(
+                cfg, file_path, cache_dir, dpi, max_pages)
             blocks_map: Dict[int, List[Dict[str, Any]]] = {}
             page_count = len(pages)
             if coord_provider == "mineru":
@@ -717,7 +686,7 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
                     output_pdf=converted_pdf,
                 )
                 pages = _render_pdf_pages(
-                    converted_pdf, cache_dir, dpi, max_pages)
+                    cfg, converted_pdf, cache_dir, dpi, max_pages)
                 blocks_map, pages_meta, mineru_meta = _build_blocks_from_mineru(
                     file_path=converted_pdf,
                     out_dir=cache_dir,
@@ -818,7 +787,7 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
         "source": source,
         "mime_type": str(mime_type or ""),
         "ext": ext,
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "file_signature": signature,
         "settings": settings,
         "cache_key": cache_key,

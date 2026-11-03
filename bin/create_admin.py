@@ -1,10 +1,8 @@
-from app.core.auth import hash_password
-from app.core.database import get_conn, init_db
-from app.core.config import get_config
+import argparse
+import importlib
 import os
 import sys
 import uuid
-import argparse
 from datetime import datetime
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,12 +11,22 @@ if BASE_DIR not in sys.path:
 
 
 def main():
-    p = argparse.ArgumentParser(description="Create or promote admin user")
-    p.add_argument("--username", default="admin")
-    p.add_argument("--email", default="admin@example.com")
-    p.add_argument("--password", default="admin123")
-    p.add_argument("--no-reset-password", action="store_true")
-    args = p.parse_args()
+    auth_module = importlib.import_module("app.core.auth")
+    config_module = importlib.import_module("app.core.config")
+    database_module = importlib.import_module("app.core.database")
+
+    hash_password = auth_module.hash_password
+    get_config = config_module.get_config
+    get_conn = database_module.get_conn
+    init_db = database_module.init_db
+
+    parser = argparse.ArgumentParser(
+        description="Create or promote admin user")
+    parser.add_argument("--username", default="admin")
+    parser.add_argument("--email", default="admin@example.com")
+    parser.add_argument("--password", default="admin123")
+    parser.add_argument("--no-reset-password", action="store_true")
+    args = parser.parse_args()
 
     cfg = get_config()
     init_db(cfg)
@@ -29,14 +37,17 @@ def main():
     row = cur.fetchone()
     now = datetime.utcnow().isoformat()
     if row:
-        sets = ["role = 'admin'", "updated_at = ?"]
-        params = [now]
+        sets = []
+        params = []
+        if args.email:
+            sets.append("email = ?")
+            params.append(args.email)
         if not args.no_reset_password:
             sets.append("password_hash = ?")
-            params.insert(0, hash_password(args.password))
-        if args.email:
-            sets.insert(0, "email = ?")
-            params.insert(0, args.email)
+            params.append(hash_password(args.password))
+        sets.append("role = 'admin'")
+        sets.append("updated_at = ?")
+        params.append(now)
         params.append(args.username)
         sql = f"UPDATE users SET {', '.join(sets)} WHERE username = ?"
         cur.execute(sql, tuple(params))

@@ -22,6 +22,7 @@ def _normalize_paths(cfg: dict, base_dir: str):
         "log_base_dir",
         "llm_trace_dir",
         "rag_trace_dir",
+        "contract_audit_debug_archive_dir",
         "embedding_model",
         "embedding_tokenizer_dir",
         "reranker_model_path",

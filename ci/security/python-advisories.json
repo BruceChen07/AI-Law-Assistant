@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-15T00:00:00Z",
+  "advisories": [],
+  "notes": [
+    "Offline baseline file for local CI dependency policy checks.",
+    "Add entries here when a package version must be blocked in the local environment."
+  ]
+}

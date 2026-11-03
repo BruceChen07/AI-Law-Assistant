@@ -5,9 +5,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_config, ensure_dirs, get_config_path
+from app.core.auth import ensure_default_admin
 from app.core.logger import setup_logging, get_pipeline_logger
 from app.core.database import init_db, ensure_embedding_columns
-from app.core.auth import ensure_default_admin
+from app.services.contract_audit_stage_log import init_contract_audit_log_db
 from app.core.embedding import EmbeddingService
 from app.core.reranker import RerankerService
 from app.core.llm import LLMService
@@ -21,6 +22,7 @@ from app.api.routers.admin import router as admin_router
 from app.api.routers.agents import build_router as build_agents_router
 from app.api.routers.capabilities import build_router as build_capabilities_router
 from app.api.routers.contracts import build_router as build_contracts_router
+from app.api.routers.contract_audit_logs import build_router as build_contract_audit_logs_router
 from app.api.routers.tax_audit import build_router as build_tax_audit_router
 from app.services.audit_capabilities import ensure_audit_capabilities_seeded
 
@@ -29,6 +31,7 @@ def init_only():
     cfg = get_config()
     ensure_dirs(cfg)
     init_db(cfg)
+    init_contract_audit_log_db(cfg)
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
@@ -44,6 +47,7 @@ def create_app():
     rag_logger = get_pipeline_logger(
         cfg, name="rag_pipeline", filename="rag_pipeline.log")
     init_db(cfg)
+    init_contract_audit_log_db(cfg)
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
@@ -68,9 +72,10 @@ def create_app():
     rag_logger.info("class=%s stage=service_ready db=%s",
                     "AppFactory", cfg.get("db_path"))
 
+    reranker_enabled = bool(cfg.get("reranker_enabled", False))
     reranker = RerankerService(
-        cfg.get("reranker_model_path"),
-        profiles=cfg.get("reranker_profiles"),
+        cfg.get("reranker_model_path") if reranker_enabled else None,
+        profiles=cfg.get("reranker_profiles") if reranker_enabled else None,
         batch_size=cfg.get("rerank_batch_size", 8),
         max_len=cfg.get("rerank_max_len", 512),
     )
@@ -123,12 +128,31 @@ def create_app():
                 if not bool(x.get("ok", False))
             ]
             if preflight_require_all:
+                hint = "python bin/ensure_local_models.py --types all"
+                if preflight_include_optional:
+                    hint = f"{hint} --include-optional"
                 raise RuntimeError(
-                    "local model preflight failed, run: python bin/ensure_local_models.py --types all --include-optional")
+                    f"local model preflight failed, run: {hint}")
             logger.warning("model_preflight_not_ready missing=%s", missing)
     else:
         logger.info("model_preflight_disabled")
     llm = LLMService(cfg)
+    llm_runtime = llm.describe_runtime_config()
+    logger.info(
+        "llm_env_precheck provider=%s model=%s api_base=%s missing_envs=%s",
+        llm_runtime.get("provider", ""),
+        llm_runtime.get("model", ""),
+        llm_runtime.get("api_base", ""),
+        llm_runtime.get("missing_env_vars", []),
+    )
+    for issue in llm_runtime.get("security_issues", []):
+        logger.warning("llm_security_issue detail=%s", issue)
+    if llm_runtime.get("missing_env_vars"):
+        logger.warning(
+            "llm_env_missing required=%s missing=%s",
+            llm_runtime.get("required_env_vars", []),
+            llm_runtime.get("missing_env_vars", []),
+        )
     translator = TranslationService(cfg)
 
     app = FastAPI(title="Law Assistant")
@@ -179,6 +203,7 @@ def create_app():
     app.include_router(build_agents_router())
     app.include_router(build_capabilities_router())
     app.include_router(build_contracts_router(cfg))
+    app.include_router(build_contract_audit_logs_router(cfg))
     app.include_router(build_tax_audit_router(cfg))
 
     app.state.cfg = cfg

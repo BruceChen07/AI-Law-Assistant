@@ -10,6 +10,7 @@ from app.services.tax_parser import (
     split_tax_clauses,
     extract_tax_fields,
     parse_regulation_document,
+    extract_regulation_text,
 )
 
 
@@ -68,3 +69,26 @@ def test_parse_regulation_document_end_to_end(tmp_path):
     assert count_tax_rules_by_document(cfg, document_id) >= 2
     doc = get_tax_regulation_document(cfg, document_id)
     assert doc["parse_status"] == "done"
+
+
+def test_extract_regulation_text_image_uses_ocr_manager(monkeypatch, tmp_path):
+    image_path = tmp_path / "demo.png"
+    image_path.write_bytes(b"fake-image")
+
+    class _StubManager:
+        def __init__(self, cfg):
+            self.cfg = cfg
+
+        def ocr_document(self, path, lang, dpi, doc_type="pdf"):
+            assert path == str(image_path)
+            assert doc_type == "image"
+            return "识别文本", 1, "mineru"
+
+    monkeypatch.setattr("app.services.tax_parser.OCREngineManager", _StubManager)
+    text, meta = extract_regulation_text(
+        {"ocr_languages": "chi_sim+eng", "ocr_dpi": 220},
+        str(image_path),
+        "png",
+    )
+    assert text == "识别文本"
+    assert meta["ocr_used"] is True

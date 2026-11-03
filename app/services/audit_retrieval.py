@@ -151,15 +151,15 @@ def _write_rag_trace(cfg: Dict[str, Any], trace_id: str, event: str, payload: Di
     opts = _rag_trace_options(cfg)
     if not opts["enabled"]:
         return
-    _cleanup_rag_debug_tree(cfg, opts["dir"])
-    day = datetime.utcnow().strftime("%Y-%m-%d")
-    target_dir = os.path.join(opts["dir"], day)
-    os.makedirs(target_dir, exist_ok=True)
-    row = _clip_for_trace({"ts": datetime.utcnow().isoformat(
-    ), "trace_id": trace_id, "event": str(event or ""), **(payload or {})}, opts["max_chars"])
-    file_path = os.path.join(target_dir, "rag_retrieval.jsonl")
-    trace_tag = _safe_trace_tag(trace_id)
     try:
+        _cleanup_rag_debug_tree(cfg, opts["dir"])
+        day = datetime.utcnow().strftime("%Y-%m-%d")
+        target_dir = os.path.join(opts["dir"], day)
+        os.makedirs(target_dir, exist_ok=True)
+        row = _clip_for_trace({"ts": datetime.utcnow().isoformat(
+        ), "trace_id": trace_id, "event": str(event or ""), **(payload or {})}, opts["max_chars"])
+        file_path = os.path.join(target_dir, "rag_retrieval.jsonl")
+        trace_tag = _safe_trace_tag(trace_id)
         with open(file_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
         if trace_tag:
@@ -167,7 +167,13 @@ def _write_rag_trace(cfg: Dict[str, Any], trace_id: str, event: str, payload: Di
             with open(trace_file_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")
     except Exception as e:
-        logger.warning("rag_trace_write_failed err=%s", str(e))
+        logger.warning(
+            "rag_trace_write_failed dir=%s trace_id=%s event=%s err=%s",
+            opts.get("dir", ""),
+            trace_id,
+            event,
+            str(e),
+        )
 
 
 def _normalize_retrieval_options(opts: Optional[Dict[str, Any]]) -> Dict[str, Any]:

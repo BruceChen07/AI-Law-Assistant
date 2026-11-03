@@ -56,6 +56,7 @@ data/llm_trace.db
 data/llm_traces_full/
 logs/
 log/
+models/
 models/embedding/
 models/reranker/
 models/translation/
@@ -83,7 +84,23 @@ Thumbs.db
 app/config.json
 app/config.test.json
 !app/config.example.json
+.env
+.env.*
+*.env
+*.secret.json
+*.credentials.json
+secrets.*
+config.local.json
+app/config.local.json
 
 # Runtime state
 .runtime/services.pids.json
-.runtime/deploy/
+.runtime/npm-cache/
+.runtime/pip-cache/
+artifacts/ci/
+
+# Local IDE / agent assets
+.trae/skills/
+
+# Refactor baseline snapshots (generated)
+.refactor-baseline/

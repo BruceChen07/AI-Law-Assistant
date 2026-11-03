@@ -38,8 +38,41 @@
   background: var(--summary-content-bg);
 }
 
+.summary-content.is-structured {
+  white-space: normal;
+}
+
 .summary-content.is-empty {
   color: var(--muted);
+}
+
+.structured-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.structured-summary-title {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.45;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.structured-summary-line {
+  margin: 0;
+  color: var(--summary-content-text);
+  line-height: 1.85;
+}
+
+.structured-summary-line strong {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.structured-summary-line span {
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .result-opinion {

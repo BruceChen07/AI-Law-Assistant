@@ -1,6 +1,13 @@
 import argparse
 import json
 import os
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from app.core.config import get_config
 from app.core.ocr import detect_dependencies, benchmark_engines
 
@@ -12,7 +19,7 @@ def main():
     args = parser.parse_args()
 
     cfg = get_config()
-    report = {"dependencies": detect_dependencies()}
+    report = {"dependencies": detect_dependencies(), "ocr_stack": "mineru_only"}
     if args.pdf and os.path.exists(args.pdf):
         report["benchmark"] = benchmark_engines(cfg, args.pdf)
 

@@ -4,19 +4,16 @@ import sys
 from pathlib import Path
 
 
-DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 DEFAULT_LLAMACPP_HOST = "http://127.0.0.1:18080"
 DEFAULT_LLAMACPP_SMALL_HOST = "http://127.0.0.1:18081"
-DEFAULT_OLLAMA_MAIN_MODEL = "qwen3.6:27b"
-DEFAULT_OLLAMA_SMALL_MODEL = "qwen3:4b"
 DEFAULT_LLAMACPP_MAIN_MODEL = "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
 DEFAULT_LLAMACPP_SMALL_MODEL = "Qwen3.6-27B-Q4_0.gguf"
 
 
-def _base_url(provider: str, ollama_host: str, llamacpp_host: str) -> str:
+def _base_url(provider: str, llamacpp_host: str) -> str:
     provider_name = str(provider or "").strip().lower()
-    if provider_name == "ollama":
-        return f"{ollama_host.rstrip('/')}/v1"
+    if provider_name != "llama_cpp":
+        raise ValueError("Only llama_cpp is supported by this branch.")
     return f"{llamacpp_host.rstrip('/')}/v1"
 
 
@@ -53,9 +50,11 @@ def build_local_llm_config(
 ) -> dict:
     return {
         "enabled": enabled,
+        "runtime_mode": "local",
         "routing_enabled": True,
+        "cloud_fallback_enabled": False,
         "allow_small_to_main_fallback": True,
-        "timeout_sec": 600,
+        "timeout_sec": 30,
         "json_repair_enabled": True,
         "main_model": _model_block(
             provider=main_provider,
@@ -89,8 +88,8 @@ def build_local_llm_config(
             "high_risk_force_main": True,
         },
         "execution": {
-            "fallback_on_error": True,
-            "fallback_on_invalid_json": True,
+            "fallback_on_error": False,
+            "fallback_on_invalid_json": False,
             "tax_match_main_review_labels": ["non_compliant"],
             "tax_match_min_confidence": 0.65,
             "tax_match_max_workers": 2,
@@ -99,6 +98,19 @@ def build_local_llm_config(
             "memory_clause_force_main_for_priority": False,
             "memory_flush_force_main": False,
         },
+    }
+
+
+def build_base_llm_config(api_base: str, model: str) -> dict:
+    return {
+        "provider": "llama_cpp",
+        "api_base": api_base,
+        "api_key": "",
+        "model": model,
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "timeout": 60,
+        "headers": {},
     }
 
 
@@ -114,20 +126,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--provider",
-        choices=["ollama", "llama_cpp"],
+        choices=["llama_cpp"],
         default="llama_cpp",
         help="Main local provider to activate.",
     )
     parser.add_argument(
         "--small-provider",
-        choices=["ollama", "llama_cpp"],
+        choices=["llama_cpp"],
         default="llama_cpp",
         help="Provider used by the small model route.",
-    )
-    parser.add_argument(
-        "--ollama-host",
-        default=DEFAULT_OLLAMA_HOST,
-        help="Base host for the local Ollama service.",
     )
     parser.add_argument(
         "--llama-cpp-host",
@@ -183,24 +190,19 @@ def main() -> int:
 
     main_provider = args.provider
     small_provider = args.small_provider
-    main_api_base = _base_url(
-        main_provider, args.ollama_host, args.llama_cpp_host)
-    small_llamacpp_host = args.small_llama_cpp_host or args.llama_cpp_host
-    small_api_base = _base_url(
-        small_provider, args.ollama_host, small_llamacpp_host)
-    main_model = args.main_model or (
-        DEFAULT_LLAMACPP_MAIN_MODEL if main_provider == "llama_cpp" else DEFAULT_OLLAMA_MAIN_MODEL
+    main_api_base = _base_url(main_provider, args.llama_cpp_host)
+    small_host = args.llama_cpp_host if args.single_instance else (
+        args.small_llama_cpp_host or args.llama_cpp_host
     )
-    small_model = args.small_model or (
-        DEFAULT_OLLAMA_SMALL_MODEL if small_provider == "ollama" else DEFAULT_LLAMACPP_SMALL_MODEL
+    small_api_base = _base_url(small_provider, small_host)
+    main_model = args.main_model or DEFAULT_LLAMACPP_MAIN_MODEL
+    small_model = (
+        main_model
+        if args.single_instance
+        else (args.small_model or DEFAULT_LLAMACPP_SMALL_MODEL)
     )
 
-    # Single-instance convenience: override small to match main
-    if args.single_instance:
-        small_provider = main_provider
-        small_api_base = main_api_base
-        small_model = main_model
-
+    config["llm_config"] = build_base_llm_config(main_api_base, main_model)
     config["local_llm"] = build_local_llm_config(
         enabled=not args.disable,
         main_provider=main_provider,
@@ -210,32 +212,6 @@ def main() -> int:
         small_api_base=small_api_base,
         small_model=small_model,
     )
-    config["llm_config"] = _model_block(
-        provider=main_provider,
-        api_base=main_api_base,
-        model=main_model,
-        temperature=0.2,
-        max_tokens=2048,
-        timeout=600,
-    )
-    config["network_policy"] = {
-        "enabled": True,
-        "mode": "offline_strict",
-        "allow_private_ip_ranges": True,
-        "allowed_hosts": [
-            "127.0.0.1",
-            "localhost",
-            "llm-gateway.intra",
-            "ollama.intra",
-            "llamacpp.intra",
-            "ocr-gateway.intra",
-        ],
-        "allowed_domain_suffixes": [
-            ".intra",
-            ".corp.local",
-            ".svc.cluster.local",
-        ],
-    }
 
     if args.dry_run:
         print()
@@ -259,28 +235,20 @@ def main() -> int:
             and main_api_base == small_api_base
         )
         print()
-        print("Enterprise offline mode is now ACTIVE:")
-        print(f"  Main model:  {main_api_base} ({main_provider}:{main_model})")
-        print(
-            f"  Small model: {small_api_base} ({small_provider}:{small_model})")
-        if single_instance:
-            print("  Runtime policy: single-instance (small tasks auto-fallback to main)")
-        else:
-            print("  Runtime policy: dual llama.cpp or local-only fallback; no public cloud route")
+        print("Local LLM mode is now ACTIVE:")
+        print(f"  Main model:  {main_api_base} ({main_model})")
+        print(f"  Small model: {small_api_base} ({small_model})")
+        print("  Cloud fallback: DISABLED")
+        print("  Base llm_config: points to local llama.cpp main model")
         print()
         if single_instance:
             print(
                 r"Next step: start the llama.cpp runtime with python .\bin\start-local-llamacpp-stack.py")
-        elif main_provider == "llama_cpp" and small_provider == "llama_cpp":
+        else:
             print(
                 r"Next step: start both local llama.cpp runtimes with python .\bin\start-local-llamacpp-stack.py --no-single-instance")
-        elif main_provider == "llama_cpp":
-            print(
-                r"Next step: stage the GGUF model and run python .\bin\start-local-llamacpp-server.py")
-        else:
-            print(r"Next step: stage local model assets and run python .\bin\download-local-llm-models.py --verify-only")
     else:
-        print("[OK] Local LLM mode disabled. Base internal service route only.")
+        print("[OK] Local routing disabled. Base llm_config remains local llama.cpp.")
 
     return 0
 

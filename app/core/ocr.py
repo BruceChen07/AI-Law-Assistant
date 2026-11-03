@@ -14,36 +14,11 @@ class OCREngine:
     def is_available(self) -> bool:
         raise NotImplementedError()
 
-    def ocr_pdf(self, path: str, lang: str, dpi: int) -> Tuple[str, int]:
+    def ocr_document(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int]:
         raise NotImplementedError()
 
-
-class TesseractEngine(OCREngine):
-    name = "tesseract"
-
-    def _check_binary(self) -> bool:
-        return bool(shutil.which("tesseract")) and (bool(shutil.which("pdftoppm")) or bool(shutil.which("pdftocairo")))
-
-    def _check_modules(self) -> bool:
-        try:
-            importlib.import_module("pytesseract")
-            importlib.import_module("pdf2image")
-            return True
-        except Exception:
-            return False
-
-    def is_available(self) -> bool:
-        return self._check_binary() and self._check_modules()
-
     def ocr_pdf(self, path: str, lang: str, dpi: int) -> Tuple[str, int]:
-        pdf2image = importlib.import_module("pdf2image")
-        pytesseract = importlib.import_module("pytesseract")
-        images = pdf2image.convert_from_path(path, dpi=dpi)
-        texts = []
-        for img in images:
-            texts.append(pytesseract.image_to_string(img, lang=lang) or "")
-        return "\n\n".join(texts), len(images)
-
+        return self.ocr_document(path, lang, dpi, doc_type="pdf")
 
 class PluginEngine(OCREngine):
     def __init__(self, name: str, module_name: str, func_name: str):
@@ -63,12 +38,15 @@ class PluginEngine(OCREngine):
         except Exception:
             return False
 
-    def ocr_pdf(self, path: str, lang: str, dpi: int) -> Tuple[str, int]:
+    def ocr_document(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int]:
         fn = self._load()
         try:
-            result = fn(path=path, lang=lang, dpi=dpi)
+            result = fn(path=path, lang=lang, dpi=dpi, doc_type=doc_type)
         except TypeError:
-            result = fn(path, lang, dpi)
+            try:
+                result = fn(path=path, lang=lang, dpi=dpi)
+            except TypeError:
+                result = fn(path, lang, dpi)
         if isinstance(result, tuple) and len(result) >= 2:
             return str(result[0]), int(result[1])
         return str(result), 0
@@ -110,7 +88,7 @@ class OCREngineManager:
                 return name
         return None
 
-    def ocr_pdf(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int, Optional[str]]:
+    def ocr_document(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int, Optional[str]]:
         name = self.select_engine(doc_type)
         if not name:
             logger.info("ocr_engine_missing file=%s doc_type=%s",
@@ -123,15 +101,18 @@ class OCREngineManager:
         logger.info(
             "ocr_engine_start file=%s engine=%s lang=%s dpi=%s", path, name, lang, dpi)
         start = time.perf_counter()
-        text, pages = engine.ocr_pdf(path, lang, dpi)
+        text, pages = engine.ocr_document(path, lang, dpi, doc_type=doc_type)
         elapsed = int((time.perf_counter() - start) * 1000)
         logger.info("ocr_engine_done file=%s engine=%s pages=%s text_length=%s cost_ms=%s",
                     path, name, pages, len(text), elapsed)
         return text, pages, name
 
+    def ocr_pdf(self, path: str, lang: str, dpi: int, doc_type: str = "pdf") -> Tuple[str, int, Optional[str]]:
+        return self.ocr_document(path, lang, dpi, doc_type=doc_type)
+
 
 def build_engines_from_config(cfg: Dict[str, Any]) -> List[OCREngine]:
-    engines: List[OCREngine] = [TesseractEngine()]
+    engines: List[OCREngine] = []
     engine_cfg = cfg.get("ocr_engines") or {}
     if isinstance(engine_cfg, dict):
         for name, detail in engine_cfg.items():
@@ -141,6 +122,8 @@ def build_engines_from_config(cfg: Dict[str, Any]) -> List[OCREngine]:
             func_name = str(detail.get("function", "")).strip()
             if module_name and func_name:
                 engines.append(PluginEngine(name, module_name, func_name))
+    if not any(e.name == "mineru" for e in engines):
+        engines.append(PluginEngine("mineru", "app.core.mineru_ocr", "ocr_document"))
     return engines
 
 
@@ -173,15 +156,6 @@ def detect_dependencies(cmd_runner=None) -> Dict[str, Any]:
         def cmd_runner(cmd):
             return subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
     info = {}
-    for name, bin_name in [("tesseract", "tesseract"), ("poppler", "pdftoppm")]:
-        path = shutil.which(bin_name)
-        info[name] = {"path": path, "version": None, "available": bool(path)}
-        if path:
-            try:
-                out = cmd_runner([bin_name, "--version"])
-                info[name]["version"] = out.splitlines()[0].strip()
-            except Exception:
-                info[name]["version"] = None
     mineru_info = {"module": False, "cli": False, "version": None}
     try:
         mineru_info["module"] = importlib.util.find_spec("mineru") is not None
