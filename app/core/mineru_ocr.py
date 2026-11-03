@@ -13,6 +13,10 @@ from typing import Tuple, Dict, Any, Optional, List
 from PIL import Image
 
 from app.core.config import get_config
+from app.core.mineru_models import (
+    ensure_local_models as ensure_local_mineru_models,
+    resolve_mineru_config_path,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -119,6 +123,8 @@ def _build_model_source_attempts(mineru_cfg: Dict[str, Any]) -> List[Dict[str, A
 def _build_mineru_subprocess_env(base_env: Dict[str, str], mineru_cfg: Dict[str, Any], model_source: str) -> Dict[str, str]:
     env = dict(base_env)
     env["MINERU_MODEL_SOURCE"] = model_source
+    if model_source == "local":
+        env["MINERU_TOOLS_CONFIG_JSON"] = resolve_mineru_config_path(mineru_cfg)
     hf_connect_timeout = int(mineru_cfg.get(
         "hf_connect_timeout_sec", 10) or 10)
     hf_download_timeout = int(mineru_cfg.get(
@@ -367,6 +373,19 @@ def _run_mineru(path: str, out_dir: str) -> Dict[str, Any]:
         backends,
         [item["source"] for item in model_source_attempts],
     )
+
+    if any(item["source"] == "local" for item in model_source_attempts):
+        local_status = ensure_local_mineru_models(cfg, allow_download=False)
+        if not local_status.get("ok"):
+            raise RuntimeError(
+                "mineru_local_models_unavailable: "
+                + str(local_status.get("message") or "本地模型缺失")
+            )
+        logger.info(
+            "mineru_local_models_verified root=%s config=%s",
+            local_status.get("root"),
+            local_status.get("config_path"),
+        )
 
     last_error = None
     for idx, backend_try in enumerate(backends, start=1):

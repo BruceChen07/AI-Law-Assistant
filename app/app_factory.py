@@ -14,6 +14,7 @@ from app.core.reranker import RerankerService
 from app.core.llm import LLMService
 from app.core.translation import TranslationService
 from bin.ensure_local_models import ensure_models
+from app.core.mineru_models import ensure_models_on_startup as ensure_mineru_models_on_startup
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
@@ -136,6 +137,16 @@ def create_app():
             logger.warning("model_preflight_not_ready missing=%s", missing)
     else:
         logger.info("model_preflight_disabled")
+    try:
+        mineru_status = ensure_mineru_models_on_startup(cfg, logger)
+        logger.info(
+            "mineru_models_startup ok=%s skipped=%s root=%s",
+            bool(mineru_status.get("ok", False)),
+            bool(mineru_status.get("skipped", False)),
+            mineru_status.get("root", ""),
+        )
+    except Exception:
+        logger.exception("mineru_models_startup_failed")
     llm = LLMService(cfg)
     llm_runtime = llm.describe_runtime_config()
     logger.info(

@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlparse
 import pytest
 
 from app.core import mineru_models as mm
+from app.core.mineru_ocr import _build_mineru_subprocess_env
 
 
 PIPELINE_FILES = {
@@ -216,3 +217,14 @@ def test_local_model_source_is_preserved(tmp_path):
     assert env["MINERU_TOOLS_CONFIG_JSON"].endswith("mineru.json")
 
 
+
+def test_local_source_sets_mineru_tools_config_env(tmp_path):
+    mineru_cfg = {
+        "model_source": "local",
+        "local_models_dir": str(tmp_path / "models"),
+    }
+
+    env = _build_mineru_subprocess_env({}, mineru_cfg, "local")
+
+    assert env["MINERU_MODEL_SOURCE"] == "local"
+    assert env["MINERU_TOOLS_CONFIG_JSON"].endswith("mineru.json")
