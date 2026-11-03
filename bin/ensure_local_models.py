@@ -180,6 +180,8 @@ def ensure_models(
     check_only: bool = False,
     include_optional: bool = False,
     model_types: Any = None,
+    download: bool = False,
+    verify_sha256: bool = False,
 ) -> Dict[str, Any]:
     config = cfg or get_config()
     report: Dict[str, Any] = {
@@ -237,6 +239,29 @@ def ensure_models(
                 "message": "" if ok else "translation assets must be staged from internal artifact repository",
             })
 
+    if _selected(model_types, "mineru"):
+        from app.core.mineru_models import ensure_local_models, inspect_local_models
+        if download:
+            status = ensure_local_models(config, allow_download=True)
+        else:
+            status = inspect_local_models(
+                config, deep=bool(verify_sha256), verify_sha256=bool(verify_sha256))
+        report["models"].append({
+            "name": "mineru:models",
+            "type": "mineru",
+            "ok": bool(status.get("ok")),
+            "downloaded": bool(status.get("downloaded", False)),
+            "detail": {
+                "root": status.get("root", ""),
+                "config_path": status.get("config_path", ""),
+                "manifest_path": status.get("manifest_path", ""),
+                "required_kinds": status.get("required_kinds", []),
+                "missing": status.get("missing", []),
+                "optional_missing": status.get("optional_missing", []),
+            },
+            "message": "" if status.get("ok") else status.get("message", ""),
+        })
+
     report["all_ready"] = all(bool(x.get("ok")) for x in report["models"]) if report["models"] else True
     return report
 
@@ -248,12 +273,24 @@ def main():
     parser.add_argument("--check-only", action="store_true")
     parser.add_argument("--include-optional", action="store_true")
     parser.add_argument("--types", default="all")
+    parser.add_argument(
+        "--download",
+        action="store_true",
+        help="Download missing MinerU models into the local model directory.",
+    )
+    parser.add_argument(
+        "--verify-sha256",
+        action="store_true",
+        help="Verify MinerU model files against sha256 recorded in manifest.json.",
+    )
     args = parser.parse_args()
     report = ensure_models(
         cfg=get_config(),
         check_only=bool(args.check_only),
         include_optional=bool(args.include_optional),
         model_types=args.types,
+        download=bool(args.download),
+        verify_sha256=bool(args.verify_sha256),
     )
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
