@@ -222,6 +222,45 @@ Security note:
 
 ---
 
+## 15) Contract Audit Performance
+
+CPU-only deployments should tune these keys together with the llama.cpp launch flags.
+
+### `contract_audit`
+
+| Key | Type | Description |
+|---|---|---|
+| `parallel_workers` | int | Clause chunks audited concurrently. Default `1`. Set `2` only when llama.cpp runs with `--parallel 2`; measured cost on a 20-core CPU is ~1.8x per-call latency for ~11% total wall-clock gain. |
+
+### `audit_token_policy`
+
+Budget planner for contract audits. Lowering `context_window_tokens` should match the llama.cpp per-slot context.
+
+| Key | Type | Description |
+|---|---|---|
+| `context_window_tokens` | int | Per-request window used for planning (default `16384`; CPU profile uses `8192`). |
+| `reserve_output_tokens` | int | Tokens kept for the completion (`2048`). |
+| `safety_margin_tokens` | int | Extra headroom (`1024`). |
+| `input_soft_limit_tokens` | int | Soft prompt limit; groups are split above it (`3584` at 8k). |
+| `input_hard_limit_tokens` | int | Hard prompt limit (`5120` at 8k). |
+| `clause_group_target_tokens` | int | Target clause tokens per chunk (`2800` at 8k). |
+| `chunk_output_tokens` | int | Output budget per chunk. |
+
+### `contract_preview.audit_build_manifest`
+
+| Key | Type | Description |
+|---|---|---|
+| `audit_build_manifest` | bool | When `false`, the audit skips preview manifest building. Building it runs MinerU for layout coordinates (tens of seconds on CPU). Set `false` on CPU deployments; the preview endpoint still builds it on demand when a user opens the document, but risk items will lack page coordinates until then. |
+
+### llama.cpp launch flags
+
+| Flag | Recommended | Description |
+|---|---|---|
+| `--ctx-size` | `8192` | Per-slot context. With `--parallel N`, llama.cpp splits this value across slots. |
+| `--parallel` | `1` (or `2` + `contract_audit.parallel_workers=2`) | Server slots. Single-sequence CPU inference already saturates the cores. |
+| `--cache-reuse` | `256` | KV cache reuse; automatically disabled by llama.cpp for contexts that do not support it (`cache_reuse is not supported by this context`). |
+| `--n-gpu-layers` | `0` | Keep inference on CPU. |
+
 ## Recommended Profiles
 
 ### Chinese-only regulation corpus
