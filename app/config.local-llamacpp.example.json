@@ -36,6 +36,13 @@
             "headers": {}
         }
     },
+    "memory_runtime_config": {
+        "memory_module_enabled": true,
+        "classic_audit_max_tokens": 3000,
+        "classic_audit_retry_max_tokens": 4000,
+        "memory_max_llm_calls_per_audit": 12,
+        "memory_max_prompt_chars_per_clause": 2400
+    },
     "network_policy": {
         "enabled": true,
         "mode": "offline_strict",

@@ -7,7 +7,6 @@ import time
 import uuid
 import hashlib
 import json
-import os
 import re
 import socket
 import structlog
@@ -23,16 +22,37 @@ from app.services.audit_utils import _safe_int, _normalize_citation_item, _enric
 from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve_regulation_evidence
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
 from app.services.contract_audit_modules.result_assembler import attach_risk_locations
-from app.services.contract_audit_modules.trace_writer import memory_paths, write_audit_trace, trace_clip
+from app.services.contract_audit_modules.trace_writer import (
+    memory_paths,
+    write_audit_trace,
+    write_round_trace,
+    trace_clip,
+)
 from app.services.contract_preview_assets import build_contract_preview_manifest
 from app.services.final_report_service import build_contract_final_report
-from app.services.llm_progress import report_progress
+from app.services.llm_progress import (
+    build_llm_progress_detail,
+    build_llm_progress_message,
+    compute_llm_progress_percent,
+    report_progress,
+)
 from app.services.prompt_binding import resolve_bound_prompt_text
+from app.services.result_aggregator import aggregate_chunk_audit_results
+from app.services.review_retry import (
+    build_reliability_review_plan,
+    build_reliability_summary,
+)
 
 logger = structlog.get_logger(__name__)
 
-CLASSIC_AUDIT_MAX_TOKENS = 900
-CLASSIC_AUDIT_RETRY_MAX_TOKENS = 1400
+# The classic audit emits a JSON object with a `risks` array whose items carry
+# 9 fields, so 900 tokens truncated the response on most chunks and the retry
+# budget (1400) usually truncated as well. Align with CONTRACT_SUMMARY_* below,
+# which already budgets for Chinese output plus hidden reasoning tokens.
+# Local llama.cpp runs with --ctx-size 16384 by default, so prompt (~2.4k) plus
+# this budget still fits comfortably.
+CLASSIC_AUDIT_MAX_TOKENS = 3000
+CLASSIC_AUDIT_RETRY_MAX_TOKENS = 4000
 CLASSIC_MULTIPASS_TRIGGER_CLAUSES = 10
 CONTRACT_SUMMARY_SOURCE_MAX_CHARS = 30000
 # Reasoning models spend part of max_tokens on hidden reasoning tokens, so the
@@ -1549,7 +1569,14 @@ def _build_classic_audit(
 
     attempt = _run_once(classic_audit_max_tokens)
     retry_used = False
-    if attempt["parse_failed"] or attempt["response_empty"]:
+    # A truncated response is almost always invalid/partial JSON, but json_repair
+    # can salvage it into a *parseable* object that silently loses risks. Retry on
+    # truncation too, otherwise the audit reports success with missing findings.
+    if (
+        attempt["parse_failed"]
+        or attempt["response_empty"]
+        or attempt["response_truncated"]
+    ):
         retry_attempt = _run_once(classic_audit_retry_max_tokens)
         if (not retry_attempt["parse_failed"]) or (
             retry_attempt["usage"]["completion_tokens"] >= attempt["usage"]["completion_tokens"]
