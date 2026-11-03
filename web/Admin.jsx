@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from "react"
-import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
+import { useState, useEffect, useMemo, useRef } from "react"
+import { adminListDocuments, adminDeleteDocument, adminListUsers, adminUpdateUserRole, adminDeleteUser, adminGetStats, adminGetLLMConfig, adminUpdateLLMConfig, adminGetLlamaCppModels, adminGetUIConfig, adminUpdateUIConfig, adminGetVectorStoreConfig, adminUpdateVectorStoreConfig, adminCleanupVectorStore, adminTestLLM, adminGetMemoryConfig, adminUpdateMemoryConfig, adminListPrompts, adminGetPrompt, adminCreatePrompt, adminUpdatePrompt, adminDeletePrompt, adminRestorePromptDefault, adminUpdatePromptStatus, adminPreviewPrompt, adminListPromptBindings, adminUpdatePromptBinding, importRegulation, getJob, searchRegulations, getCurrentUser, logout } from "./api"
 import TokenMonitor from "./TokenMonitor"
 import SkillManager from "./SkillManager"
 import { adminI18n } from "./i18n/adminI18n"
@@ -66,19 +66,7 @@ export default function Admin({ onBack, lang, onLangChange }) {
   const [llmTestResult, setLlmTestResult] = useState("")
   const [llmTestError, setLlmTestError] = useState("")
   const [llmTesting, setLlmTesting] = useState(false)
-  const [ollamaModels, setOllamaModels] = useState([])
-  const [ollamaModelsLoading, setOllamaModelsLoading] = useState(false)
-  const [ollamaModelsError, setOllamaModelsError] = useState("")
-  const [ollamaSearch, setOllamaSearch] = useState("")
-  const [ollamaMeta, setOllamaMeta] = useState({
-    host: "http://127.0.0.1:11434",
-    cached: false,
-    stale: false,
-    current_model: "",
-    recommended_model: "",
-    cached_at: "",
-    expires_at: ""
-  })
+  const [llmSaving, setLlmSaving] = useState(false)
   const [llamaCppModels, setLlamaCppModels] = useState([])
   const [llamaCppModelsLoading, setLlamaCppModelsLoading] = useState(false)
   const [llamaCppModelsError, setLlamaCppModelsError] = useState("")
@@ -464,6 +452,82 @@ export default function Admin({ onBack, lang, onLangChange }) {
       setLoading(false)
     }
   }
+
+  const loadLlamaCppModels = async (forceRefresh = false) => {
+    setLlamaCppModelsLoading(true)
+    try {
+      const data = await adminGetLlamaCppModels(forceRefresh ? { force_refresh: "true" } : {})
+      const models = Array.isArray(data.models) ? data.models : []
+      setLlamaCppModels(models)
+      setLlamaCppMeta({
+        host: data.host || "http://127.0.0.1:18080",
+        cached: !!data.cached,
+        stale: !!data.stale,
+        current_model: data.current_model || "",
+        recommended_model: data.recommended_model || "",
+        cached_at: data.cached_at || "",
+        expires_at: data.expires_at || ""
+      })
+      setLlamaCppModelsError(data.error || "")
+    } catch (err) {
+      setLlamaCppModels([])
+      setLlamaCppModelsError(err.message)
+    } finally {
+      setLlamaCppModelsLoading(false)
+    }
+  }
+
+  const applyLlamaCppModel = async (modelName) => {
+    if (!llmConfig || !modelName) return
+    const nextConfig = {
+      ...llmConfig,
+      provider: "llama_cpp",
+      api_base: `${String(llamaCppMeta.host || "http://127.0.0.1:18080").replace(/\/$/, "")}/v1`,
+      api_key: "",
+      model: modelName
+    }
+    setLlmSaving(true)
+    setLlmError("")
+    setLlmConfig(nextConfig)
+    try {
+      const saved = await adminUpdateLLMConfig({
+        provider: nextConfig.provider,
+        api_base: nextConfig.api_base,
+        model: nextConfig.model,
+        temperature: Number(nextConfig.temperature),
+        max_tokens: Number(nextConfig.max_tokens),
+        timeout: Number(nextConfig.timeout),
+        headers: nextConfig.headers || {}
+      })
+      setLlmConfig(prev => prev ? {
+        ...prev,
+        ...saved,
+        provider_label: saved.provider_label || prev.provider_label,
+        api_base: saved.api_base || nextConfig.api_base,
+        model: saved.model || nextConfig.model
+      } : prev)
+      setLlmError(t.saved)
+    } catch (err) {
+      setLlmError(err.message)
+    } finally {
+      setLlmSaving(false)
+    }
+  }
+
+  const filteredLlamaCppModels = useMemo(() => {
+    const keyword = String(llamaCppSearch || "").trim().toLowerCase()
+    if (!keyword) return llamaCppModels
+    return llamaCppModels.filter(item => {
+      const haystack = [
+        item.name,
+        item.model,
+        item.owner,
+        item.family,
+        item.quantization_level
+      ].join(" ").toLowerCase()
+      return haystack.includes(keyword)
+    })
+  }, [llamaCppModels, llamaCppSearch])
 
   const loadUIConfig = async () => {
     try {
@@ -1457,84 +1521,6 @@ export default function Admin({ onBack, lang, onLangChange }) {
           <h2>{t.llmTitle}</h2>
           {llmConfig && (
             <div className="form">
-              {showLegacyOllamaTools && <div className="llm-test">
-                <div className="row">
-                  <label>{t.ollamaDetectedModels}</label>
-                  <button disabled={ollamaModelsLoading} onClick={() => loadOllamaModels(true)}>
-                    {ollamaModelsLoading ? t.ollamaRefreshing : t.ollamaRefresh}
-                  </button>
-                </div>
-                <div className="row">
-                  <label>{t.ollamaStatus}</label>
-                  <div>
-                    {ollamaMeta.host}
-                    {ollamaMeta.cached ? ` | ${t.ollamaCacheHit}` : ""}
-                    {ollamaMeta.stale ? ` | ${t.ollamaCacheStale}` : ""}
-                    {ollamaMeta.expires_at ? ` | ${t.ollamaCacheExpire}: ${formatDate(ollamaMeta.expires_at)}` : ""}
-                  </div>
-                </div>
-                <div className="row">
-                  <label>{t.ollamaSearch}</label>
-                  <input
-                    value={ollamaSearch}
-                    placeholder={t.ollamaSearchPlaceholder}
-                    onChange={e => setOllamaSearch(e.target.value)}
-                  />
-                </div>
-                {ollamaModelsError && (
-                  <div className="row">
-                    <span className="llm-test-error">{ollamaModelsError}</span>
-                  </div>
-                )}
-                {!!filteredOllamaModels.length && (
-                  <>
-                    <div className="row">
-                      <label>{t.ollamaChooseModel}</label>
-                      <select
-                        value={llmConfig.model}
-                        onChange={async e => {
-                          const modelName = e.target.value
-                          setLlmConfig(prev => prev ? {
-                            ...prev,
-                            provider: "ollama",
-                            api_base: `${String(ollamaMeta.host || "http://127.0.0.1:11434").replace(/\/$/, "")}/v1`,
-                            api_key: "",
-                            model: modelName
-                          } : prev)
-                          await applyOllamaModel(modelName)
-                        }}
-                      >
-                        {filteredOllamaModels.map(item => (
-                          <option key={item.name || item.model} value={item.name || item.model}>
-                            {item.name || item.model}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="row">
-                      <div className="llm-test-result">
-                        {filteredOllamaModels.map(item => {
-                          const modelName = item.name || item.model
-                          const isCurrent = modelName === llmConfig.model
-                          return (
-                            <div key={modelName} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px solid #eee" }}>
-                              <div>
-                                <strong>{modelName}</strong>
-                                <div style={{ fontSize: 12, color: "#666" }}>
-                                  {[item.parameter_size, item.family, item.quantization_level].filter(Boolean).join(" | ") || t.ollamaMetaFallback}
-                                </div>
-                              </div>
-                              <button disabled={llmSaving && isCurrent} onClick={() => applyOllamaModel(modelName)}>
-                                {isCurrent ? t.ollamaCurrentModel : t.ollamaApplyModel}
-                              </button>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>}
               <div className="llm-test">
                 <div className="row">
                   <label>{lang === "zh" ? "本地 llama.cpp 模型" : "Local llama.cpp Models"}</label>
