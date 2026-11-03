@@ -24,7 +24,7 @@ INDEX_URL=${OCR_PIP_INDEX:-}
 PKGS=(
   "pillow>=11.0.0"
   "pypdf>=5.6.0"
-  "mineru==3.1.5"
+  "mineru[pipeline]==3.1.5"
 )
 
 if command -v uv >/dev/null 2>&1; then

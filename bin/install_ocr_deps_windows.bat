@@ -28,7 +28,7 @@ REM ---- 4) Upgrade build tools
 if errorlevel 1 exit /b 1
 
 REM ---- 5) Install OCR Python deps
-%INSTALLER% install %PIP_INDEX% pillow>=11.0.0 pypdf>=5.6.0 "mineru==3.1.5"
+%INSTALLER% install %PIP_INDEX% pillow>=11.0.0 pypdf>=5.6.0 "mineru[pipeline]==3.1.5"
 if errorlevel 1 exit /b 1
 
 echo MinerU OCR dependencies installed successfully.

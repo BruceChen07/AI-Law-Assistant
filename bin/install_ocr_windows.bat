@@ -6,7 +6,7 @@ if errorlevel 1 (
   echo python not found
   exit /b 1
 )
-python -m pip install -U "mineru==3.1.5"
+python -m pip install -U "mineru[pipeline]==3.1.5"
 if errorlevel 1 exit /b 1
 
 for /f "delims=" %%i in ('mineru --version') do (
