@@ -55,6 +55,8 @@ data/app.db
 data/llm_trace.db
 data/llm_traces_full/
 data/verify/
+data/audit_logs/
+data/.audit_internal/
 logs/
 log/
 models/
