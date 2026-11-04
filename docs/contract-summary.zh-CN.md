@@ -58,6 +58,7 @@ CPU（Qwen3.6-35B-A3B，llama.cpp）实测：1,300 字补充协议约 **94 秒**
 
 ## 与审计的关系
 
-- 审计接口 `/contracts/audit` 完全未改动；
+- 审计接口 `/contracts/audit` 的入参未改动，只是改为「入队 + 摘要优先」执行；
 - 摘要失败不影响审计结果；
-- 代码独立在 `feature/contract-summary` 分支，可单独合并或放弃。
+- 摘要优先实现：队列 worker 在跑审计前先生成摘要，接口在队列持有该文档时返回 `status=pending`，前端每 3 秒轮询直到就绪（最多约 3 分钟）；实测提交后 265 ms 返回 pending，85 秒摘要就绪，此时审计仍在执行；
+- 所在分支：`feature/audit-summary`（由 `feature/contract-summary` 与 `feature/audit-queue` 合并）。
