@@ -87,3 +87,12 @@ app/config.test.json
 # Runtime state
 .runtime/services.pids.json
 .runtime/deploy/
+
+# Runtime process state, generated artifacts and audit archives
+.runtime/
+data/audits/
+data/.audit_internal/
+data/files/contract_reports/
+data/files/tax_audit_reports/
+data/files/contract_markdown/
+
