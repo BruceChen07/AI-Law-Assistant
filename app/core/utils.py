@@ -1,7 +1,10 @@
 import os
 import re
+import json
+import hashlib
 import logging
 import threading
+import time
 import jieba
 from typing import List, Tuple, Optional, Dict, Any
 from pypdf import PdfReader
@@ -68,7 +71,7 @@ def extract_text(path: str) -> str:
     raise ValueError("unsupported file type")
 
 
-def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[str, Any]]:
+def _extract_text_with_config_uncached(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[str, Any]]:
     ext = os.path.splitext(path)[1].lower()
     meta = {
         "ext": ext,
@@ -132,6 +135,101 @@ def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[
                 f"OCR_PARSE_FAILED: {type(e).__name__}: {e}"
             ) from e
     return text, meta
+
+
+_TEXT_CACHE_LOCKS: Dict[str, threading.Lock] = {}
+_TEXT_CACHE_LOCKS_GUARD = threading.Lock()
+
+
+def _file_digest(path: str) -> str:
+    try:
+        digest = hashlib.sha256()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return ""
+
+
+def _text_cache_path(cfg: Dict[str, Any], digest: str) -> str:
+    data_dir = str(cfg.get("data_dir") or "data")
+    return os.path.join(data_dir, "memory", "text_cache", digest[:2], f"{digest}.json")
+
+
+def _read_text_cache(cfg: Dict[str, Any], digest: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+    path = _text_cache_path(cfg, digest)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8-sig") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        logger.warning("text_cache_read_failed path=%s", path)
+        return None
+    text = str(data.get("text") or "")
+    if not text:
+        return None
+    meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
+    return text, dict(meta)
+
+
+def _write_text_cache(cfg: Dict[str, Any], digest: str, text: str,
+                      meta: Dict[str, Any]) -> None:
+    path = _text_cache_path(cfg, digest)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(
+                {
+                    "text": text,
+                    "meta": dict(meta or {}),
+                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                },
+                fh,
+                ensure_ascii=False,
+            )
+        os.replace(tmp, path)
+    except OSError:
+        logger.warning("text_cache_write_failed path=%s", path)
+
+
+def _digest_lock(digest: str) -> threading.Lock:
+    with _TEXT_CACHE_LOCKS_GUARD:
+        lock = _TEXT_CACHE_LOCKS.get(digest)
+        if lock is None:
+            lock = threading.Lock()
+            _TEXT_CACHE_LOCKS[digest] = lock
+        return lock
+
+
+def extract_text_with_config(cfg: Dict[str, Any], path: str) -> Tuple[str, Dict[str, Any]]:
+    """带缓存的文本抽取。
+
+    PDF 扫描件的一次 OCR 要 1~2 分钟。审计和摘要都会抽取同一份文件，若各自
+    跑一遍 OCR 纯属浪费，所以按文件内容 sha256 缓存抽取结果；同一文件并发
+    抽取时用按哈希的锁串行化，后来者直接读缓存。
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in {".pdf", ".docx"}:
+        return _extract_text_with_config_uncached(cfg, path)
+    digest = _file_digest(path)
+    if not digest:
+        return _extract_text_with_config_uncached(cfg, path)
+    cached = _read_text_cache(cfg, digest)
+    if cached is not None:
+        logger.info("text_cache_hit file=%s", path)
+        return cached
+    with _digest_lock(digest):
+        cached = _read_text_cache(cfg, digest)
+        if cached is not None:
+            logger.info("text_cache_hit_after_wait file=%s", path)
+            return cached
+        text, meta = _extract_text_with_config_uncached(cfg, path)
+        _write_text_cache(cfg, digest, text, meta)
+        logger.info("text_cache_stored file=%s chars=%s", path, len(text))
+        return text, meta
 
 
 def split_articles(text):
