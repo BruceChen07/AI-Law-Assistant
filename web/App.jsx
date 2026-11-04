@@ -467,9 +467,10 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    // 合同速读摘要独立于审计：结果就绪后按 documentId 拉取一次，失败静默降级。
+    // 合同速读摘要独立于审计：文件一上传（documentId 就绪）就开始拉取，
+    // 不必等审计跑完，让用户先看到合同讲什么。
     const docId = String(documentId || "")
-    if (!docId || !contractResult) return
+    if (!docId) return
     const key = `${docId}|${uiLang}`
     if (summaryLoadedKeyRef.current === key) return
     summaryLoadedKeyRef.current = key
@@ -487,7 +488,7 @@ export default function App() {
       })
     return () => { cancelled = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentId, contractResult, uiLang])
+  }, [documentId, uiLang])
 
   useEffect(() => {
     // P2: keep a server-side view of running audits so a task that outlives this
@@ -1499,6 +1500,39 @@ export default function App() {
           {!contractResult && (
             <div className="empty-state">
               <p>{t.appSubtitle}</p>
+            </div>
+          )}
+          {!contractResult && (hasContractSummary || contractSummaryLoading) && (
+            <div className="audit-progress audit-summary-panel">
+              <div className="audit-progress-head">
+                <span>{t.summary}</span>
+                <span>{contractSummaryLoading && !hasContractSummary ? t.summaryLoading : ""}</span>
+              </div>
+              {hasContractSummary ? (
+                <div className="contract-summary-card">
+                  {summaryTitle && <div className="contract-summary-headline">{summaryTitle}</div>}
+                  {summaryAbout && (
+                    <div className="contract-summary-section">
+                      <div className="contract-summary-label">{t.summaryAbout}</div>
+                      <div className="contract-summary-text">{summaryAbout}</div>
+                    </div>
+                  )}
+                  {summaryCore && (
+                    <div className="contract-summary-section">
+                      <div className="contract-summary-label">{t.summaryCore}</div>
+                      <div className="contract-summary-text">{summaryCore}</div>
+                    </div>
+                  )}
+                  {summaryTax && (
+                    <div className="contract-summary-section">
+                      <div className="contract-summary-label">{t.summaryTax}</div>
+                      <div className="contract-summary-text">{summaryTax}</div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="audit-progress-note">{t.summaryLoading}</div>
+              )}
             </div>
           )}
           {contractResult && (
