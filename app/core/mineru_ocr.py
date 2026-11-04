@@ -13,6 +13,10 @@ from typing import Tuple, Dict, Any, Optional, List
 from PIL import Image
 
 from app.core.config import get_config
+from app.core.mineru_models import (
+    ensure_local_models as ensure_local_mineru_models,
+    resolve_mineru_config_path,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -119,6 +123,8 @@ def _build_model_source_attempts(mineru_cfg: Dict[str, Any]) -> List[Dict[str, A
 def _build_mineru_subprocess_env(base_env: Dict[str, str], mineru_cfg: Dict[str, Any], model_source: str) -> Dict[str, str]:
     env = dict(base_env)
     env["MINERU_MODEL_SOURCE"] = model_source
+    if model_source == "local":
+        env["MINERU_TOOLS_CONFIG_JSON"] = resolve_mineru_config_path(mineru_cfg)
     hf_connect_timeout = int(mineru_cfg.get(
         "hf_connect_timeout_sec", 10) or 10)
     hf_download_timeout = int(mineru_cfg.get(
@@ -183,13 +189,35 @@ def _run_cmd_text(cmd: List[str], timeout: int = 8) -> str:
 
 
 def _detect_gpu() -> bool:
+    """判断 MinerU 是否真的能用 GPU 推理。
+
+    仅有 ``nvidia-smi`` 说明装了驱动，不代表当前解释器的 torch 带 CUDA；
+    CPU 版 torch 配独显是本项目的常见组合，此时必须走 pipeline 后端。
+    """
     if not shutil.which("nvidia-smi"):
         return False
     try:
         out = _run_cmd_text(["nvidia-smi", "-L"], timeout=5)
-        return bool(out.strip()) and "gpu" in out.lower()
     except Exception:
         return False
+    if not out.strip() or "gpu" not in out.lower():
+        return False
+    try:
+        import torch
+    except Exception:
+        logger.warning("mineru_gpu_probe_torch_missing driver_present=True")
+        return False
+    try:
+        available = bool(torch.cuda.is_available())
+    except Exception:
+        logger.warning("mineru_gpu_probe_torch_error", exc_info=True)
+        return False
+    if not available:
+        logger.info(
+            "mineru_gpu_probe driver_present=True torch_cuda=False torch=%s",
+            getattr(torch, "__version__", ""),
+        )
+    return available
 
 
 def _probe_supported_backends() -> List[str]:
@@ -367,6 +395,19 @@ def _run_mineru(path: str, out_dir: str) -> Dict[str, Any]:
         backends,
         [item["source"] for item in model_source_attempts],
     )
+
+    if any(item["source"] == "local" for item in model_source_attempts):
+        local_status = ensure_local_mineru_models(cfg, allow_download=False)
+        if not local_status.get("ok"):
+            raise RuntimeError(
+                "mineru_local_models_unavailable: "
+                + str(local_status.get("message") or "本地模型缺失")
+            )
+        logger.info(
+            "mineru_local_models_verified root=%s config=%s",
+            local_status.get("root"),
+            local_status.get("config_path"),
+        )
 
     last_error = None
     for idx, backend_try in enumerate(backends, start=1):

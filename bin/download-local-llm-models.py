@@ -1,7 +1,6 @@
 import argparse
 import json
 import time
-import urllib.error
 import urllib.request
 import sys
 
@@ -47,33 +46,18 @@ def get_installed_models(host: str) -> set[str]:
     return {str(item.get("name") or "").strip() for item in models if isinstance(item, dict)}
 
 
-def pull_model(host: str, model: str) -> bool:
-    try:
-        ollama_request(host, "/api/pull", {"name": model, "stream": False})
-        return True
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        print(f"[FAIL] Pull failed for {model}: HTTP {exc.code} {detail}")
-        return False
-    except Exception as exc:
-        print(f"[FAIL] Pull failed for {model}: {exc}")
-        return False
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Ensure Ollama models are pulled and ready for local deployment."
+        description="Validate local Ollama models for enterprise offline deployment."
     )
     parser.add_argument(
         "--ollama-host", default=DEFAULT_OLLAMA_HOST, help="Ollama API host.")
-    parser.add_argument("--skip-main", action="store_true",
-                        help="Skip main model download.")
-    parser.add_argument("--skip-small", action="store_true",
-                        help="Skip small model download.")
     parser.add_argument(
         "--main-model", default=DEFAULT_MAIN_MODEL, help="Main Ollama model name.")
     parser.add_argument(
         "--small-model", default=DEFAULT_SMALL_MODEL, help="Small Ollama model name.")
+    parser.add_argument("--verify-only", action="store_true",
+                        help="Compatibility flag. Validation-only is always enforced in offline mode.")
     parser.add_argument(
         "--wait-seconds",
         type=int,
@@ -95,36 +79,31 @@ def main() -> int:
         print(r"Start it first with: python .\bin\start-local-llm-servers.py")
         return 1
 
-    ok = True
     installed = get_installed_models(args.ollama_host)
-
-    if not args.skip_main and args.main_model not in installed:
-        print(f"[PULL] Main model: {args.main_model}")
-        ok = pull_model(args.ollama_host, args.main_model) and ok
-        installed = get_installed_models(args.ollama_host)
-    elif not args.skip_main:
-        print(f"[SKIP] Main model already installed: {args.main_model}")
-
-    if not args.skip_small and args.small_model not in installed:
-        print(f"[PULL] Small model: {args.small_model}")
-        ok = pull_model(args.ollama_host, args.small_model) and ok
-        installed = get_installed_models(args.ollama_host)
-    elif not args.skip_small:
-        print(f"[SKIP] Small model already installed: {args.small_model}")
+    main_exists = args.main_model in installed
+    small_exists = args.small_model in installed
+    if main_exists:
+        print(f"[OK] Main model already installed: {args.main_model}")
+    else:
+        print(f"[MISSING] Main model not found: {args.main_model}")
+    if small_exists:
+        print(f"[OK] Small model already installed: {args.small_model}")
+    else:
+        print(f"[MISSING] Small model not found: {args.small_model}")
 
     print()
     print("=== Summary ===")
-    main_exists = args.main_model in installed
-    small_exists = args.small_model in installed
 
     print(
         f"Main model  ({args.main_model}): {'READY' if main_exists else 'MISSING'}")
     print(
         f"Small model ({args.small_model}): {'READY' if small_exists else 'MISSING'}")
     print()
+    print("Offline policy: no remote pull is attempted by this script.")
+    print("If a model is missing, import it from the internal artifact repository before retrying.")
     print(r"Next step: python .\bin\apply-local-llm-config.py")
 
-    return 0 if ok else 1
+    return 0 if main_exists and small_exists else 1
 
 
 if __name__ == "__main__":

@@ -1,5 +1,22 @@
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8001"
 
+// 长请求超时的下限，避免调用方传入过小的时间预算。
+const API_REQUEST_TIMEOUT_MS = 8000
+const API_LONG_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
+const API_CONTRACT_AUDIT_TIMEOUT_MS = 60 * 60 * 1000
+
+export function getLongRequestTimeoutMs(timeoutSec) {
+  const seconds = Number(timeoutSec)
+  if (Number.isFinite(seconds) && seconds > 0) {
+    return Math.max(API_REQUEST_TIMEOUT_MS, seconds * 1000 + 5000)
+  }
+  return API_LONG_REQUEST_TIMEOUT_MS
+}
+
+export function getContractAuditTimeoutMs() {
+  return API_CONTRACT_AUDIT_TIMEOUT_MS
+}
+
 export function getToken() {
   return localStorage.getItem("token")
 }
@@ -73,9 +90,31 @@ export async function ensureOk(res) {
   throw new ApiError(buildApiErrorPayload(res.status, text, parsed))
 }
 
+async function fetchWithTimeout(url, options = {}) {
+  const { timeoutMs, ...fetchOptions } = options || {}
+  const effectiveTimeoutMs = Number(timeoutMs)
+  if (!Number.isFinite(effectiveTimeoutMs) || effectiveTimeoutMs <= 0) {
+    return fetch(url, fetchOptions)
+  }
+  const controller = new AbortController()
+  const upstreamSignal = fetchOptions.signal
+  const forwardAbort = () => controller.abort()
+  if (upstreamSignal) {
+    if (upstreamSignal.aborted) controller.abort()
+    else upstreamSignal.addEventListener("abort", forwardAbort, { once: true })
+  }
+  const timer = setTimeout(() => controller.abort(), effectiveTimeoutMs)
+  try {
+    return await fetch(url, { ...fetchOptions, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+    if (upstreamSignal) upstreamSignal.removeEventListener("abort", forwardAbort)
+  }
+}
+
 export async function requestJson(url, options) {
   try {
-    const res = await fetch(url, options)
+    const res = await fetchWithTimeout(url, options)
     await ensureOk(res)
     return res.json()
   } catch (err) {
@@ -93,7 +132,7 @@ export async function requestJson(url, options) {
 
 export async function requestBlob(url, options) {
   try {
-    const res = await fetch(url, options)
+    const res = await fetchWithTimeout(url, options)
     await ensureOk(res)
     return res.blob()
   } catch (err) {
@@ -127,7 +166,7 @@ function parseContentDispositionFilename(value) {
 
 export async function requestBlobResponse(url, options) {
   try {
-    const res = await fetch(url, options)
+    const res = await fetchWithTimeout(url, options)
     await ensureOk(res)
     const blob = await res.blob()
     const contentDisposition = String(res.headers.get("content-disposition") || "")

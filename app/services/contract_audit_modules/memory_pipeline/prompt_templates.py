@@ -102,6 +102,7 @@ def build_clause_prompt(
     long_memory_block: str,
     clause_title: str,
     clause_text: str,
+    full_contract_context: str = "",
 ) -> Tuple[str, str]:
     rendered = render_prompt_messages(
         "memory_pipeline.clause_audit",

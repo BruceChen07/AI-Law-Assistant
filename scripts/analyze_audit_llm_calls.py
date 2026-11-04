@@ -132,7 +132,7 @@ def main() -> None:
     print(f"    auditing stage      : median {statistics.median([r['auditing_s'] for r in rows]):.1f}s")
     print(f"    tokens per audit    : median {statistics.median([r['tokens'] for r in rows]):,.0f}")
     share = statistics.mean([
-        r["llm_sum_s"] / r["auditing_s"] * 100 for r in rows if r["auditing_s"]]) 
+        r["llm_sum_s"] / r["auditing_s"] * 100 for r in rows if r["auditing_s"]])
     print(f"    LLM share of stage  : {share:.0f}%  (rest is prompt building / parsing)")
 
     print("\n  serialization evidence (one audit, consecutive call gaps):")

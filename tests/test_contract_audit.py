@@ -445,9 +445,9 @@ def test_contract_audit_runtime_ignores_env_cloud_provider_in_local_mode(monkeyp
             "routing_enabled": True,
             "cloud_fallback_enabled": False,
             "main_model": {
-                "provider": "ollama",
-                "api_base": "http://127.0.0.1:11434/v1",
-                "model": "qwen3.5:9b",
+                "provider": "llama_cpp",
+                "api_base": "http://127.0.0.1:18080/v1",
+                "model": "auto",
             },
         },
     }
@@ -456,9 +456,9 @@ def test_contract_audit_runtime_ignores_env_cloud_provider_in_local_mode(monkeyp
 
     runtime_cfg = ca._resolve_contract_audit_runtime_llm(cfg)
 
-    assert runtime_cfg["provider"] == "ollama"
-    assert runtime_cfg["model"] == "qwen3.5:9b"
-    assert runtime_cfg["api_base"] == "http://127.0.0.1:11434/v1"
+    assert runtime_cfg["provider"] == "llama_cpp"
+    assert runtime_cfg["model"] == "auto"
+    assert runtime_cfg["api_base"] == "http://127.0.0.1:18080/v1"
 
 
 def test_build_contract_summary_source_text_groups_clauses_and_flags_truncation():

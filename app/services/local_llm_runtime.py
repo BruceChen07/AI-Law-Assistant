@@ -28,13 +28,13 @@ def get_local_llm_cfg(cfg: Dict[str, Any] | None) -> Dict[str, Any]:
     return _clean_dict((cfg or {}).get("local_llm"))
 
 
-def is_cloud_fallback_enabled(cfg: Dict[str, Any] | None) -> bool:
-    return _is_enabled(get_local_llm_cfg(cfg).get("cloud_fallback_enabled"), True)
+def is_main_fallback_enabled(cfg: Dict[str, Any] | None) -> bool:
+    return _is_enabled(get_local_llm_cfg(cfg).get("allow_small_to_main_fallback"), True)
 
 
-def is_high_risk_force_cloud(cfg: Dict[str, Any] | None) -> bool:
+def is_high_risk_force_main(cfg: Dict[str, Any] | None) -> bool:
     routing_cfg = _clean_dict(get_local_llm_cfg(cfg).get("routing"))
-    return _is_enabled(routing_cfg.get("high_risk_force_cloud"), False)
+    return _is_enabled(routing_cfg.get("high_risk_force_main"), True)
 
 
 def get_local_worker_limit(
@@ -60,7 +60,7 @@ def get_local_worker_limit(
 def get_cloud_review_labels(cfg: Dict[str, Any] | None) -> list[str]:
     execution_cfg = _clean_dict(get_local_llm_cfg(cfg).get("execution"))
     labels = [str(x).strip().lower() for x in _clean_list(
-        execution_cfg.get("tax_match_cloud_review_labels")) if str(x).strip()]
+        execution_cfg.get("tax_match_main_review_labels")) if str(x).strip()]
     return labels or ["non_compliant"]
 
 
@@ -102,7 +102,7 @@ def call_with_fallback(
     task_profile: str,
     overrides: Optional[Dict[str, Any]] = None,
     validator: Optional[Validator] = None,
-    force_cloud: bool = False,
+    force_main: bool = False,
     retry_on_error: bool = True,
     retry_on_invalid: bool = True,
 ) -> Tuple[Any, Any, Dict[str, Any]]:
@@ -112,39 +112,39 @@ def call_with_fallback(
     meta = {
         "fallback_used": False,
         "fallback_reason": "",
-        "final_model_role": "cloud_fallback" if force_cloud else "auto",
+        "final_model_role": "main" if force_main else "auto",
     }
     primary_overrides = dict(overrides or {})
-    if force_cloud:
-        primary_overrides["_model_role"] = "cloud_fallback"
+    if force_main:
+        primary_overrides["_model_role"] = "main"
     try:
         text, raw = _call_task_profile(
             llm, messages, task_profile, primary_overrides)
     except Exception:
-        if force_cloud or not retry_on_error or not is_cloud_fallback_enabled(cfg):
+        if force_main or not retry_on_error or not is_main_fallback_enabled(cfg):
             raise
-        cloud_overrides = dict(overrides or {})
-        cloud_overrides["_model_role"] = "cloud_fallback"
+        fallback_overrides = dict(overrides or {})
+        fallback_overrides["_model_role"] = "main"
         text, raw = _call_task_profile(
-            llm, messages, task_profile, cloud_overrides)
+            llm, messages, task_profile, fallback_overrides)
         meta["fallback_used"] = True
         meta["fallback_reason"] = "error"
-        meta["final_model_role"] = "cloud_fallback"
+        meta["final_model_role"] = "main"
         return text, raw, meta
 
     is_valid = validator(text, raw) if callable(validator) else True
-    if force_cloud or is_valid or not retry_on_invalid or not is_cloud_fallback_enabled(cfg):
+    if force_main or is_valid or not retry_on_invalid or not is_main_fallback_enabled(cfg):
         route = raw.get("_route") if isinstance(
             raw, dict) and isinstance(raw.get("_route"), dict) else {}
         if route.get("selected_role"):
             meta["final_model_role"] = str(route.get("selected_role"))
         return text, raw, meta
 
-    cloud_overrides = dict(overrides or {})
-    cloud_overrides["_model_role"] = "cloud_fallback"
+    fallback_overrides = dict(overrides or {})
+    fallback_overrides["_model_role"] = "main"
     cloud_text, cloud_raw = _call_task_profile(
-        llm, messages, task_profile, cloud_overrides)
+        llm, messages, task_profile, fallback_overrides)
     meta["fallback_used"] = True
     meta["fallback_reason"] = "invalid_result"
-    meta["final_model_role"] = "cloud_fallback"
+    meta["final_model_role"] = "main"
     return cloud_text, cloud_raw, meta

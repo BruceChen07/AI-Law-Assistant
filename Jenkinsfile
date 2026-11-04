@@ -16,6 +16,16 @@ pipeline {
   }
 
   stages {
+    stage('LLM Isolation Gate') {
+      steps {
+        bat """
+          if not exist "%PYTHON_EXE%" set PYTHON_EXE=python
+          %PYTHON_EXE% ci\\check_llm_isolation.py
+          %PYTHON_EXE% -m pytest tests\\test_local_llm_policy.py tests\\test_llm_local_mode.py -q
+        """
+      }
+    }
+
     stage('Local Offline CI') {
       steps {
         bat """

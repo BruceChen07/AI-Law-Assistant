@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import patch
 
+import httpx
+
 from app.core.llm import LLMService
 
 
@@ -9,9 +11,9 @@ class LLMLocalModeTests(unittest.TestCase):
         self.cfg = {
             "llm_config": {
                 "provider": "openai_compatible",
-                "api_base": "https://api.openai.com/v1",
+                "api_base": "http://127.0.0.1:18081/v1",
                 "api_key": "",
-                "model": "gpt-4o-mini",
+                "model": "qwen3-14b-instruct-awq",
                 "temperature": 0.2,
                 "max_tokens": 256,
                 "timeout": 10,
@@ -20,7 +22,7 @@ class LLMLocalModeTests(unittest.TestCase):
             "local_llm": {
                 "enabled": True,
                 "routing_enabled": True,
-                "cloud_fallback_enabled": True,
+                "allow_small_to_main_fallback": True,
                 "main_model": {
                     "provider": "ollama",
                     "api_base": "http://127.0.0.1:11434/v1",
@@ -105,6 +107,154 @@ class LLMLocalModeTests(unittest.TestCase):
         self.assertEqual(captured["body"]["model"], "qwen3.6:27b")
         self.assertEqual(captured["body"]["options"]["num_predict"], 123)
         self.assertEqual(raw["_route"]["selected_role"], "main")
+
+    def test_chat_retries_once_on_ollama_read_error(self):
+        svc = LLMService(self.cfg)
+        calls = {"count": 0}
+
+        def _fake_ollama_post(url, body, headers, timeout):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise httpx.ReadError("[WinError 10054] connection reset")
+            return {
+                "model": body["model"],
+                "done": True,
+                "message": {"role": "assistant", "content": "pong"},
+                "prompt_eval_count": 12,
+                "eval_count": 24,
+            }
+
+        with patch.object(svc, "_post_ollama_chat", side_effect=_fake_ollama_post):
+            content, raw = svc.chat([{"role": "user", "content": "test"}])
+
+        self.assertEqual(content, "pong")
+        self.assertEqual(raw["model"], "qwen3.6:27b")
+        self.assertEqual(calls["count"], 2)
+
+    def test_chat_maps_ollama_model_not_found(self):
+        svc = LLMService(self.cfg)
+        request = httpx.Request("POST", "http://127.0.0.1:11434/api/chat")
+        response = httpx.Response(
+            404,
+            request=request,
+            json={"error": "model 'qwen3.6:27b' not found"},
+        )
+
+        with patch.object(
+            svc,
+            "_post_ollama_chat",
+            side_effect=httpx.HTTPStatusError(
+                "Client error '404 Not Found'",
+                request=request,
+                response=response,
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "ollama model not found: qwen3.6:27b"):
+                svc.chat([{"role": "user", "content": "test"}])
+
+    def test_chat_uses_llamacpp_main_model_via_openai_compatible_route(self):
+        cfg = {
+            **self.cfg,
+            "local_llm": {
+                **self.cfg["local_llm"],
+                "main_model": {
+                    "provider": "llama_cpp",
+                    "api_base": "http://127.0.0.1:18080/v1",
+                    "api_key": "",
+                    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+                    "timeout": 30,
+                    "headers": {},
+                },
+            },
+        }
+        svc = LLMService(cfg)
+        captured = {}
+
+        def _fake_post_json(url, body, headers, timeout):
+            captured.update({
+                "url": url,
+                "body": body,
+                "headers": headers,
+                "timeout": timeout,
+            })
+            return {
+                "model": body["model"],
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": '{"ok": true}',
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 24,
+                    "total_tokens": 36,
+                },
+            }
+
+        with patch.object(svc, "_post_json", side_effect=_fake_post_json):
+            content, raw = svc.chat([{"role": "user", "content": "test"}])
+
+        self.assertEqual(content, '{"ok": true}')
+        self.assertEqual(
+            captured["url"], "http://127.0.0.1:18080/v1/chat/completions")
+        self.assertEqual(captured["body"]["model"],
+                         "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf")
+        self.assertEqual(captured["timeout"], 30)
+        self.assertNotIn("Authorization", captured["headers"])
+        self.assertEqual(raw["_route"]["selected_role"], "main")
+
+    def test_chat_uses_reasoning_content_fallback_for_llamacpp_when_content_is_empty(self):
+        cfg = {
+            **self.cfg,
+            "local_llm": {
+                **self.cfg["local_llm"],
+                "main_model": {
+                    "provider": "llama_cpp",
+                    "api_base": "http://127.0.0.1:18080/v1",
+                    "api_key": "",
+                    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+                    "timeout": 30,
+                    "headers": {},
+                },
+            },
+        }
+        svc = LLMService(cfg)
+
+        def _fake_post_json(_url, _body, _headers, _timeout):
+            return {
+                "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "",
+                            "reasoning_content": "主模型联调成功",
+                        }
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 12,
+                    "completion_tokens": 24,
+                    "total_tokens": 36,
+                },
+            }
+
+        with patch.object(svc, "_post_json", side_effect=_fake_post_json):
+            content, raw = svc.chat([{"role": "user", "content": "test"}])
+
+        self.assertEqual(content, "主模型联调成功")
+        self.assertTrue(raw["_used_reasoning_content_fallback"])
+        self.assertEqual(
+            raw["choices"][0]["message"]["reasoning_content"],
+            "主模型联调成功",
+        )
+        self.assertEqual(
+            raw["choices"][0]["message"]["content"],
+            "主模型联调成功",
+        )
 
 
 if __name__ == "__main__":

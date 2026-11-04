@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
+from app.local_llm.policy import ensure_llamacpp_target
+
 
 PROVIDER_ALIASES = {
     "deepseek": "deepseek",
@@ -17,6 +19,8 @@ PROVIDER_ALIASES = {
     "qianfan": "wenxin",
     "baidu": "wenxin",
     "ollama": "ollama",
+    "llama_cpp": "llama_cpp",
+    "llamacpp": "llama_cpp",
 }
 
 
@@ -27,6 +31,7 @@ PROVIDER_LABELS = {
     "qwen": "Qwen / DashScope",
     "wenxin": "Wenxin / Qianfan",
     "ollama": "Ollama",
+    "llama_cpp": "llama.cpp",
 }
 
 
@@ -154,6 +159,17 @@ PROVIDER_SPECS: Dict[str, Dict[str, Any]] = {
         ],
         "base_url_envs": ["LLM_API_BASE"],
         "model_envs": ["LLM_MODEL", "OLLAMA_MODEL"],
+        "api_key_envs": [],
+        "requires_api_key": False,
+    },
+    "llama_cpp": {
+        "default_base_url": "http://127.0.0.1:18080/v1",
+        "supported_env_vars": [
+            "ENABLE_LOCAL_LLM",
+            "ENABLE_CLOUD_API_TEST",
+        ],
+        "base_url_envs": [],
+        "model_envs": [],
         "api_key_envs": [],
         "requires_api_key": False,
     },
@@ -316,19 +332,10 @@ def resolve_runtime_llm_config(
     source_cfg = dict(cfg or {})
     env_map: Mapping[str, str] = env or os.environ
     env_sources: Dict[str, str] = {}
-    lock_runtime_target = bool(source_cfg.get("_lock_runtime_target"))
-    inferred_provider = ""
-    inferred_provider_source = ""
-    if not lock_runtime_target:
-        inferred_provider, inferred_provider_source = detect_env_provider_hint(
-            env_map)
-    provider = normalize_provider(
-        source_cfg.get("provider", "openai_compatible")
-        if lock_runtime_target
-        else (inferred_provider or source_cfg.get("provider", "openai_compatible"))
-    )
-    if not lock_runtime_target and inferred_provider_source:
-        env_sources["provider"] = inferred_provider_source
+    # This branch is a pure local distribution. Ambient cloud credentials or
+    # provider variables must never replace the selected llama.cpp target.
+    lock_runtime_target = True
+    provider = normalize_provider(source_cfg.get("provider", "llama_cpp"))
     spec = get_provider_spec(provider)
 
     resolved = dict(source_cfg)
@@ -365,6 +372,7 @@ def resolve_runtime_llm_config(
     resolved["api_key"] = auth_payload.get("api_key", "")
     resolved["access_key"] = auth_payload.get("access_key", "")
     resolved["secret_key"] = auth_payload.get("secret_key", "")
+    ensure_llamacpp_target(resolved["provider"], resolved["api_base"])
     prefer_long_timeout = bool(source_cfg.get("_prefer_long_timeout"))
     task_profile = _clean_text(source_cfg.get("_runtime_task_profile", ""))
     if prefer_long_timeout and provider in {"deepseek", "openai", "openai_compatible", "qwen", "wenxin"}:

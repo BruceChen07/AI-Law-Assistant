@@ -6,9 +6,12 @@ the original registration order, so `app_factory` is unchanged.
 """
 from __future__ import annotations
 
+import httpx
 from fastapi import APIRouter
 
-from . import prompts, documents, users, skills, vector_store, stats, llm_config, ui_config, memory_config, token_usage, memory_rules  # noqa: F401
+from . import prompts, documents, users, skills, vector_store, stats, llm_config, local_llm, ui_config, memory_config, token_usage, memory_rules  # noqa: F401
+
+_LLAMACPP_MODELS_CACHE = local_llm.LLAMACPP_MODELS_CACHE
 
 from app.api.routers.admin.prompts import (  # noqa: F401
     _normalize_prompt_status,
@@ -108,6 +111,7 @@ router.include_router(skills.router)
 router.include_router(vector_store.router)
 router.include_router(stats.router)
 router.include_router(llm_config.router)
+router.include_router(local_llm.router)
 router.include_router(ui_config.router)
 router.include_router(memory_config.router)
 router.include_router(token_usage.router)

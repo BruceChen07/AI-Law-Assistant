@@ -67,3 +67,53 @@ input, select, textarea {
 input::placeholder, textarea::placeholder {
   color: rgba(169, 162, 153, 0.6);
 }
+
+/* Password visibility toggle */
+.pwd-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pwd-wrapper input {
+  width: 100%;
+  padding-right: 44px; /* room for the eye button */
+}
+
+.pwd-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  padding: 6px;
+  cursor: pointer;
+  color: var(--muted);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s ease, background 0.2s ease;
+}
+
+.pwd-toggle:hover {
+  color: var(--text);
+  background: var(--panel);
+  transform: translateY(-50%);
+  border-color: transparent;
+}
+
+.pwd-toggle svg {
+  display: block;
+}
+
+.success {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(111, 209, 192, 0.12);
+  border: 1px solid rgba(111, 209, 192, 0.3);
+  color: var(--accent);
+  font-size: 13px;
+}

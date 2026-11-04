@@ -45,7 +45,7 @@ def run_contract_audit(
     preview_file_path: str = "",
     lang: str = "zh",
     retrieval_options: Optional[Dict[str, Any]] = None,
-    progress_cb: Optional[Callable[[str, int, str], None]] = None,
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     """Run the contract audit flow (memory/classic depending on config)."""
     from app.services.contract_audit import audit_contract
@@ -72,7 +72,7 @@ def run_contract_pipeline_bundle(
     preview_file_path: str = "",
     lang: str = "zh",
     retrieval_options: Optional[Dict[str, Any]] = None,
-    progress_cb: Optional[Callable[[str, int, str], None]] = None,
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     """Run contract audit and return normalized bundle output."""
     result = run_contract_audit(
@@ -94,6 +94,9 @@ def run_contract_pipeline_bundle(
         "audit": audit,
         "meta": meta,
         "risk_summary": summarize_contract_risks(audit),
+        "final_report": audit.get("final_report") if isinstance(audit.get("final_report"), dict) else {},
+        "pipeline_summary": audit.get("pipeline_summary") if isinstance(audit.get("pipeline_summary"), dict) else {},
+        "reliability_summary": audit.get("reliability_summary") if isinstance(audit.get("reliability_summary"), dict) else {},
     }
 
 
@@ -122,6 +125,7 @@ def tax_match_contract(
     contract_id: str,
     operator_id: str = "",
     top_k_per_clause: int = 5,
+    rule_pack_selectors: Optional[list[dict]] = None,
 ) -> Dict[str, Any]:
     """Run tax matching (vector retrieval + rule evaluation + LLM fallback)."""
     from app.services.tax_matcher import match_contract_against_rules
@@ -133,6 +137,7 @@ def tax_match_contract(
         top_k_per_clause=top_k_per_clause,
         llm=services.llm,
         embedder=services.embedder,
+        rule_pack_selectors=rule_pack_selectors,
     )
 
 

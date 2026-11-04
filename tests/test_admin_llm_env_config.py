@@ -91,4 +91,3 @@ def test_admin_llm_config_update_is_blocked():
     )
     assert resp.status_code == 405
     assert "environment-managed" in resp.json()["detail"]
-

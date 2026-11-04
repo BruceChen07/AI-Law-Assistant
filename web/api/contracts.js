@@ -1,10 +1,11 @@
-import { API_BASE, getAuthHeaders, requestBlob, requestBlobResponse, requestJson } from "./base"
+import { API_BASE, getAuthHeaders, getContractAuditTimeoutMs, requestBlob, requestBlobResponse, requestJson } from "./base"
 
 export async function auditContract(formData) {
   return requestJson(`${API_BASE}/contracts/audit`, {
     method: "POST",
     body: formData,
-    headers: { ...getAuthHeaders() }
+    headers: { ...getAuthHeaders() },
+    timeoutMs: getContractAuditTimeoutMs()
   })
 }
 
@@ -64,6 +65,7 @@ export async function exportContractReport(documentId, payload) {
   return requestBlobResponse(`${API_BASE}/contracts/${documentId}/report/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-    body: JSON.stringify(payload || {})
+    body: JSON.stringify(payload || {}),
+    returnResponseMeta: true
   })
 }

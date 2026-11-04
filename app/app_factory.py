@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import get_config, ensure_dirs, get_config_path
+from app.core.auth import ensure_default_admin
 from app.core.logger import setup_logging, get_pipeline_logger
 from app.core.database import init_db, ensure_embedding_columns
 from app.services.contract_audit_stage_log import init_contract_audit_log_db
@@ -13,14 +14,18 @@ from app.core.reranker import RerankerService
 from app.core.llm import LLMService
 from app.core.translation import TranslationService
 from bin.ensure_local_models import ensure_models
+from app.core.mineru_models import ensure_models_on_startup as ensure_mineru_models_on_startup
 from app.api.routers.health import build_router as build_health_router
 from app.api.routers.embedding import build_router as build_embedding_router
 from app.api.routers.regulations import build_router as build_regulations_router
 from app.api.routers.auth import build_router as build_auth_router
 from app.api.routers.admin import router as admin_router
+from app.api.routers.agents import build_router as build_agents_router
+from app.api.routers.capabilities import build_router as build_capabilities_router
 from app.api.routers.contracts import build_router as build_contracts_router
 from app.api.routers.contract_audit_logs import build_router as build_contract_audit_logs_router
 from app.api.routers.tax_audit import build_router as build_tax_audit_router
+from app.services.audit_capabilities import ensure_audit_capabilities_seeded
 
 
 def init_only():
@@ -31,6 +36,9 @@ def init_only():
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
+    ensure_audit_capabilities_seeded(cfg)
+    # Bootstrap default admin
+    ensure_default_admin(cfg)
 
 
 def create_app():
@@ -44,6 +52,13 @@ def create_app():
     from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
     ensure_embedding_columns(cfg)
     ensure_article_dsl_columns(cfg)
+    ensure_audit_capabilities_seeded(cfg)
+
+    # Bootstrap: ensure at least one admin user always exists
+    admin_bootstrap = ensure_default_admin(cfg, logger)
+    if admin_bootstrap["action"] != "skip":
+        logger.warning("bootstrap_admin action=%s username=%s",
+                       admin_bootstrap["action"], admin_bootstrap.get("username", ""))
 
     embedder = EmbeddingService(default_language=str(
         cfg.get("default_language", "zh")).lower())
@@ -69,7 +84,7 @@ def create_app():
     preflight_auto_download = bool(
         cfg.get("model_preflight_auto_download_on_startup", False))
     preflight_include_optional = bool(
-        cfg.get("model_preflight_include_optional", True))
+        cfg.get("model_preflight_include_optional", False))
     preflight_require_all = bool(cfg.get("model_preflight_require_all", True))
     if preflight_enabled:
         logger.info(
@@ -122,6 +137,16 @@ def create_app():
             logger.warning("model_preflight_not_ready missing=%s", missing)
     else:
         logger.info("model_preflight_disabled")
+    try:
+        mineru_status = ensure_mineru_models_on_startup(cfg, logger)
+        logger.info(
+            "mineru_models_startup ok=%s skipped=%s root=%s",
+            bool(mineru_status.get("ok", False)),
+            bool(mineru_status.get("skipped", False)),
+            mineru_status.get("root", ""),
+        )
+    except Exception:
+        logger.exception("mineru_models_startup_failed")
     llm = LLMService(cfg)
     llm_runtime = llm.describe_runtime_config()
     logger.info(
@@ -186,6 +211,8 @@ def create_app():
     app.include_router(build_regulations_router(cfg))
     app.include_router(build_auth_router())
     app.include_router(admin_router)
+    app.include_router(build_agents_router())
+    app.include_router(build_capabilities_router())
     app.include_router(build_contracts_router(cfg))
     app.include_router(build_contract_audit_logs_router(cfg))
     app.include_router(build_tax_audit_router(cfg))

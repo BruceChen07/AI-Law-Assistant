@@ -5,6 +5,28 @@ export default defineConfig({
   plugins: [react()],
   server: {
     host: true,
-    port: 5173
-  }
+    port: 5173,
+    proxy: {
+      "/api": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        secure: false,
+        bypass(req) {
+          // Do NOT proxy static assets (JS modules, CSS, images, etc.)
+          // These are Vite-served files, not backend API routes.
+          // Backend API routes have no file extension.
+          const url = req.url || "";
+          // Strip query/hash so HMR URLs like /api/admin.js?t=123 still count as static assets.
+          const pathname = url.split("?")[0].split("#")[0];
+          const isStaticAsset = /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|map)$/i.test(pathname);
+          // Backend API routes: /api/auth/login, /api/contracts/audit, etc. (no extension)
+          const isApiRoute = pathname.startsWith("/api/") && !isStaticAsset;
+          if (!isApiRoute) {
+            return url; // bypass proxy, let Vite serve it locally
+          }
+          return undefined; // go through proxy to backend
+        },
+      },
+    },
+  },
 })

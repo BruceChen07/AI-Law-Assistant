@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 import httpx
 
 from app.core.llm_env import get_provider_label, normalize_provider
+from app.local_llm.llama_cpp import LlamaCppProvider
 
 if TYPE_CHECKING:
     from app.core.llm import LLMService
@@ -124,26 +125,13 @@ class WenxinProvider(OpenAICompatibleProvider):
         return token
 
 
-class OllamaProvider(BaseLLMProvider):
-    provider_name = "ollama"
-
-    def chat(
-        self,
-        service: "LLMService",
-        messages: List[Dict[str, str]],
-        cfg: Dict[str, Any],
-    ) -> Tuple[str, Dict[str, Any]]:
-        self.ensure_ready(cfg)
-        return service._chat_via_ollama_provider(messages, cfg)
-
-
 _PROVIDER_REGISTRY: Dict[str, BaseLLMProvider] = {
     "deepseek": DeepSeekProvider(),
     "openai": OpenAIProvider(),
     "openai_compatible": OpenAICompatibleProvider(),
     "qwen": QwenProvider(),
     "wenxin": WenxinProvider(),
-    "ollama": OllamaProvider(),
+    "llama_cpp": LlamaCppProvider(),
 }
 
 

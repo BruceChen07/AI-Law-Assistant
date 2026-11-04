@@ -2,30 +2,64 @@
 Contract Audit Facade.
 职责: 作为合同审计模块的统一入口，封装 IO 操作并调用拆分后的子模块。
 """
+import os
 import time
 import uuid
 import hashlib
 import json
-import os
+import math
 import re
+import socket
 import structlog
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, Any, Optional, Callable, List
 
+from app.core.config import get_config
 from app.core.llm_env import is_cloud_provider, resolve_runtime_llm_config
 from app.core.llm_router import resolve_llm_route
+from app.core.llm_trace import new_trace_id
 from app.core.utils import extract_text_with_config
+from app.services.audit_token_policy import (
+    build_contract_audit_budget,
+    estimate_text_tokens,
+    get_audit_token_policy,
+    plan_clause_groups,
+)
 from app.services.audit_utils import _safe_int, _normalize_citation_item, _enrich_citations
 from app.services.audit_retrieval import _normalize_retrieval_options, _retrieve_regulation_evidence
 from app.services.contract_audit_modules.clause_builder import build_preview_clauses
 from app.services.contract_audit_modules.result_assembler import attach_risk_locations
-from app.services.contract_audit_modules.trace_writer import memory_paths, write_audit_trace, trace_clip
+from app.services.contract_audit_modules.trace_writer import (
+    memory_paths,
+    write_audit_trace,
+    write_round_trace,
+    trace_clip,
+)
 from app.services.contract_preview_assets import build_contract_preview_manifest
+from app.services.final_report_service import build_contract_final_report
+from app.services.llm_progress import (
+    build_llm_progress_detail,
+    build_llm_progress_message,
+    compute_llm_progress_percent,
+    report_progress,
+)
 from app.services.prompt_binding import resolve_bound_prompt_text
+from app.services.result_aggregator import aggregate_chunk_audit_results
+from app.services.review_retry import (
+    build_reliability_review_plan,
+    build_reliability_summary,
+)
 
 logger = structlog.get_logger(__name__)
 
-CLASSIC_AUDIT_MAX_TOKENS = 900
-CLASSIC_AUDIT_RETRY_MAX_TOKENS = 1400
+# The classic audit emits a JSON object with a `risks` array whose items carry
+# 9 fields, so 900 tokens truncated the response on most chunks and the retry
+# budget (1400) usually truncated as well. Align with CONTRACT_SUMMARY_* below,
+# which already budgets for Chinese output plus hidden reasoning tokens.
+# Local llama.cpp runs with --ctx-size 16384 by default, so prompt (~2.4k) plus
+# this budget still fits comfortably.
+CLASSIC_AUDIT_MAX_TOKENS = 3000
+CLASSIC_AUDIT_RETRY_MAX_TOKENS = 4000
 CLASSIC_MULTIPASS_TRIGGER_CLAUSES = 10
 CONTRACT_SUMMARY_SOURCE_MAX_CHARS = 30000
 # Reasoning models spend part of max_tokens on hidden reasoning tokens, so the
@@ -51,6 +85,13 @@ HybridSearcher = None
 
 def _build_preview_clauses(text: str):
     return build_preview_clauses(text)
+
+
+def _should_build_preview_manifest(cfg: Dict[str, Any]) -> bool:
+    """审计阶段是否构建预览清单（会触发 MinerU 版面坐标抽取）。"""
+    preview_cfg = cfg.get("contract_preview") if isinstance(
+        cfg.get("contract_preview"), dict) else {}
+    return bool(preview_cfg.get("audit_build_manifest", True))
 
 
 def _attach_risk_locations(audit, clauses, preview_manifest=None):
@@ -550,6 +591,20 @@ def _run_skill_orchestrated_audit(
             "mode": "skill_orchestrated",
             "report_id": str(getattr(report, "report_id", "") or ""),
         },
+    }
+
+
+def _get_memory_temporary_disable_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    raw = cfg.get("memory_temporary_disable") if isinstance(
+        cfg.get("memory_temporary_disable"), dict) else {}
+    fallback_mode = str(raw.get("fallback_mode") or "classic").strip().lower()
+    if fallback_mode not in {"classic"}:
+        fallback_mode = "classic"
+    return {
+        "enabled": bool(raw.get("enabled", False)),
+        "fallback_mode": fallback_mode,
+        "reason": str(raw.get("reason") or "edge_llm_context_limit").strip() or "edge_llm_context_limit",
+        "trigger_source": str(raw.get("trigger_source") or "config.memory_temporary_disable").strip() or "config.memory_temporary_disable",
     }
 
 
@@ -1176,14 +1231,63 @@ def _merge_citations(primary: List[Dict[str, Any]], extra: List[Dict[str, Any]])
     return merged
 
 
+def _estimate_clause_tokens(clause: Dict[str, Any]) -> int:
+    return estimate_text_tokens(
+        f"{clause.get('title') or clause.get('clause_path') or ''}\n"
+        f"{clause.get('clause_text') or clause.get('text') or ''}"
+    )
+
+
+def _plan_chunks_by_tokens(
+    clauses: List[Dict[str, Any]],
+    policy: Dict[str, Any],
+    max_calls: int,
+) -> List[List[Dict[str, Any]]]:
+    """按 token 预算分组，避免小合同被切成过多无谓的调用。
+
+    旧逻辑按条款数量等分，``max_calls`` 条一律拆开：21 条款的补充协议会被拆成
+    11 块（每块 2 条款），11 次 LLM 调用在 CPU 上要 4 分钟。这里改为按
+    ``clause_group_target_tokens`` 打包，同时保证单块不超过硬上限。
+    """
+    if not bool(policy.get("enabled")):
+        return []
+    target_tokens = max(600, int(policy.get("clause_group_target_tokens") or 2800))
+    hard_limit = max(1024, int(policy.get("input_hard_limit_tokens") or 5120))
+    total_tokens = sum(_estimate_clause_tokens(item) for item in clauses)
+    if total_tokens <= target_tokens:
+        return [clauses]
+    by_target = math.ceil(total_tokens / target_tokens)
+    by_hard = math.ceil(total_tokens / hard_limit)
+    desired = max(1, by_target, by_hard)
+    call_cap = max(1, int(max_calls or 1))
+    if desired > call_cap:
+        # 宁可变慢也不能让单次 prompt 超过硬上限被截断。
+        logger.warning(
+            "classic_audit_chunk_overflow total_tokens=%s desired_groups=%s cap=%s",
+            total_tokens,
+            desired,
+            call_cap,
+        )
+    chunk_size = max(1, math.ceil(len(clauses) / desired))
+    return [
+        clauses[idx: idx + chunk_size]
+        for idx in range(0, len(clauses), chunk_size)
+    ]
+
+
 def _chunk_preview_clauses(
     preview_clauses: List[Dict[str, Any]],
     max_calls: int,
+    policy: Optional[Dict[str, Any]] = None,
 ) -> List[List[Dict[str, Any]]]:
     clauses = [item for item in list(
         preview_clauses or []) if isinstance(item, dict)]
     if not clauses:
         return []
+    token_plan = _plan_chunks_by_tokens(
+        clauses, policy if isinstance(policy, dict) else {}, max_calls)
+    if token_plan:
+        return token_plan
     if len(clauses) <= CLASSIC_MULTIPASS_TRIGGER_CLAUSES:
         return [clauses]
     bounded_calls = max(1, int(max_calls or 1))
@@ -1312,6 +1416,81 @@ def _aggregate_classic_results(
     }
 
 
+def _build_classic_prompt_payload(
+    cfg: Dict[str, Any],
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    evidence_items: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
+    runtime_cfg = _get_memory_runtime_config(cfg)
+    allowed_citation_ids = {
+        str(item.get("citation_id") or "").strip()
+        for item in evidence_items
+        if str(item.get("citation_id") or "").strip()
+    }
+    evidence_lines = []
+    for item in list(evidence_items or [])[:24]:
+        citation_id = str(item.get("citation_id") or "").strip()
+        law_title = str(item.get("law_title") or item.get("title") or "").strip()
+        article_no = str(item.get("article_no") or "").strip()
+        if citation_id and law_title:
+            evidence_lines.append(
+                f"[{citation_id}] {law_title} {article_no}".strip()
+            )
+    whitelist_text = "\n".join(evidence_lines) or "-"
+    max_clause_chars = int(
+        runtime_cfg.get("memory_max_prompt_chars_per_clause") or 2400
+    )
+    clause_text = _build_classic_clause_text(
+        text=text,
+        preview_clauses=preview_clauses,
+        max_clause_chars=max_clause_chars,
+        context_window_tokens=DEFAULT_LOCAL_CONTEXT_WINDOW_TOKENS,
+        output_reserve_tokens=DEFAULT_CONTEXT_WINDOW_OUTPUT_RESERVE_TOKENS,
+    )
+    prompt_context = {
+        "lang": norm_lang,
+        "whitelist_text": whitelist_text,
+        "contract_clauses": clause_text,
+        "audit_mode": "rag",
+        "json_schema": (
+            '{"summary":"","risks":[{"level":"high|medium|low",'
+            '"issue":"","suggestion":"","citation_id":"","law_title":"",'
+            '"article_no":"","evidence":"","confidence":0.0,"clause_id":""}]}'
+        ),
+    }
+    prompt_cfg = cfg if cfg.get("db_path") else get_config()
+    bound_prompt = resolve_bound_prompt_text(
+        "contract_audit.classic_json",
+        "",
+        prompt_context,
+        prompt_cfg,
+    )
+    messages = [
+        {
+            "role": "system",
+            "content": str(bound_prompt.get("rendered_system_text") or ""),
+        },
+        {
+            "role": "user",
+            "content": str(bound_prompt.get("rendered_text") or ""),
+        },
+    ]
+    return {
+        "norm_lang": norm_lang,
+        "messages": messages,
+        "allowed_citation_ids": allowed_citation_ids,
+        "prompt_meta": {
+            "prompt_clause_count": len(preview_clauses or []),
+            "evidence_items_used": min(24, len(evidence_items or [])),
+            "whitelist_line_count": len(evidence_lines),
+            "prompt_source": str(bound_prompt.get("source") or ""),
+        },
+    }
+
+
 def _build_classic_audit(
     cfg: Dict[str, Any],
     llm,
@@ -1322,6 +1501,8 @@ def _build_classic_audit(
     evidence_items: List[Dict[str, Any]],
     retrieval_opts: Dict[str, Any],
     audit_id: str,
+    trace_id: str = "",
+    prompt_payload: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     norm_lang = "en" if str(lang or "").lower() == "en" else "zh"
     runtime_cfg = _get_memory_runtime_config(cfg)
@@ -1374,11 +1555,12 @@ def _build_classic_audit(
         "json_schema": "{\"summary\":\"\",\"risks\":[{\"level\":\"high|medium|low\",\"issue\":\"\",\"suggestion\":\"\",\"citation_id\":\"\",\"law_title\":\"\",\"article_no\":\"\",\"evidence\":\"\",\"confidence\":0.0,\"clause_id\":\"\"}]}",
     }
     try:
+        prompt_cfg = cfg if cfg.get("db_path") else get_config()
         bound_prompt = resolve_bound_prompt_text(
             "contract_audit.classic_json",
             "",
             prompt_context,
-            cfg,
+            prompt_cfg,
         )
     except KeyError:
         bound_prompt = {
@@ -1409,6 +1591,7 @@ def _build_classic_audit(
         "module": "contract_audit",
         "stage": "contract_classic_audit",
         "audit_id": audit_id,
+        "trace_id": trace_id,
         "lang": norm_lang,
         "audit_mode": str(retrieval_opts.get("audit_mode") or ""),
         "provider": str(runtime_llm_cfg.get("provider") or ""),
@@ -1449,7 +1632,14 @@ def _build_classic_audit(
 
     attempt = _run_once(classic_audit_max_tokens)
     retry_used = False
-    if attempt["parse_failed"] or attempt["response_empty"]:
+    # A truncated response is almost always invalid/partial JSON, but json_repair
+    # can salvage it into a *parseable* object that silently loses risks. Retry on
+    # truncation too, otherwise the audit reports success with missing findings.
+    if (
+        attempt["parse_failed"]
+        or attempt["response_empty"]
+        or attempt["response_truncated"]
+    ):
         retry_attempt = _run_once(classic_audit_retry_max_tokens)
         if (not retry_attempt["parse_failed"]) or (
             retry_attempt["usage"]["completion_tokens"] >= attempt["usage"]["completion_tokens"]
@@ -1468,6 +1658,7 @@ def _build_classic_audit(
     audit_incomplete = parse_failed or response_empty or response_truncated
     risks = parsed.get("risks") if isinstance(
         parsed.get("risks"), list) else []
+
     clause_map = {str(c.get("clause_id") or ""): c for c in preview_clauses}
     normalized_risks = []
     for idx, r in enumerate(risks, start=1):
@@ -1484,16 +1675,25 @@ def _build_classic_audit(
         law_title = str(r.get("law_title") or "")
         article_no = str(r.get("article_no") or "")
         basis = f"{law_title} {article_no}".strip()
+        issue_text = str(r.get("issue") or "").strip()
+        evidence_text = str(r.get("evidence") or "").strip()
+        # Skip risks with completely empty content (LLM returned a skeleton without substance)
+        if len(issue_text) < 6 and len(evidence_text) < 6:
+            continue
+        # Skip risks without any legal reference (no citation_id AND no law_title)
+        # These are likely the model echoing contract text rather than doing tax risk analysis
+        if not mapped_cid and not law_title.strip():
+            continue
         normalized_risks.append(
             {
                 "level": level,
-                "issue": str(r.get("issue") or ""),
+                "issue": issue_text,
                 "suggestion": str(r.get("suggestion") or ""),
                 "basis": basis,
                 "law_reference": basis,
                 "citation_id": mapped_cid,
                 "citation_status": "mapped" if mapped_cid else "unmapped",
-                "evidence": str(r.get("evidence") or ""),
+                "evidence": evidence_text,
                 "law_title": law_title,
                 "article_no": article_no,
                 "location": {
@@ -1503,7 +1703,7 @@ def _build_classic_audit(
                     "page_no": 0,
                     "paragraph_no": str(c.get("paragraph_no") or ""),
                     "clause_path": str(c.get("clause_path") or ""),
-                    "quote": str(r.get("evidence") or ""),
+                    "quote": evidence_text,
                     "score": round(float(r.get("confidence") or 0.0), 4),
                 },
             }
@@ -1589,6 +1789,658 @@ def _build_classic_audit(
     }
 
 
+def _select_multipass_evidence_items(
+    evidence_items: List[Dict[str, Any]],
+    max_items: int,
+) -> List[Dict[str, Any]]:
+    def _score(item: Dict[str, Any]) -> float:
+        try:
+            return float(item.get("final_score") or item.get("score") or item.get("tax_relevance") or 0.0)
+        except Exception:
+            return 0.0
+
+    ranked = sorted(
+        [item for item in list(evidence_items or [])
+         if isinstance(item, dict)],
+        key=_score,
+        reverse=True,
+    )
+    return ranked[:max_items]
+
+
+def _build_chunk_clause_range(chunk_id: str, clauses: List[Dict[str, Any]]) -> Dict[str, Any]:
+    clause_ids = [str(item.get("clause_id") or "") for item in clauses]
+    clause_paths = [str(item.get("clause_path") or item.get(
+        "title") or "") for item in clauses]
+    page_numbers = [
+        int(item.get("page_no") or 0)
+        for item in clauses
+        if int(item.get("page_no") or 0) > 0
+    ]
+    return {
+        "chunk_id": chunk_id,
+        "start_clause_id": clause_ids[0] if clause_ids else "",
+        "end_clause_id": clause_ids[-1] if clause_ids else "",
+        "clause_ids": clause_ids,
+        "clause_paths": clause_paths,
+        "page_start": min(page_numbers) if page_numbers else 0,
+        "page_end": max(page_numbers) if page_numbers else 0,
+        "paragraph_start": str(clauses[0].get("paragraph_no") or "") if clauses else "",
+        "paragraph_end": str(clauses[-1].get("paragraph_no") or "") if clauses else "",
+    }
+
+
+def _build_chunk_audit_result(
+    *,
+    chunk_id: str,
+    round_index: int,
+    clauses: List[Dict[str, Any]],
+    audit_result: Dict[str, Any],
+) -> Dict[str, Any]:
+    audit = audit_result.get("audit") if isinstance(
+        audit_result.get("audit"), dict) else {}
+    meta = audit_result.get("meta") if isinstance(
+        audit_result.get("meta"), dict) else {}
+    risks = [item for item in list(
+        audit.get("risks") or []) if isinstance(item, dict)]
+    citations = [item for item in list(
+        audit.get("citations") or []) if isinstance(item, dict)]
+    evidence_links = []
+    evidence_seen = set()
+    for item in citations:
+        key = (
+            str(item.get("citation_id") or "").strip(),
+            str(item.get("law_title") or item.get("title") or "").strip(),
+            str(item.get("article_no") or "").strip(),
+        )
+        if key in evidence_seen:
+            continue
+        evidence_seen.add(key)
+        evidence_links.append(
+            {
+                "citation_id": key[0],
+                "law_title": key[1],
+                "article_no": key[2],
+            }
+        )
+    confidence_values = []
+    for risk in risks:
+        location = risk.get("location") if isinstance(
+            risk.get("location"), dict) else {}
+        try:
+            confidence_values.append(
+                float(location.get("score") or risk.get("confidence") or 0.0))
+        except Exception:
+            continue
+    confidence_score = round(
+        sum(confidence_values) / len(confidence_values), 4) if confidence_values else 0.0
+    return {
+        "chunk_id": chunk_id,
+        "round_index": int(round_index or 0),
+        "clause_range": _build_chunk_clause_range(chunk_id, clauses),
+        "risk_items": risks,
+        "risk_count": len(risks),
+        "evidence_links": evidence_links,
+        "confidence_score": confidence_score,
+        "parse_failed_flag": bool(meta.get("classic_parse_failed")),
+        "truncated_flag": bool(meta.get("classic_response_truncated")),
+        "completion_tokens": int(meta.get("classic_completion_tokens") or 0),
+        "max_output_tokens": int(meta.get("classic_max_tokens") or 0),
+        "summary": str(audit.get("summary") or ""),
+    }
+
+
+def _run_multipass_chunk_round(
+    *,
+    cfg: Dict[str, Any],
+    llm,
+    text: str,
+    lang: str,
+    clauses: List[Dict[str, Any]],
+    selected_evidence: List[Dict[str, Any]],
+    retrieval_opts: Dict[str, Any],
+    audit_id: str,
+    trace_id: str,
+    round_index: int,
+    chunk_id: str,
+    estimated_clause_tokens: int,
+    budget_trigger: List[str],
+    retry_index: int = 0,
+    retry_reasons: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    chunk_text = "\n\n".join(
+        [
+            f"{item.get('clause_path') or item.get('title') or item.get('clause_id') or ''}\n"
+            f"{item.get('clause_text') or item.get('text') or ''}"
+            for item in clauses
+        ]
+    )
+    chunk_payload = _build_classic_prompt_payload(
+        cfg=cfg,
+        text=chunk_text or text,
+        lang=lang,
+        preview_clauses=clauses,
+        evidence_items=selected_evidence,
+    )
+    chunk_result = _build_classic_audit(
+        cfg=cfg,
+        llm=llm,
+        text=chunk_text or text,
+        lang=lang,
+        preview_clauses=clauses,
+        evidence_items=selected_evidence,
+        retrieval_opts=retrieval_opts,
+        audit_id=f"{audit_id}_r{round_index}_try{retry_index}",
+        trace_id=trace_id,
+        prompt_payload=chunk_payload,
+    )
+    round_meta = chunk_result.get("meta") if isinstance(
+        chunk_result.get("meta"), dict) else {}
+    chunk_audit_result = _build_chunk_audit_result(
+        chunk_id=chunk_id,
+        round_index=int(round_index or 0),
+        clauses=clauses,
+        audit_result=chunk_result,
+    )
+    write_round_trace(
+        cfg,
+        int(round_index or 0),
+        "chunk_audit_done" if retry_index <= 0 else "chunk_retry_done",
+        {
+            "audit_id": audit_id,
+            "chunk_id": chunk_id,
+            "retry_index": retry_index,
+            "retry_reasons": list(retry_reasons or []),
+            "risk_count": chunk_audit_result.get("risk_count"),
+            "confidence_score": chunk_audit_result.get("confidence_score"),
+            "parse_failed_flag": chunk_audit_result.get("parse_failed_flag"),
+            "truncated_flag": chunk_audit_result.get("truncated_flag"),
+        },
+    )
+    return {
+        "round_index": round_index,
+        "chunk_id": chunk_id,
+        "clause_ids": [str(item.get("clause_id") or "") for item in clauses],
+        "clause_paths": [str(item.get("clause_path") or item.get("title") or "") for item in clauses],
+        "estimated_clause_tokens": estimated_clause_tokens,
+        "audit": chunk_result.get("audit"),
+        "meta": round_meta,
+        "chunk_audit_result": chunk_audit_result,
+        "budget_trigger": list(budget_trigger or []),
+        "retry_index": int(retry_index or 0),
+        "retry_reasons": list(retry_reasons or []),
+    }
+
+
+def _merge_multipass_audits(
+    rounds: List[Dict[str, Any]],
+    cfg: Dict[str, Any],
+    preview_clauses: List[Dict[str, Any]],
+    lang: str,
+) -> Dict[str, Any]:
+    parse_failed_rounds = 0
+    truncated_rounds = 0
+    chunk_audit_results = []
+    for round_result in rounds:
+        meta = round_result.get("meta") if isinstance(
+            round_result.get("meta"), dict) else {}
+        if meta.get("classic_parse_failed"):
+            parse_failed_rounds += 1
+        if meta.get("classic_response_truncated"):
+            truncated_rounds += 1
+        if isinstance(round_result.get("chunk_audit_result"), dict):
+            chunk_audit_results.append(round_result["chunk_audit_result"])
+    aggregated = aggregate_chunk_audit_results(
+        cfg=cfg,
+        chunk_audit_results=chunk_audit_results,
+        preview_clauses=preview_clauses,
+        lang=lang,
+    )
+    aggregated_audit = aggregated.get("audit") if isinstance(
+        aggregated.get("audit"), dict) else {}
+    aggregated_meta = aggregated.get("meta") if isinstance(
+        aggregated.get("meta"), dict) else {}
+    legal_validation = aggregated_audit.get("legal_validation") if isinstance(
+        aggregated_audit.get("legal_validation"), dict) else {}
+    return {
+        "audit": aggregated_audit,
+        "meta": {
+            "memory_mode": False,
+            "memory_mode_enabled": False,
+            "execution_path": "multipass_classic_stage1",
+            "memory_llm_call_count": len(rounds),
+            "memory_report_risk_count": len(list(aggregated_audit.get("risks") or [])),
+            "memory_validation_ok": bool(legal_validation.get("ok", False)),
+            "classic_parse_failed": parse_failed_rounds > 0,
+            "classic_response_truncated": truncated_rounds > 0,
+            "classic_completion_tokens": sum(
+                int((item.get("meta") or {}).get(
+                    "classic_completion_tokens") or 0)
+                for item in rounds
+            ),
+            "classic_max_tokens": max(
+                [int((item.get("meta") or {}).get("classic_max_tokens") or 0)
+                 for item in rounds] or [0]
+            ),
+            "multipass_round_count": len(rounds),
+            "multipass_parse_failed_rounds": parse_failed_rounds,
+            "multipass_truncated_rounds": truncated_rounds,
+            **aggregated_meta,
+        },
+        "raw": {
+            "mode": "multipass_classic_stage1",
+            "rounds": rounds,
+            "chunk_audit_results": chunk_audit_results,
+            "aggregated_exports": aggregated.get("exports") if isinstance(aggregated.get("exports"), dict) else {},
+        },
+    }
+
+
+def _build_multipass_classic_audit(
+    cfg: Dict[str, Any],
+    llm,
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    evidence_items: List[Dict[str, Any]],
+    retrieval_opts: Dict[str, Any],
+    audit_id: str,
+    trace_id: str,
+    token_budget: Dict[str, Any],
+    progress_cb: Optional[Callable[..., None]] = None,
+) -> Dict[str, Any]:
+    policy = dict((token_budget or {}).get("policy") or {})
+    clause_plan = plan_clause_groups(preview_clauses, policy)
+    selected_evidence = _select_multipass_evidence_items(
+        evidence_items,
+        int(policy.get("max_evidence_items_per_round") or 12),
+    )
+    rounds: List[Dict[str, Any]] = []
+    progress_state = {
+        "planned_total": len(clause_plan.get("rounds") or []),
+        "started": 0,
+        "completed": 0,
+        "last_completed_label": "",
+    }
+
+    def _emit_classic_progress(
+        *,
+        request_status: str,
+        current_index: int = 0,
+        current_label: str = "",
+        request_kind: str = "",
+        retry_index: int = 0,
+        round_index: int = 0,
+        last_error: str = "",
+    ) -> Dict[str, Any]:
+        total = int(progress_state.get("planned_total") or 0)
+        detail = build_llm_progress_detail(
+            execution_path="classic",
+            total_planned=total,
+            total_upper_bound=total,
+            exact_total_known=True,
+            started=int(progress_state.get("started") or 0),
+            completed=int(progress_state.get("completed") or 0),
+            current_index=current_index,
+            current_label=current_label,
+            request_kind=request_kind,
+            request_status=request_status,
+            retry_index=retry_index,
+            round_index=round_index,
+            last_completed_label=str(
+                progress_state.get("last_completed_label") or ""),
+            last_error=last_error,
+        )
+        report_progress(
+            progress_cb,
+            "auditing",
+            compute_llm_progress_percent(
+                int(progress_state.get("completed") or 0),
+                max(1, total),
+            ),
+            build_llm_progress_message(detail),
+            detail=detail,
+        )
+        return detail
+
+    logger.info(
+        "audit_llm_plan_created",
+        audit_id=audit_id,
+        execution_path="classic",
+        llm_request_total_planned=int(
+            progress_state.get("planned_total") or 0),
+        llm_request_exact_total_known=True,
+    )
+    _emit_classic_progress(request_status="planned")
+
+    clause_group_map: Dict[str, List[Dict[str, Any]]] = {}
+    for round_info, group in zip(clause_plan.get("rounds") or [], clause_plan.get("groups") or []):
+        chunk_id = f"chunk-{int(round_info.get('round_index') or 0):03d}"
+        clause_group_map[chunk_id] = group
+        progress_state["started"] = int(progress_state.get("started") or 0) + 1
+        current_index = int(progress_state.get("started") or 0)
+        current_round_index = int(round_info.get("round_index") or 0)
+        logger.info(
+            "audit_llm_request_start",
+            audit_id=audit_id,
+            execution_path="classic",
+            llm_request_current_index=current_index,
+            llm_request_total_planned=int(
+                progress_state.get("planned_total") or 0),
+            request_kind="chunk",
+            chunk_id=chunk_id,
+            retry_index=0,
+            round_index=current_round_index,
+        )
+        _emit_classic_progress(
+            request_status="running",
+            current_index=current_index,
+            current_label=chunk_id,
+            request_kind="chunk",
+            retry_index=0,
+            round_index=current_round_index,
+        )
+        round_result = _run_multipass_chunk_round(
+            cfg=cfg,
+            llm=llm,
+            text=text,
+            lang=lang,
+            clauses=group,
+            selected_evidence=selected_evidence,
+            retrieval_opts=retrieval_opts,
+            audit_id=audit_id,
+            trace_id=trace_id,
+            round_index=current_round_index,
+            chunk_id=chunk_id,
+            estimated_clause_tokens=int(
+                round_info.get("estimated_clause_tokens") or 0),
+            budget_trigger=list((token_budget or {}).get("reasons") or []),
+        )
+        rounds.append(round_result)
+        chunk_audit_result = round_result.get(
+            "chunk_audit_result") if isinstance(round_result.get("chunk_audit_result"), dict) else {}
+        progress_state["completed"] = int(
+            progress_state.get("completed") or 0) + 1
+        progress_state["last_completed_label"] = chunk_id
+        logger.info(
+            "audit_llm_request_done",
+            audit_id=audit_id,
+            execution_path="classic",
+            llm_request_current_index=current_index,
+            llm_request_total_planned=int(
+                progress_state.get("planned_total") or 0),
+            request_kind="chunk",
+            chunk_id=chunk_id,
+            retry_index=0,
+            round_index=current_round_index,
+            risk_count=int(chunk_audit_result.get("risk_count") or 0),
+            parse_failed_flag=bool(
+                chunk_audit_result.get("parse_failed_flag")),
+            truncated_flag=bool(chunk_audit_result.get("truncated_flag")),
+        )
+        _emit_classic_progress(
+            request_status="done",
+            current_index=current_index,
+            current_label=chunk_id,
+            request_kind="chunk",
+            retry_index=0,
+            round_index=current_round_index,
+        )
+    merged = _merge_multipass_audits(
+        rounds,
+        cfg=cfg,
+        preview_clauses=preview_clauses,
+        lang=lang,
+    )
+    review_plan = build_reliability_review_plan(
+        cfg=cfg,
+        aggregated_audit=merged.get("audit") if isinstance(
+            merged.get("audit"), dict) else {},
+        aggregated_meta=merged.get("meta") if isinstance(
+            merged.get("meta"), dict) else {},
+        chunk_audit_results=list(
+            (merged.get("raw") or {}).get("chunk_audit_results") or []),
+    )
+    write_audit_trace(
+        cfg,
+        "audit_review_plan",
+        {
+            "audit_id": audit_id,
+            "retry_chunk_ids": list(review_plan.get("retry_chunk_ids") or []),
+            "review_item_count": int(review_plan.get("review_item_count") or 0),
+            "should_retry": bool(review_plan.get("should_retry")),
+            "initial_reliability_level": str(
+                review_plan.get("initial_reliability_level") or "medium"),
+        },
+    )
+    retry_logs: List[Dict[str, Any]] = []
+    if bool(review_plan.get("should_retry")):
+        round_index_map = {
+            str(item.get("chunk_id") or ""): index
+            for index, item in enumerate(rounds)
+            if isinstance(item, dict)
+        }
+        max_retry_per_chunk = int(
+            ((review_plan.get("policy") or {}).get("max_retry_per_chunk") or 0))
+        for retry_target in list(review_plan.get("retry_chunks") or []):
+            chunk_id = str(retry_target.get("chunk_id") or "")
+            if not chunk_id or chunk_id not in round_index_map:
+                continue
+            current_round = rounds[round_index_map[chunk_id]]
+            current_retry_index = int(current_round.get("retry_index") or 0)
+            if current_retry_index >= max_retry_per_chunk:
+                retry_logs.append(
+                    {
+                        "chunk_id": chunk_id,
+                        "retry_performed": False,
+                        "reason": "retry_limit_reached",
+                        "retry_reasons": list(retry_target.get("reasons") or []),
+                    }
+                )
+                continue
+            old_total = int(progress_state.get("planned_total") or 0)
+            progress_state["planned_total"] = old_total + 1
+            logger.info(
+                "audit_llm_plan_adjusted",
+                audit_id=audit_id,
+                execution_path="classic",
+                llm_request_total_planned_before=old_total,
+                llm_request_total_planned_after=int(
+                    progress_state.get("planned_total") or 0),
+                reason="reliability_retry",
+                chunk_id=chunk_id,
+            )
+            progress_state["started"] = int(
+                progress_state.get("started") or 0) + 1
+            current_index = int(progress_state.get("started") or 0)
+            current_round_index = int(current_round.get("round_index") or 0)
+            retry_step = current_retry_index + 1
+            logger.info(
+                "audit_llm_request_start",
+                audit_id=audit_id,
+                execution_path="classic",
+                llm_request_current_index=current_index,
+                llm_request_total_planned=int(
+                    progress_state.get("planned_total") or 0),
+                request_kind="retry",
+                chunk_id=chunk_id,
+                retry_index=retry_step,
+                round_index=current_round_index,
+            )
+            _emit_classic_progress(
+                request_status="running",
+                current_index=current_index,
+                current_label=chunk_id,
+                request_kind="retry",
+                retry_index=retry_step,
+                round_index=current_round_index,
+            )
+            next_round = _run_multipass_chunk_round(
+                cfg=cfg,
+                llm=llm,
+                text=text,
+                lang=lang,
+                clauses=clause_group_map.get(chunk_id) or [],
+                selected_evidence=selected_evidence,
+                retrieval_opts=retrieval_opts,
+                audit_id=audit_id,
+                trace_id=trace_id,
+                round_index=int(current_round.get("round_index") or 0),
+                chunk_id=chunk_id,
+                estimated_clause_tokens=int(
+                    current_round.get("estimated_clause_tokens") or 0),
+                budget_trigger=list(current_round.get("budget_trigger") or []),
+                retry_index=retry_step,
+                retry_reasons=list(retry_target.get("reasons") or []),
+            )
+            retry_logs.append(
+                {
+                    "chunk_id": chunk_id,
+                    "retry_performed": True,
+                    "retry_index": retry_step,
+                    "retry_reasons": list(retry_target.get("reasons") or []),
+                    "before_parse_failed": bool((current_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
+                    "after_parse_failed": bool((next_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
+                    "before_truncated": bool((current_round.get("chunk_audit_result") or {}).get("truncated_flag")),
+                    "after_truncated": bool((next_round.get("chunk_audit_result") or {}).get("truncated_flag")),
+                    "before_risk_count": int((current_round.get("chunk_audit_result") or {}).get("risk_count") or 0),
+                    "after_risk_count": int((next_round.get("chunk_audit_result") or {}).get("risk_count") or 0),
+                }
+            )
+            retry_chunk_audit_result = next_round.get(
+                "chunk_audit_result") if isinstance(next_round.get("chunk_audit_result"), dict) else {}
+            progress_state["completed"] = int(
+                progress_state.get("completed") or 0) + 1
+            progress_state["last_completed_label"] = chunk_id
+            logger.info(
+                "audit_llm_request_done",
+                audit_id=audit_id,
+                execution_path="classic",
+                llm_request_current_index=current_index,
+                llm_request_total_planned=int(
+                    progress_state.get("planned_total") or 0),
+                request_kind="retry",
+                chunk_id=chunk_id,
+                retry_index=retry_step,
+                round_index=current_round_index,
+                risk_count=int(
+                    retry_chunk_audit_result.get("risk_count") or 0),
+                parse_failed_flag=bool(
+                    retry_chunk_audit_result.get("parse_failed_flag")),
+                truncated_flag=bool(
+                    retry_chunk_audit_result.get("truncated_flag")),
+            )
+            _emit_classic_progress(
+                request_status="done",
+                current_index=current_index,
+                current_label=chunk_id,
+                request_kind="retry",
+                retry_index=retry_step,
+                round_index=current_round_index,
+            )
+            write_audit_trace(
+                cfg,
+                "audit_review_retry_done",
+                {
+                    "audit_id": audit_id,
+                    "chunk_id": chunk_id,
+                    "retry_index": retry_step,
+                    "retry_reasons": list(retry_target.get("reasons") or []),
+                    "before_parse_failed": bool((current_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
+                    "after_parse_failed": bool((next_round.get("chunk_audit_result") or {}).get("parse_failed_flag")),
+                    "before_truncated": bool((current_round.get("chunk_audit_result") or {}).get("truncated_flag")),
+                    "after_truncated": bool((next_round.get("chunk_audit_result") or {}).get("truncated_flag")),
+                    "before_risk_count": int((current_round.get("chunk_audit_result") or {}).get("risk_count") or 0),
+                    "after_risk_count": int((next_round.get("chunk_audit_result") or {}).get("risk_count") or 0),
+                },
+            )
+            rounds[round_index_map[chunk_id]] = next_round
+        merged = _merge_multipass_audits(
+            rounds,
+            cfg=cfg,
+            preview_clauses=preview_clauses,
+            lang=lang,
+        )
+    merged_meta = merged.get("meta") if isinstance(
+        merged.get("meta"), dict) else {}
+    reliability_summary = build_reliability_summary(
+        review_plan=review_plan,
+        retry_logs=retry_logs,
+        final_audit=merged.get("audit") if isinstance(
+            merged.get("audit"), dict) else {},
+    )
+    merged_meta["token_budget_triggered"] = True
+    merged_meta["token_budget_reasons"] = list(
+        (token_budget or {}).get("reasons") or [])
+    merged_meta["token_budget_round_plan"] = clause_plan.get("rounds") or []
+    merged_meta["multipass_overflow_clause_count"] = int(
+        clause_plan.get("overflow_clause_count") or 0)
+    merged_meta["review_item_count"] = int(
+        reliability_summary.get("review_item_count") or 0)
+    merged_meta["review_retry_count"] = int(
+        reliability_summary.get("retry_count") or 0)
+    merged_meta["unresolved_review_item_count"] = int(
+        reliability_summary.get("unresolved_review_item_count") or 0)
+    merged_meta["reliability_level"] = str(
+        reliability_summary.get("reliability_level") or "medium")
+    merged["meta"] = merged_meta
+    merged_raw = merged.get("raw") if isinstance(
+        merged.get("raw"), dict) else {}
+    merged_raw["review_plan"] = review_plan
+    merged_raw["review_retry_logs"] = retry_logs
+    merged["raw"] = merged_raw
+    return merged
+
+
+def _run_budget_aware_classic_audit(
+    cfg: Dict[str, Any],
+    llm,
+    text: str,
+    lang: str,
+    preview_clauses: List[Dict[str, Any]],
+    evidence_items: List[Dict[str, Any]],
+    retrieval_opts: Dict[str, Any],
+    audit_id: str,
+    trace_id: str,
+    token_budget: Dict[str, Any],
+    prompt_payload: Dict[str, Any],
+    progress_cb: Optional[Callable[..., None]] = None,
+) -> Dict[str, Any]:
+    if bool((token_budget or {}).get("requires_multi_pass")):
+        return _build_multipass_classic_audit(
+            cfg=cfg,
+            llm=llm,
+            text=text,
+            lang=lang,
+            preview_clauses=preview_clauses,
+            evidence_items=evidence_items,
+            retrieval_opts=retrieval_opts,
+            audit_id=audit_id,
+            trace_id=trace_id,
+            token_budget=token_budget,
+            progress_cb=progress_cb,
+        )
+    classic_result = _build_classic_audit(
+        cfg=cfg,
+        llm=llm,
+        text=text,
+        lang=lang,
+        preview_clauses=preview_clauses,
+        evidence_items=evidence_items,
+        retrieval_opts=retrieval_opts,
+        audit_id=audit_id,
+        trace_id=trace_id,
+        prompt_payload=prompt_payload,
+    )
+    result_meta = classic_result.get("meta") if isinstance(
+        classic_result.get("meta"), dict) else {}
+    result_meta["token_budget_triggered"] = False
+    result_meta["token_budget_reasons"] = list(
+        (token_budget or {}).get("reasons") or [])
+    classic_result["meta"] = result_meta
+    return classic_result
+
+
 def _parse_citation_pack_ref(citation_id: str) -> Dict[str, str]:
     cid = str(citation_id or "").strip()
     if not cid:
@@ -1643,8 +2495,8 @@ def get_regulation_pack_fingerprint(
         "date": str(opts.get("date") or ""),
     }
     pack_seed = "|".join(members) if members else f"empty_pack:{scope['lang']}"
-    regulation_pack_id = "rp_" + \
-        hashlib.sha1(pack_seed.encode("utf-8")).hexdigest()[:20]
+    regulation_pack_id = "rp_" + hashlib.sha1(
+        pack_seed.encode("utf-8")).hexdigest()[:20]
     fingerprint_payload = {
         "pack_id": regulation_pack_id,
         "members": members,
@@ -1652,14 +2504,37 @@ def get_regulation_pack_fingerprint(
         "scope": scope,
     }
     regulation_fingerprint = hashlib.sha256(
-        json.dumps(fingerprint_payload, ensure_ascii=False,
-                   sort_keys=True).encode("utf-8")
+        json.dumps(
+            fingerprint_payload,
+            ensure_ascii=False,
+            sort_keys=True,
+        ).encode("utf-8")
     ).hexdigest()
     return {
         "regulation_pack_id": regulation_pack_id,
         "regulation_fingerprint": regulation_fingerprint,
         "regulation_pack_members": members,
     }
+
+
+def _resolve_classic_parallel_workers(cfg: Dict[str, Any], chunk_count: int) -> int:
+    """并发分块数：需与 llama.cpp 的 --parallel 槽位数匹配。
+
+    ``contract_audit.parallel_workers`` 优先，其次
+    ``memory_runtime_config.audit_parallel_workers``，默认 1（保持串行语义）。
+    """
+    raw_audit = cfg.get("contract_audit")
+    audit_cfg = raw_audit if isinstance(raw_audit, dict) else {}
+    raw_runtime = cfg.get("memory_runtime_config")
+    runtime_cfg = raw_runtime if isinstance(raw_runtime, dict) else {}
+    workers = _safe_int(
+        audit_cfg.get(
+            "parallel_workers",
+            runtime_cfg.get("audit_parallel_workers"),
+        ),
+        1,
+    )
+    return max(1, min(workers, max(1, int(chunk_count))))
 
 
 def _run_classic_multipass_audit(
@@ -1677,9 +2552,10 @@ def _run_classic_multipass_audit(
     max_calls = max(1, int(runtime_cfg.get(
         "memory_max_llm_calls_per_audit") or 12))
     clause_chunks = _chunk_preview_clauses(
-        preview_clauses, max_calls=max_calls)
+        preview_clauses, max_calls=max_calls,
+        policy=get_audit_token_policy(cfg))
     if len(clause_chunks) <= 1:
-        return _build_classic_audit(
+        single_result = _build_classic_audit(
             cfg=cfg,
             llm=llm,
             text=text,
@@ -1690,21 +2566,47 @@ def _run_classic_multipass_audit(
             retrieval_opts=retrieval_opts,
             audit_id=audit_id,
         )
+        single_meta = single_result.get("meta") if isinstance(
+            single_result.get("meta"), dict) else {}
+        single_meta.setdefault("classic_chunk_count", 1)
+        single_meta.setdefault("classic_chunk_plan", "single")
+        single_result["meta"] = single_meta
+        return single_result
     chunk_results: List[Dict[str, Any]] = []
-    for index, clause_chunk in enumerate(clause_chunks, start=1):
-        chunk_results.append(
-            _build_classic_audit(
-                cfg=cfg,
-                llm=llm,
-                text=text,
-                lang=lang,
-                preview_clauses=clause_chunk,
-                preview_manifest=preview_manifest,
-                evidence_items=evidence_items,
-                retrieval_opts=retrieval_opts,
-                audit_id=f"{audit_id}_chunk_{index}",
-            )
+
+    def _run_chunk(index: int, clause_chunk: List[Dict[str, Any]]) -> Dict[str, Any]:
+        return _build_classic_audit(
+            cfg=cfg,
+            llm=llm,
+            text=text,
+            lang=lang,
+            preview_clauses=clause_chunk,
+            preview_manifest=preview_manifest,
+            evidence_items=evidence_items,
+            retrieval_opts=retrieval_opts,
+            audit_id=f"{audit_id}_chunk_{index}",
         )
+
+    workers = _resolve_classic_parallel_workers(cfg, len(clause_chunks))
+    if workers <= 1:
+        for index, clause_chunk in enumerate(clause_chunks, start=1):
+            chunk_results.append(_run_chunk(index, clause_chunk))
+    else:
+        logger.info(
+            "classic_audit_parallel workers=%s chunks=%s",
+            workers,
+            len(clause_chunks),
+        )
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="classic-audit"
+        ) as pool:
+            futures = [
+                pool.submit(_run_chunk, index, clause_chunk)
+                for index, clause_chunk in enumerate(clause_chunks, start=1)
+            ]
+            # future.result() 按提交顺序取值，保证分块结果顺序稳定。
+            for future in futures:
+                chunk_results.append(future.result())
     return _aggregate_classic_results(chunk_results, lang=lang)
 
 
@@ -1718,31 +2620,29 @@ def audit_contract(
     reranker=None,
     translator=None,
     retrieval_options: Optional[Dict[str, Any]] = None,
-    progress_cb: Optional[Callable[[str, int, str], None]] = None
+    progress_cb: Optional[Callable[..., None]] = None,
 ) -> Dict[str, Any]:
     """
     A unified facade function for contract auditing.
     It integrates text extraction, clause preview, evidence retrieval, and LLM clause-level auditing with memory.
     It remains completely transparent to upper-level calls.
     """
-    def _report(stage: str, percent: int, message: str = "") -> None:
-        if not callable(progress_cb):
-            return
-        try:
-            progress_cb(stage, percent, message)
-        except Exception:
-            return
+    def _report(stage: str, percent: int, message: str = "", detail: Optional[Dict[str, Any]] = None) -> None:
+        report_progress(progress_cb, stage, percent, message, detail=detail)
 
     audit_started_at = time.perf_counter()
     audit_id = f"audit_{uuid.uuid4().hex[:12]}"
+    trace_id = new_trace_id()
     _report("extracting", 15, "extracting text")
     logger.info("audit_extract_start", file=file_path,
-                lang=lang, audit_id=audit_id)
+                lang=lang, audit_id=audit_id, trace_id=trace_id)
     text, meta = extract_text_with_config(cfg, file_path)
     preview_clauses = build_preview_clauses(text)
     preview_manifest = None
     preview_source_path = str(preview_file_path or file_path or "").strip()
-    if preview_source_path:
+    # 构建预览清单会调用 MinerU 生成版面坐标（首次数十秒）。CPU 部署可在
+    # contract_preview.audit_build_manifest=false 时跳过，改由打开预览时按需生成。
+    if preview_source_path and _should_build_preview_manifest(cfg):
         try:
             preview_manifest = build_contract_preview_manifest(
                 cfg=cfg,
@@ -1756,6 +2656,11 @@ def audit_contract(
                 audit_id,
                 preview_source_path,
             )
+    elif preview_source_path:
+        logger.info(
+            "audit_preview_manifest_skipped audit_id=%s reason=config audit_build_manifest=false",
+            audit_id,
+        )
     logger.info(
         "audit_extract_done",
         file=file_path,
@@ -1841,10 +2746,41 @@ def audit_contract(
         raise RuntimeError("retrieval coverage incomplete")
     evidence_items = [_normalize_citation_item(
         it) for it in (retrieved.get("items") or [])]
+    classic_prompt_payload = _build_classic_prompt_payload(
+        cfg=cfg,
+        text=text,
+        lang=lang,
+        preview_clauses=preview_clauses,
+        evidence_items=evidence_items,
+    )
+    classic_audit_max_tokens = int(cfg.get("classic_audit_max_tokens") or 4096)
+    token_budget = build_contract_audit_budget(
+        cfg,
+        full_contract_text=text,
+        preview_clauses=preview_clauses,
+        evidence_items=evidence_items,
+        prompt_messages=list(classic_prompt_payload.get("messages") or []),
+        prompt_meta=dict(classic_prompt_payload.get("prompt_meta") or {}),
+        requested_output_tokens=classic_audit_max_tokens,
+    )
     regulation_identity = get_regulation_pack_fingerprint(
         evidence_items=evidence_items,
         retrieval_opts=opts,
         lang=lang,
+    )
+    write_audit_trace(
+        cfg,
+        "audit_token_budget",
+        {
+            "audit_id": audit_id,
+            "file_path": file_path,
+            "requires_multi_pass": bool(token_budget.get("requires_multi_pass")),
+            "reasons": list(token_budget.get("reasons") or []),
+            "truncation_reasons": list(token_budget.get("truncation_reasons") or []),
+            "policy": dict(token_budget.get("policy") or {}),
+            "estimates": dict(token_budget.get("estimates") or {}),
+            "prompt_meta": dict(token_budget.get("prompt_meta") or {}),
+        },
     )
     write_audit_trace(
         cfg,
@@ -1872,10 +2808,19 @@ def audit_contract(
         },
     )
     memory_runtime_cfg = _get_memory_runtime_config(cfg)
-    memory_enabled = bool(memory_runtime_cfg.get(
-        "memory_module_enabled", True))
-    fallback_on_error = bool(memory_runtime_cfg.get(
-        "memory_disable_fallback_on_error", True))
+    memory_temporary_disable_cfg = _get_memory_temporary_disable_config(cfg)
+    runtime_memory_enabled = bool(
+        memory_runtime_cfg.get("memory_module_enabled", True))
+    memory_temporarily_disabled = bool(
+        memory_temporary_disable_cfg.get("enabled", False))
+    effective_disable_mode = str(
+        memory_temporary_disable_cfg.get("fallback_mode")
+        or memory_runtime_cfg.get("memory_mode_when_disabled")
+        or "classic"
+    ).strip().lower()
+    memory_enabled = runtime_memory_enabled and not memory_temporarily_disabled
+    fallback_on_error = bool(
+        memory_runtime_cfg.get("memory_disable_fallback_on_error", True))
     execution_path = "memory"
     memory_result: Dict[str, Any] = {}
     use_classic_multipass = len(
@@ -2050,9 +2995,11 @@ def audit_contract(
                     "module": "contract_audit",
                     "file_path": file_path,
                     "audit_id": audit_id,
+                    "trace_id": trace_id,
                     "regulation_pack_id": regulation_identity.get("regulation_pack_id", ""),
                     "regulation_fingerprint": regulation_identity.get("regulation_fingerprint", ""),
                 },
+                progress_cb=progress_cb,
             )
             execution_path = "memory"
         except Exception as e:
@@ -2111,11 +3058,19 @@ def audit_contract(
             if _safe_int(it.get("tax_relevance", 0), 0) > 0
         ]),
         "preview_clause_total": len(preview_clauses),
+        "audit_token_budget": token_budget,
+        "audit_token_budget_requires_multi_pass": bool(token_budget.get("requires_multi_pass")),
+        "audit_token_budget_reasons": list(token_budget.get("reasons") or []),
         "audit_duration_ms": audit_duration_ms,
         "regulation_pack_id": regulation_identity.get("regulation_pack_id", ""),
         "regulation_fingerprint": regulation_identity.get("regulation_fingerprint", ""),
         "regulation_pack_members": regulation_identity.get("regulation_pack_members", []),
         "memory_module_enabled": memory_enabled,
+        "memory_runtime_module_enabled": runtime_memory_enabled,
+        "memory_temporarily_disabled": memory_temporarily_disabled,
+        "memory_temporary_disable_reason": memory_temporary_disable_cfg.get("reason"),
+        "memory_temporary_disable_trigger_source": memory_temporary_disable_cfg.get("trigger_source"),
+        "memory_temporary_disable_fallback_mode": memory_temporary_disable_cfg.get("fallback_mode"),
         "execution_path": execution_path,
         **memory_meta,
     }
@@ -2130,6 +3085,9 @@ def audit_contract(
             "memory_rounds": output_meta.get("memory_clause_rounds", 0),
             "memory_llm_call_count": output_meta.get("memory_llm_call_count", 0),
             "memory_llm_total_tokens": output_meta.get("memory_llm_total_tokens", 0),
+            "memory_temporarily_disabled": memory_temporarily_disabled,
+            "memory_temporary_disable_reason": output_meta.get("memory_temporary_disable_reason", ""),
+            "memory_temporary_disable_trigger_source": output_meta.get("memory_temporary_disable_trigger_source", ""),
             "risk_count": output_meta.get("memory_report_risk_count", 0),
             "suppressed_missing_risks": output_meta.get("suppressed_missing_risks", 0),
             "parse_failed_clauses": output_meta.get("parse_failed_clauses", 0),
@@ -2176,8 +3134,21 @@ def audit_contract(
     output_meta["episode_saved"] = bool(episode_meta.get("saved", False))
     output_meta["episode_id"] = str(episode_meta.get("episode_id") or "")
     output_meta["episode_status"] = str(episode_meta.get("status") or "")
+    final_audit = memory_result.get("audit") if isinstance(
+        memory_result.get("audit"), dict) else {}
+    final_report = build_contract_final_report(
+        audit=final_audit,
+        meta=output_meta,
+        file_path=file_path,
+        contract_id=audit_id,
+    )
+    final_audit["final_report"] = final_report
+    final_audit["pipeline_summary"] = final_report.get("pipeline_summary") if isinstance(
+        final_report.get("pipeline_summary"), dict) else {}
+    final_audit["reliability_summary"] = final_report.get("reliability_summary") if isinstance(
+        final_report.get("reliability_summary"), dict) else {}
     return {
-        "audit": memory_result.get("audit"),
+        "audit": final_audit,
         "meta": output_meta,
         "raw": memory_result.get("raw") if isinstance(memory_result.get("raw"), dict) else {"mode": "memory"}
     }

@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 from app.api.dependencies import get_app_llm, require_admin
-from app.core.config import get_config
+from app.core.config import get_config, update_config_patch
+from app.local_llm.policy import ensure_llamacpp_target
 from app.services.prompt_binding import render_prompt_messages
 from fastapi import APIRouter, Depends, HTTPException, Request
 from typing import Optional
@@ -56,10 +57,31 @@ def get_llm_config(current_user: dict = Depends(require_admin), llm=Depends(get_
 
 @router.put("/llm-config", response_model=LLMConfigResponse)
 def update_llm_config(payload: LLMConfigUpdate, request: Request, current_user: dict = Depends(require_admin)):
-    raise HTTPException(
-        status_code=405,
-        detail="LLM config is environment-managed. Update Windows environment variables instead of saving values in the app.",
+    data = _normalize_llm_payload(payload.model_dump())
+    _validate_llm_config(data)
+    try:
+        ensure_llamacpp_target(data.get("provider"), data.get("api_base"))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    current = get_config()
+    local_cfg = dict(current.get("local_llm") or {})
+    local_cfg.update(
+        {
+            "enabled": True,
+            "runtime_mode": "local",
+            "routing_enabled": True,
+            "cloud_fallback_enabled": False,
+            "main_model": dict(data),
+        }
     )
+    updated = update_config_patch(
+        {"llm_config": dict(data), "local_llm": local_cfg}
+    )
+    request.app.state.llm.cfg = updated
+    runtime = request.app.state.llm.describe_runtime_config()
+    runtime["config_source"] = "local_main_model"
+    return LLMConfigResponse(**runtime)
 
 
 @router.delete("/llm-config/api-key")
@@ -95,6 +117,16 @@ def test_llm(
     try:
         answer, _ = llm.chat(messages)
     except Exception as e:
+        error = str(e)
+        runtime = llm.describe_runtime_config()
+        api_base = str(runtime.get("api_base") or "")
+        model = str(runtime.get("model") or "")
         raise HTTPException(
-            status_code=400, detail=f"llm test failed: {str(e)}")
+            status_code=400,
+            detail=(
+                "llama.cpp local inference failed: "
+                f"{error}. endpoint={api_base} model={model}. "
+                "Check the loopback endpoint, loaded GGUF model, and timeout."
+            ),
+        )
     return LLMTestResponse(ok=True, prompt=prompt, answer=answer)

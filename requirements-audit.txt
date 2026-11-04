@@ -1,0 +1,25 @@
+# 合同审计Skill体系 - 新增依赖
+# ================================
+# 本文件列出合同审计Skill体系新增的Python依赖。
+# 基础依赖已包含在 app/requirements.txt 中，以下为增量依赖。
+#
+# 安装方式:
+#   pip install -r requirements-audit.txt
+
+# YAML配置文件解析（skill_config.yaml）
+PyYAML>=6.0
+
+# Jinja2模板引擎（Skill Prompt模板渲染）
+# 注：Jinja2已在 app/requirements.txt 中，此处仅做显式声明
+# jinja2>=3.1.2
+
+# 以下为可选依赖：
+
+# ChromaDB（隔离RAG向量库，已在主requirements.txt）
+# chromadb>=0.4.0
+
+# PDF文本提取（已在主requirements.txt）
+# pypdf>=5.6.0
+
+# Word文档处理（已在主requirements.txt）
+# python-docx>=1.2.0

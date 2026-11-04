@@ -81,7 +81,16 @@ Copy-Item .\app\config.example.json .\app\config.json
 }
 ```
 
-### 4.4 启动服务
+### 4.4 本地模型部署
+
+离线环境请将 `mineru.model_source` 设为 `local`，并把模型权重固化到 `models/mineru`。首次启动会自动下载缺失模型（支持断点续传与 sha256 校验），详细配置、验收与排障见 [MinerU 本地模型部署与离线运行](mineru-local-models.zh-CN.md)。
+
+```powershell
+# 可选：部署阶段一次性拉齐模型
+python .\bin\ensure_local_models.py --types mineru --download
+```
+
+### 4.5 启动服务
 
 ```powershell
 python .\bin\deploy_local.py --profile lite --disable-translation --keep-running
@@ -105,7 +114,10 @@ python .\bin\verify_ocr_env.py --output .\reports\ocr_report.json
 
 ```powershell
 curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/mineru
 ```
+
+`/health` 的 `mineru` 块给出本地模型状态（`local_ready`、`missing`、`download.stage`）；本地模式部署方法与离线验收见 [MinerU 本地模型部署与离线运行](mineru-local-models.zh-CN.md)。
 
 浏览器访问：
 

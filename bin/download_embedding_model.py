@@ -1,9 +1,8 @@
-import os
-import json
 import argparse
+import json
+import os
 import shutil
 from pathlib import Path
-from modelscope.hub.snapshot_download import snapshot_download
 
 
 def resolve_path(base_dir: str, p: str) -> str:
@@ -28,8 +27,9 @@ def main():
     parser.add_argument("--target-dir", default="..\\models\\embedding")
     parser.add_argument("--onnx-name", default="")
     parser.add_argument("--config-path", default="..\\app\\config.json")
-    parser.add_argument("--revision", default="master")
     parser.add_argument("--reranker", action="store_true")
+    parser.add_argument("--source-dir", default="",
+                        help="Pre-staged local model directory from enterprise artifact repository.")
     args = parser.parse_args()
 
     app_dir = os.path.dirname(os.path.abspath(__file__))
@@ -56,11 +56,11 @@ def main():
             app_dir, os.path.join(base_target_dir, lang)))
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        local_dir = snapshot_download(
-            model_id=model_id,
-            revision=args.revision
-        )
-        src_dir = Path(local_dir)
+        if not args.source_dir:
+            raise RuntimeError("source-dir is required in enterprise offline mode")
+        src_dir = Path(resolve_path(app_dir, args.source_dir))
+        if not src_dir.exists():
+            raise RuntimeError(f"source-dir not found: {src_dir}")
 
         onnx_dst = None
         if not args.reranker:
@@ -116,7 +116,7 @@ def main():
                 profile["embedding_tokenizer_dir"] = os.path.relpath(
                     str(target_dir), cfg_base_dir)
                 profile["embedding_model_id"] = model_id
-                profile["embedding_source"] = "modelscope"
+                profile["embedding_source"] = "local_registry"
                 profile.setdefault("embedding_max_seq_len", 512)
                 profile.setdefault("embedding_pooling", "cls")
                 profile.setdefault("embedding_threads", 2)

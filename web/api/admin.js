@@ -1,4 +1,4 @@
-import { API_BASE, getAuthHeaders, requestBlob, requestJson } from "./base"
+import { API_BASE, getAuthHeaders, getLongRequestTimeoutMs, requestBlob, requestJson } from "./base"
 
 export async function adminListPrompts(params = {}) {
   const query = new URLSearchParams(params).toString()
@@ -166,6 +166,14 @@ export async function adminGetLLMConfig() {
   })
 }
 
+export async function adminUpdateLLMConfig(payload) {
+  return requestJson(`${API_BASE}/api/admin/llm-config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    body: JSON.stringify(payload)
+  })
+}
+
 export async function adminGetUIConfig() {
   return requestJson(`${API_BASE}/api/admin/ui-config`, {
     headers: { ...getAuthHeaders() }
@@ -229,10 +237,58 @@ export async function adminExportTokenStats(params = {}) {
   })
 }
 
-export async function adminTestLLM(payload) {
+export async function adminTestLLM(payload, timeoutSec) {
   return requestJson(`${API_BASE}/api/admin/llm-test`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...getAuthHeaders() },
-    body: JSON.stringify(payload || {})
+    body: JSON.stringify(payload || {}),
+    timeoutMs: getLongRequestTimeoutMs(timeoutSec)
+  })
+}
+
+export async function adminGetOllamaModels(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/ollama/models${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetLlamaCppModels(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/llama-cpp/models${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+// ---- LLM Trace 全链路日志接口 ----
+
+export async function adminListLLMTraces(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/llm-traces${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetLLMTraceDetail(spanId) {
+  return requestJson(`${API_BASE}/api/admin/llm-traces/${spanId}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminGetLLMTraceStats(params = {}) {
+  const query = new URLSearchParams(params).toString()
+  const suffix = query ? `?${query}` : ""
+  return requestJson(`${API_BASE}/api/admin/llm-traces/stats/summary${suffix}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function adminCleanupLLMTraces(beforeDate) {
+  return requestJson(`${API_BASE}/api/admin/llm-traces?before_date=${encodeURIComponent(beforeDate)}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
   })
 }

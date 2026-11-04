@@ -9,7 +9,7 @@ if ! command -v brew >/dev/null 2>&1; then
   fi
 fi
 if command -v python3 >/dev/null 2>&1; then
-  python3 -m pip install -U "mineru==3.1.5"
+  python3 -m pip install -U "mineru[pipeline]==3.1.5"
 else
   echo "python3 not found"
   exit 1

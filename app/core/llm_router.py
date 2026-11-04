@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional, Tuple
+
+from app.local_llm.policy import assert_local_runtime_enabled
 
 
 DEFAULT_TASK_ROLE_MAP = {
@@ -35,22 +36,19 @@ def _is_enabled(value: Any, default: bool = False) -> bool:
 def _normalize_role(value: Any) -> str:
     role = _clean_text(value).lower()
     aliases = {
-        "cloud": "cloud_fallback",
-        "fallback": "cloud_fallback",
+        "primary": "main",
+        "secondary": "small",
         "local_main": "main",
         "local_small": "small",
+        "base_service": "base",
+        "default_service": "base",
     }
     return aliases.get(role, role)
 
 
 def _resolve_runtime_mode(local_cfg: Dict[str, Any]) -> Tuple[str, str]:
-    env_mode = _clean_text(os.environ.get("LLM_RUNTIME_MODE", "")).lower()
-    if env_mode in {"local", "cloud"}:
-        return env_mode, "env"
-    cfg_mode = _clean_text(local_cfg.get("runtime_mode", "local")).lower()
-    if cfg_mode in {"local", "cloud"}:
-        return cfg_mode, "config"
-    return "local", "default"
+    assert_local_runtime_enabled()
+    return "local", "local_only_policy"
 
 
 def _normalize_model_cfg(base_cfg: Dict[str, Any], target_cfg: Dict[str, Any], local_cfg: Dict[str, Any]) -> Dict[str, Any]:
@@ -74,12 +72,20 @@ def _is_model_target_ready(cfg: Dict[str, Any]) -> bool:
 
 def _resolve_task_role(local_cfg: Dict[str, Any], task_profile: str, preferred_role: str) -> Tuple[str, str]:
     normalized_preferred = _normalize_role(preferred_role)
-    if normalized_preferred in {"main", "small", "cloud_fallback"}:
+    # 安全约束：不允许 preferred_role 直接指定 "base"（云端），
+    # 仅接受 "main" / "small" 两个本地角色
+    if normalized_preferred in {"main", "small"}:
         return normalized_preferred, "preferred_role"
+    if normalized_preferred == "base":
+        # 忽略云端请求，降级到默认本地角色
+        default_role = _normalize_role(DEFAULT_TASK_ROLE_MAP.get(
+            task_profile) or DEFAULT_TASK_ROLE_MAP["default"])
+        return default_role, "base_role_rejected"
     routing_cfg = _clean_dict(local_cfg.get("routing"))
     profile_map = _clean_dict(routing_cfg.get("task_profiles"))
     mapped_role = _normalize_role(profile_map.get(task_profile))
-    if mapped_role in {"main", "small", "cloud_fallback"}:
+    # 安全约束：task_profiles 映射也不允许 "base"
+    if mapped_role in {"main", "small"}:
         return mapped_role, "task_profile_map"
     default_role = _normalize_role(DEFAULT_TASK_ROLE_MAP.get(
         task_profile) or DEFAULT_TASK_ROLE_MAP["default"])
@@ -97,34 +103,22 @@ def resolve_llm_route(
     local_cfg = _clean_dict((app_cfg or {}).get("local_llm"))
     local_enabled = _is_enabled(local_cfg.get("enabled"), False)
     routing_enabled = _is_enabled(local_cfg.get("routing_enabled"), True)
-    cloud_fallback_enabled = _is_enabled(
-        local_cfg.get("cloud_fallback_enabled"), True)
+    allow_small_to_main_fallback = _is_enabled(
+        local_cfg.get("allow_small_to_main_fallback"), True)
+    cloud_fallback_enabled = False
     runtime_mode, runtime_mode_source = _resolve_runtime_mode(local_cfg)
 
     if not local_enabled:
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
+            "selected_role": "base",
             "selected_source": "llm_config",
             "reason": "local_disabled",
             "runtime_mode": runtime_mode,
             "runtime_mode_source": runtime_mode_source,
             "local_enabled": False,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
-        }
-
-    if runtime_mode == "cloud":
-        return dict(base_cfg), {
-            "task_profile": task_profile,
-            "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
-            "selected_source": "llm_config",
-            "reason": "runtime_mode_cloud",
-            "runtime_mode": runtime_mode,
-            "runtime_mode_source": runtime_mode_source,
-            "local_enabled": True,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
     resolved_role, reason = _resolve_task_role(
@@ -136,20 +130,39 @@ def resolve_llm_route(
     target_key = {
         "main": "main_model",
         "small": "small_model",
-        "cloud_fallback": "",
+        "base": "",
     }.get(resolved_role, "main_model")
 
-    if resolved_role == "cloud_fallback":
+    # allow_cloud_fallback: 显式开启才允许回退到 llm_config（云端）
+    # 默认 False = 纯本地部署，禁止任何云端逃逸
+    allow_cloud_fallback = False
+
+    if resolved_role == "base":
+        if not allow_cloud_fallback:
+            # 拒绝云端路由，强制降级到本地 main_model
+            main_cfg = _clean_dict(local_cfg.get("main_model"))
+            if _is_model_target_ready(main_cfg):
+                merged_cfg = _normalize_model_cfg(base_cfg, main_cfg, local_cfg)
+                return merged_cfg, {
+                    "task_profile": task_profile,
+                    "requested_role": preferred_role or "auto",
+                    "selected_role": "main",
+                    "selected_source": "main_model",
+                    "reason": "base_role_rejected_no_cloud",
+                    "local_enabled": True,
+                    "allow_cloud_fallback": False,
+                }
+            # main_model 也不可用，返回 base 但在 meta 中标记
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
+            "selected_role": "base",
             "selected_source": "llm_config",
             "reason": reason,
             "runtime_mode": runtime_mode,
             "runtime_mode_source": runtime_mode_source,
             "local_enabled": True,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
+            "allow_cloud_fallback": allow_cloud_fallback,
         }
 
     local_target_cfg = _clean_dict(local_cfg.get(target_key))
@@ -165,22 +178,38 @@ def resolve_llm_route(
             "runtime_mode": runtime_mode,
             "runtime_mode_source": runtime_mode_source,
             "local_enabled": True,
-            "cloud_fallback_enabled": cloud_fallback_enabled,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
-    if cloud_fallback_enabled and _is_model_target_ready(base_cfg):
+    main_cfg = _clean_dict(local_cfg.get("main_model"))
+    if resolved_role == "small" and allow_small_to_main_fallback and _is_model_target_ready(main_cfg):
+        merged_cfg = _normalize_model_cfg(base_cfg, main_cfg, local_cfg)
+        return merged_cfg, {
+            "task_profile": task_profile,
+            "requested_role": preferred_role or "auto",
+            "selected_role": "main",
+            "selected_source": "main_model",
+            "reason": "small_missing_main_fallback",
+            "local_enabled": True,
+            "allow_small_to_main_fallback": True,
+        }
+
+    # 安全约束：本地模型配置缺失时，默认拒绝静默回退到云端
+    if _is_model_target_ready(base_cfg) and allow_cloud_fallback:
         return dict(base_cfg), {
             "task_profile": task_profile,
             "requested_role": preferred_role or "auto",
-            "selected_role": "cloud_fallback",
+            "selected_role": "base",
             "selected_source": "llm_config",
             "reason": f"{resolved_role}_missing_fallback",
             "runtime_mode": runtime_mode,
             "runtime_mode_source": runtime_mode_source,
             "local_enabled": True,
-            "cloud_fallback_enabled": True,
+            "allow_cloud_fallback": True,
+            "allow_small_to_main_fallback": allow_small_to_main_fallback,
         }
 
+    # 本地模型不可用且禁止云端回退 → 返回不完整的本地配置 + 告警 meta
     merged_cfg = _normalize_model_cfg(base_cfg, local_target_cfg, local_cfg)
     return merged_cfg, {
         "task_profile": task_profile,
@@ -191,5 +220,6 @@ def resolve_llm_route(
         "runtime_mode": runtime_mode,
         "runtime_mode_source": runtime_mode_source,
         "local_enabled": True,
-        "cloud_fallback_enabled": cloud_fallback_enabled,
+        "allow_cloud_fallback": False,
+        "allow_small_to_main_fallback": allow_small_to_main_fallback,
     }

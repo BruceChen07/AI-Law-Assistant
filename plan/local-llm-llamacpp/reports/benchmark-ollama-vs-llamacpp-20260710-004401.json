@@ -1,0 +1,83 @@
+{
+  "generated_at": "2026-07-09T16:44:11.293047+00:00",
+  "runtime_policy": {
+    "edge_only": true,
+    "cloud_fallback_allowed": false
+  },
+  "hardware_note": "Run Ollama and llama.cpp sequentially on the same host with the same GGUF/model settings for a fair comparison.",
+  "prompt_chars": 17,
+  "rounds": 1,
+  "warmup_rounds": 0,
+  "ollama": {
+    "runtime": "ollama",
+    "base_url": "http://127.0.0.1:11434",
+    "model": "qwen3.6:27b",
+    "ready": {
+      "ok": false,
+      "url": "",
+      "latency_ms": 0,
+      "attempts": [
+        {
+          "url": "http://127.0.0.1:11434/api/version",
+          "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+        },
+        {
+          "url": "http://127.0.0.1:11434/v1/models",
+          "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+        }
+      ],
+      "payload": {}
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [],
+    "summary": {
+      "error": "ollama endpoint is not reachable"
+    },
+    "ok": false
+  },
+  "llama_cpp": {
+    "runtime": "llama_cpp",
+    "base_url": "http://127.0.0.1:18080",
+    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+    "ready": {
+      "ok": false,
+      "url": "",
+      "latency_ms": 0,
+      "attempts": [
+        {
+          "url": "http://127.0.0.1:18080/health",
+          "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+        },
+        {
+          "url": "http://127.0.0.1:18080/v1/models",
+          "error": "<urlopen error [WinError 10061] No connection could be made because the target machine actively refused it>"
+        }
+      ],
+      "payload": {}
+    },
+    "launch": {
+      "attempted": false,
+      "started": false,
+      "pid": 0,
+      "log_path": "",
+      "command": "",
+      "ready_after_launch_sec": 0.0
+    },
+    "rounds": [],
+    "summary": {
+      "error": "llama_cpp endpoint is not reachable"
+    },
+    "ok": false
+  },
+  "comparison": {
+    "ready": false
+  },
+  "ok": false
+}

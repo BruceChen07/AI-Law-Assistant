@@ -254,6 +254,7 @@ class LLMConfigResponse(BaseModel):
     env_sources: dict
     security_issues: List[str]
     route: dict
+    config_source: str = "local_main_model"
 
 
 class LLMConfigUpdate(BaseModel):

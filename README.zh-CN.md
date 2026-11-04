@@ -194,11 +194,15 @@ npm run storybook
 
 1. 进入 Admin → 「模型配置」→「记忆审计配置」
 2. 开关 `启用经验记忆审计`：关闭后走 `classic` 低成本路径
-3. 勾选 `启用记忆 Token 守卫`，并设置预算上限
+3. 开关 `临时全局禁用记忆功能`：优先级高于 `启用经验记忆审计`，开启后统一走 `classic`
+4. 勾选 `启用记忆 Token 守卫`，并设置预算上限
 
 建议参数（生产默认）：
 
 - `memory_module_enabled`: `true`（如需严格控成本可设为 `false`）
+- `memory_temporary_disable.enabled`: 端侧模型上下文承载不足或持续超时时可设为 `true`
+- `memory_temporary_disable.reason`: 建议填写 `edge_llm_context_limit`
+- `memory_temporary_disable.trigger_source`: 建议填写运维变更来源，如 `ops_temporary_disable_2026-07-03`
 - `memory_max_llm_calls_per_audit`: `8-16`（合同较长建议上调）
 - `memory_max_prompt_chars_per_clause`: `1600-2800`
 
@@ -206,6 +210,7 @@ npm run storybook
 
 - 启用记忆模式会增加 LLM 调用次数与 Token 消耗，成本通常高于 classic 模式
 - 关闭记忆模式后，复杂场景的跨条款召回与经验修正能力会下降
+- 开启 `临时全局禁用记忆功能` 后，即使 `memory_module_enabled=true`，系统仍会强制走 `classic`
 - 预算过低时系统会优先高风险条款，低优先级条款可能被跳过（可在 trace 中观测）
 
 常见排查：
@@ -213,6 +218,7 @@ npm run storybook
 - 如果发现命中率下降，先检查 `memory_max_llm_calls_per_audit` 是否过小
 - 如果出现条款被跳过，检查 `memory_llm_guard_skipped_low_priority_calls` 指标
 - 如果想快速止损，直接在 Admin 关闭 `启用经验记忆审计`
+- 如果端侧模型持续超时，优先开启 `临时全局禁用记忆功能`，并在日志中观察 `memory_temporarily_disabled`
 
 ### 记忆审计模块拆分说明
 
@@ -264,13 +270,20 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
 }
 ```
 
-### 端侧大模型 CPU 本地部署（Phase 0-5）
+### 企业内网严格离线部署
 
 系统已支持在纯 CPU 环境下通过 Ollama 接入本地大模型，并可在企业内网场景下以“纯本地、无云端兜底”方式运行。
 
-**本地模型配置示例**（`app/config.json` 中新增 `local_llm` 字段）：
+**离线模型配置示例**（`app/config.json`）：
 
 ```json
+"network_policy": {
+    "enabled": true,
+    "mode": "offline_strict",
+    "allow_private_ip_ranges": true,
+    "allowed_hosts": ["127.0.0.1", "localhost", "llm-gateway.intra"],
+    "allowed_domain_suffixes": [".intra", ".corp.local"]
+},
 "local_llm": {
     "enabled": true,
     "routing_enabled": true,
@@ -284,7 +297,7 @@ python bin/verify_ocr_env.py --pdf /path/to/sample.pdf --output reports/ocr_repo
     },
     "small_model": {
         "provider": "ollama",
-        "model": "llama3.2:3b",
+        "model": "qwen3:4b",
         "api_base": "http://127.0.0.1:11434/v1",
         "max_tokens": 400,
         "timeout": 30
@@ -325,12 +338,16 @@ python .\bin\init.py
 
 # 2) 启动 Ollama 并确保模型已安装
 python .\bin\start-local-llm-servers.py
-python .\bin\download-local-llm-models.py
+python .\bin\download-local-llm-models.py --verify-only
 
-# 3) 写入本地 LLM 配置
+# 3) 写入离线 LLM 配置
 python .\bin\apply-local-llm-config.py
 
-# 4) 启动后端与前端
+# 4) 校验离线合规
+python .\bin\ensure_local_models.py --check-only --include-optional
+python .\bin\validate_offline_compliance.py
+
+# 5) 启动后端与前端
 python .\bin\start-services.py
 ```
 
@@ -346,9 +363,8 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 ```
 
 详细文档：
-- `plan/edge-llm-cpu-local-deployment-detailed-design.md` — 详细设计文档
-- `plan/edge-llm-cpu-local-deployment-runbook.md` — 部署与联调手册
-- `plan/edge-llm-cpu-local-known-issues.md` — 已知问题清单
+- `plan/enterprise-offline-private-deployment-design.md` — 企业内网严格离线方案
+- `plan/enterprise-offline-private-deployment-runbook.md` — 企业内网部署与验收手册
 
 ### API 接口
 
@@ -365,6 +381,7 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | POST | `/embedding/compute`           | 计算向量      |
 | GET  | `/api/admin/llm-config`        | 获取 LLM 配置 |
 | PUT  | `/api/admin/llm-config`        | 更新 LLM 配置 |
+| GET  | `/api/admin/ollama/models`     | 获取本地 Ollama 模型列表 |
 | GET  | `/api/admin/memory-config`     | 获取记忆运行配置 |
 | PUT  | `/api/admin/memory-config`     | 更新记忆运行配置 |
 
@@ -401,6 +418,12 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
         "memory_token_guard_enabled": true,
         "memory_max_llm_calls_per_audit": 12,
         "memory_max_prompt_chars_per_clause": 2400
+    },
+    "memory_temporary_disable": {
+        "enabled": false,
+        "fallback_mode": "classic",
+        "reason": "edge_llm_context_limit",
+        "trigger_source": "config.memory_temporary_disable"
     },
     "reranker_enabled": true,
     "reranker_model_path": "../models/reranker/zh",
@@ -441,6 +464,11 @@ python -m pytest tests/test_llm_router.py tests/test_llm_local_mode.py tests/tes
 | `memory_token_guard_enabled` | boolean | 是否启用记忆调用预算守卫             |
 | `memory_max_llm_calls_per_audit` | int | 单次审计允许的记忆路径最大 LLM 调用次数 |
 | `memory_max_prompt_chars_per_clause` | int | 单条款 prompt 最大字符数上限    |
+| `memory_temporary_disable` | object | 端侧稳定性止损用的临时总闸配置 |
+| `memory_temporary_disable.enabled` | boolean | 是否临时全局禁用记忆功能 |
+| `memory_temporary_disable.fallback_mode` | string | 临时禁用后强制回退模式，当前固定为 `classic` |
+| `memory_temporary_disable.reason` | string | 临时禁用原因，会写入日志与审计元数据 |
+| `memory_temporary_disable.trigger_source` | string | 临时禁用触发源，会写入日志与审计元数据 |
 | `reranker_enabled`       | boolean | 是否启用重排                    |
 | `reranker_model_path`    | string  | 默认重排模型路径                  |
 | `reranker_profiles`      | object  | 重排模型多语言路径                 |
@@ -504,3 +532,53 @@ python bin/download_embedding_model.py
 ## 许可证
 
 MIT License
+
+## 端侧 llama.cpp 本地替换说明（2026-07 更新）
+
+当前仓库已开始推进 `llama.cpp` 替换主模型运行时，目标是：
+
+- 主模型统一切换为端侧本地 `llama-server`
+- 小模型在迁移阶段可继续保留 Ollama
+- 禁止将云端大模型作为默认路径或回退路径
+
+推荐文件与入口：
+
+- 启动 `llama.cpp`：`bin/start-local-llamacpp-server.py`
+- 应用本地配置：`bin/apply-local-llm-config.py --provider llama_cpp`
+- 配置样例：`app/config.local-llamacpp.example.json`
+- 阶段记录索引：`plan/local-llm-llamacpp/README.md`
+
+推荐主模型映射：
+
+```json
+{
+  "llm_config": {
+    "provider": "llama_cpp",
+    "api_base": "http://127.0.0.1:18080/v1",
+    "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+  },
+  "local_llm": {
+    "main_model": {
+      "provider": "llama_cpp",
+      "api_base": "http://127.0.0.1:18080/v1",
+      "model": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf"
+    },
+    "small_model": {
+      "provider": "ollama",
+      "api_base": "http://127.0.0.1:11434/v1",
+      "model": "qwen3:4b"
+    }
+  }
+}
+```
+
+运行约束：
+
+- `llama.cpp` 与 Ollama 都应部署在本机或企业内网
+- `network_policy.mode` 保持 `offline_strict`
+- `allowed_hosts` 至少包含 `127.0.0.1`、`localhost`、`llamacpp.intra`、`ollama.intra`
+
+说明：
+
+- 当前 Admin 页面已支持发现本地 `llama.cpp` 模型、切换模型、执行 `llm-test`
+- 详细切换步骤、测试要求与回退方案见 `plan/local-llm-llamacpp/` 下的阶段文档与 runbook

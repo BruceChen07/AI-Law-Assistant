@@ -1,3 +1,4 @@
+import ipaddress
 import json
 import logging
 import os
@@ -11,6 +12,7 @@ import httpx
 from openai import OpenAI, APITimeoutError
 
 from app.core.llm_backends import get_provider
+from app.core.token_utils import estimate_messages_tokens
 from app.core.llm_env import (
     collect_persisted_secret_issues,
     detect_env_provider_hint,
@@ -24,6 +26,9 @@ logger = logging.getLogger("law_assistant")
 
 
 class LLMService:
+    # Cache for auto-detected model names, keyed by api_base
+    _model_cache: Dict[str, str] = {}
+
     def __init__(self, cfg: Dict[str, Any]):
         self.cfg = cfg or {}
 
@@ -139,12 +144,117 @@ class LLMService:
             raise RuntimeError("llm_config api_base invalid")
         return f"{p.scheme}://{p.netloc}{p.path}".rstrip("/")
 
+    def _resolve_model_name(self, api_base: str, provider: str, configured_model: str) -> str:
+        """Resolve model name. If configured as 'auto', detect from server.
+
+        For local providers (llama_cpp, ollama), the model field in the
+        request is ignored by the server – it uses whatever model is loaded.
+        We query /v1/models to get the actual model name for display/trace.
+        """
+        if configured_model.lower() != "auto":
+            return configured_model
+        # Check cache first
+        cached = LLMService._model_cache.get(api_base)
+        if cached:
+            return cached
+        # Try to detect from server
+        detected = self._detect_model_from_server(api_base, provider)
+        if detected:
+            LLMService._model_cache[api_base] = detected
+            logger.info("model_auto_detected api_base=%s model=%s", api_base, detected)
+            return detected
+        # Detection failed – use "auto" as placeholder; will be
+        # updated from response after first successful call
+        logger.warning("model_auto_detect_failed api_base=%s using placeholder", api_base)
+        return configured_model
+
+    def _detect_model_from_server(self, api_base: str, provider: str) -> str:
+        """Query the LLM server's /v1/models endpoint to get the actual model name."""
+        try:
+            base_url = self._build_base_url(api_base)
+            # For ollama, use /api/tags; for openai_compatible/llama_cpp, use /v1/models
+            if provider == "ollama":
+                ollama_base = self._build_ollama_base_url(api_base)
+                url = f"{ollama_base}/api/tags"
+            else:
+                url = f"{base_url}/models"
+            self._enforce_network_policy(url)
+            resp = httpx.get(url, timeout=5)
+            resp.raise_for_status()
+            data = resp.json()
+            if provider == "ollama":
+                models = data.get("models") or []
+                if models:
+                    name = str(models[0].get("name") or models[0].get("model") or "").strip()
+                    if name:
+                        return name
+            else:
+                models = data.get("data") or data.get("models") or []
+                if models and isinstance(models, list):
+                    name = str(models[0].get("id") or models[0].get("model") or "").strip()
+                    if name:
+                        return name
+        except Exception as e:
+            logger.debug("model_detect_error api_base=%s err=%s", api_base, str(e))
+        return ""
+
     def _build_ollama_base_url(self, base: str) -> str:
         s = self._build_base_url(base)
         for suffix in ("/chat/completions", "/api/chat", "/api/generate", "/v1"):
             if s.endswith(suffix):
                 s = s[: -len(suffix)]
         return s.rstrip("/")
+
+    def _network_policy(self) -> Dict[str, Any]:
+        raw = self.cfg.get("network_policy")
+        return dict(raw) if isinstance(raw, dict) else {}
+
+    def _offline_mode_enabled(self) -> bool:
+        policy = self._network_policy()
+        return bool(policy.get("enabled", True)) and str(
+            policy.get("mode", "offline_strict")
+        ).strip().lower() == "offline_strict"
+
+    def _is_allowed_host(self, host: str) -> bool:
+        normalized = self._clean_text(host).lower()
+        if not normalized:
+            return False
+        policy = self._network_policy()
+        allowed_hosts = {
+            str(x).strip().lower()
+            for x in (policy.get("allowed_hosts") or [])
+            if str(x).strip()
+        }
+        allowed_suffixes = [
+            str(x).strip().lower()
+            for x in (policy.get("allowed_domain_suffixes") or [])
+            if str(x).strip()
+        ]
+        if normalized in allowed_hosts or normalized in {"127.0.0.1", "localhost", "::1"}:
+            return True
+        if any(normalized.endswith(suffix) for suffix in allowed_suffixes):
+            return True
+        try:
+            ip = ipaddress.ip_address(normalized)
+            if ip.is_loopback:
+                return True
+            return bool(policy.get("allow_private_ip_ranges", True)) and (
+                ip.is_private or ip.is_link_local
+            )
+        except ValueError:
+            # Hostnames without public suffixes are commonly used in intranet DNS.
+            if "." not in normalized:
+                return True
+        return False
+
+    def _enforce_network_policy(self, base_url: str) -> None:
+        if not self._offline_mode_enabled():
+            return
+        host = urlsplit(base_url).hostname or ""
+        if not self._is_allowed_host(host):
+            raise RuntimeError(
+                f"network policy blocked non-intranet LLM endpoint: {host or '<empty>'}"
+            )
 
     def _build_headers(self, api_key: Optional[str], extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -163,30 +273,7 @@ class LLMService:
         return f"{s[:4]}***{s[-4:]}(len={len(s)})"
 
     def _estimate_input_tokens(self, messages: List[Dict[str, Any]]) -> int:
-        parts: List[str] = []
-        for m in messages or []:
-            if not isinstance(m, dict):
-                parts.append(str(m or ""))
-                continue
-            content = m.get("content", "")
-            if isinstance(content, str):
-                parts.append(content)
-                continue
-            if isinstance(content, list):
-                for item in content:
-                    if isinstance(item, dict):
-                        text = str(item.get("text")
-                                   or item.get("content") or "")
-                        if text:
-                            parts.append(text)
-                    else:
-                        parts.append(str(item or ""))
-                continue
-            parts.append(str(content or ""))
-        joined = "\n".join([x for x in parts if x])
-        cjk = len(re.findall(r"[\u4e00-\u9fff]", joined))
-        non_cjk = max(0, len(joined) - cjk)
-        return max(1, int(cjk * 1.1 + non_cjk / 3.8)) if joined else 0
+        return estimate_messages_tokens(messages)
 
     def _trace_options(self) -> Dict[str, Any]:
         enabled = bool(self.cfg.get("llm_trace_enabled", False))
@@ -256,7 +343,12 @@ class LLMService:
         }
         extra_body: Dict[str, Any] = {}
         if "enable_thinking" in cfg:
-            extra_body["enable_thinking"] = bool(cfg.get("enable_thinking"))
+            enable_thinking = bool(cfg.get("enable_thinking"))
+            extra_body["enable_thinking"] = enable_thinking
+            if not enable_thinking:
+                # Qwen3 / llama.cpp: 同时通过 chat_template_kwargs 抑制思考模式
+                # 仅传 enable_thinking 顶层参数时，llama.cpp 可能忽略（非标准参数）
+                extra_body["chat_template_kwargs"] = {"enable_thinking": False}
         thinking_budget = cfg.get("thinking_budget_tokens")
         if thinking_budget is not None:
             try:
@@ -276,26 +368,31 @@ class LLMService:
             kwargs["extra_body"] = extra_body
         return kwargs
 
-    def _create_chat_completion(self, client: OpenAI, kwargs: Dict[str, Any]):
-        try:
-            return client.chat.completions.create(**kwargs)
-        except Exception as e:
-            msg = str(e).lower()
-            if (
-                "unsupported" in msg
-                or "unknown" in msg
-                or "unrecognized" in msg
-                or "invalid" in msg
-                or "unexpected keyword" in msg
-                or "unexpected keyword argument" in msg
-            ) and (
-                "extra_body" in kwargs or "reasoning_effort" in kwargs
-            ):
-                fallback_kwargs = dict(kwargs)
-                fallback_kwargs.pop("extra_body", None)
-                fallback_kwargs.pop("reasoning_effort", None)
-                return client.chat.completions.create(**fallback_kwargs)
-            raise
+    def _build_openai_compatible_body(
+        self,
+        model: str,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        cfg: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        body = self._build_chat_kwargs(
+            model, messages, temperature, max_tokens, cfg)
+        extra_body = body.pop("extra_body", None)
+        if isinstance(extra_body, dict):
+            body.update(extra_body)
+        return body
+
+    def _post_json(
+        self,
+        url: str,
+        body: Dict[str, Any],
+        headers: Dict[str, str],
+        timeout: int,
+    ) -> Dict[str, Any]:
+        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
+        response.raise_for_status()
+        return response.json()
 
     def _build_ollama_chat_body(
         self,
@@ -340,85 +437,19 @@ class LLMService:
         headers: Dict[str, str],
         timeout: int,
     ) -> Dict[str, Any]:
-        response = httpx.post(url, json=body, headers=headers, timeout=timeout)
-        response.raise_for_status()
-        return response.json()
+        return self._post_json(url, body, headers, timeout)
 
-    def _chat_via_ollama_provider(
-        self,
-        messages: List[Dict[str, str]],
-        cfg: Dict[str, Any],
-    ) -> Tuple[str, Dict[str, Any]]:
-        api_base = self._build_base_url(str(cfg.get("api_base", "")))
-        model = self._clean_text(cfg.get("model", ""))
-        temperature = float(cfg.get("temperature", 0.2))
-        max_tokens = int(cfg.get("max_tokens", 2048))
-        timeout = int(cfg.get("timeout", 60))
-        extra_headers = cfg.get("headers") if isinstance(
-            cfg.get("headers"), dict) else None
-        base_url = self._build_ollama_base_url(api_base)
-        request_url = f"{base_url}/api/chat"
-        request_headers = self._build_headers(None, extra_headers)
-        request_body = self._build_ollama_chat_body(
-            model, messages, temperature, max_tokens, cfg
-        )
+    def _extract_http_error_text(self, err: httpx.HTTPStatusError) -> str:
+        response = getattr(err, "response", None)
+        if response is None:
+            return ""
         try:
-            raw = self._post_ollama_chat(
-                request_url, request_body, request_headers, timeout
-            )
-        except httpx.TimeoutException:
-            retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
-            retry_cfg = dict(cfg)
-            retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
-            retry_body = self._build_ollama_chat_body(
-                model, messages, temperature, retry_max_tokens, retry_cfg
-            )
-            logger.warning(
-                "ollama_request_timeout_retry url=%s model=%s timeout=%s->%s max_tokens=%s->%s",
-                request_url,
-                model,
-                timeout,
-                retry_timeout,
-                max_tokens,
-                retry_max_tokens,
-            )
-            try:
-                raw = self._post_ollama_chat(
-                    request_url, retry_body, request_headers, retry_timeout
-                )
-            except Exception as e2:
-                raise RuntimeError(
-                    f"ollama request failed after timeout retry: {str(e2)}"
-                ) from e2
-        message = raw.get("message") if isinstance(
-            raw.get("message"), dict) else {}
-        content = str(message.get("content") or "")
-        prompt_tokens = int(raw.get("prompt_eval_count") or 0)
-        completion_tokens = int(raw.get("eval_count") or 0)
-        parsed = {
-            "model": raw.get("model") or model,
-            "done": bool(raw.get("done", True)),
-            "done_reason": raw.get("done_reason") or "",
-            "message": {
-                "role": message.get("role") or "assistant",
-                "content": content,
-            },
-            "usage": {
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "total_tokens": prompt_tokens + completion_tokens,
-            },
-            "ollama_raw": raw,
-            "choices": [
-                {
-                    "message": {
-                        "role": message.get("role") or "assistant",
-                        "content": content,
-                    }
-                }
-            ],
-        }
-        return content, parsed
+            payload = response.json()
+            if isinstance(payload, dict):
+                return str(payload.get("error") or payload.get("message") or "")
+            return str(payload or "")
+        except Exception:
+            return str(getattr(response, "text", "") or "")
 
     def _chat_via_openai_compatible(
         self,
@@ -599,6 +630,13 @@ class LLMService:
         total_tokens = int(usage.get("total_tokens") or (
             prompt_tokens + completion_tokens))
         latency_ms = int((time.perf_counter() - t0) * 1000)
+
+        # Update model name from response if available (more accurate than config)
+        response_model = self._clean_text(parsed.get("model", ""))
+        if response_model and response_model != model:
+            LLMService._model_cache[api_base] = response_model
+            model = response_model
+
         logger.info(
             "llm_request_done provider=%s model=%s input_tokens_est=%s prompt_tokens=%s completion_tokens=%s total_tokens=%s latency_ms=%s",
             provider_name,

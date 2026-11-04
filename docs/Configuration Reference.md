@@ -22,8 +22,8 @@ This document explains the configuration fields in `app/config.example.json`.
 |---|---|---|
 | `embedding_model` | string | ONNX model file path. |
 | `embedding_tokenizer_dir` | string | Tokenizer directory path. |
-| `embedding_model_id` | string | Source model ID (for identification/download). |
-| `embedding_source` | string | Model source platform (e.g. `modelscope`). |
+| `embedding_model_id` | string | Internal model ID used for artifact traceability. |
+| `embedding_source` | string | Model source label, recommended `local_registry`. |
 | `embedding_max_seq_len` | int | Maximum sequence length for embedding input. |
 | `embedding_pooling` | string | Embedding pooling strategy (e.g. `cls`). |
 | `embedding_query_instruction` | string | Query prefix/instruction used to improve retrieval quality. |
@@ -66,8 +66,20 @@ This document explains the configuration fields in `app/config.example.json`.
 | `device` | string | Runtime device (`cpu` / `cuda`). |
 | `formula` | bool | Enable formula parsing. |
 | `table` | bool | Enable table parsing. |
-| `model_source` | string | Model source platform. |
-| `model_source_fallback_enabled` | bool | Enable automatic fallback from Hugging Face to ModelScope on network failure. |
+| `model_source` | string | Model source: `huggingface`, `modelscope`, or `local`. `local` reads models only from `local_models_dir` and never contacts a model hub. |
+| `local_models_dir` | string | Local model root (default `../models/mineru`), resolved relative to the config file. Holds `pipeline/`, `vlm/`, `mineru.json`, `manifest.json`. |
+| `local_config_path` | string | Optional explicit MinerU tool config path. Empty means `<local_models_dir>/mineru.json`. |
+| `auto_download_on_startup` | bool | On service start, download missing models into `local_models_dir` when `model_source=local`. |
+| `auto_download_background` | bool | Run the startup download in a background thread instead of blocking startup. |
+| `download_source` | string | Primary hub for the startup download (`modelscope` / `huggingface`). |
+| `download_source_fallback` | string | Source used when the primary hub fails. Leave empty for strictly offline hosts. |
+| `download_endpoints` | object | Base URLs per source, e.g. `{"modelscope": "https://www.modelscope.cn"}`. |
+| `download_max_workers` | int | Parallel file download workers. |
+| `download_retries` | int | Per-file retry count for download/integrity failures. |
+| `download_retry_backoff_sec` | int | Base backoff between retries (multiplied by attempt number). |
+| `download_revisions` | object | Per-source git revision, e.g. `{"modelscope": "master"}`. |
+| `download_patterns` | object | File globs per kind, e.g. `{"pipeline": ["models/OCR/*"]}`. Defaults match MinerU 3.x layout. |
+| `model_source_fallback_enabled` | bool | Enable automatic fallback from Hugging Face to ModelScope on network failure. Ignored when `model_source=local`. |
 | `fallback_model_source` | string | Fallback model source, typically `modelscope`. |
 | `hf_retry_count` | int | Additional retry count before switching away from Hugging Face. |
 | `hf_connect_timeout_sec` | int | Hugging Face metadata/connect timeout passed via environment. |
@@ -108,8 +120,8 @@ Security note:
 | `backend` | string | Translation backend implementation. |
 | `mode` | string | `dual` or `translate_only`. |
 | `cross_lang_source_query_enabled` | bool | In `dual` mode and cross-language scenario, whether to also run source-language retrieval. Set `false` to avoid duplicate retrieval when corpus is Chinese-only. |
-| `model_id` | string | Translation model ID. |
-| `model_dir` | string | Local model directory override. |
+| `model_id` | string | Internal translation model identifier. |
+| `model_dir` | string | Local model directory. Required for offline deployment. |
 | `device` | string | Translation device (`cpu` / `cuda`). |
 | `source_langs` | string[] | Source languages eligible for translation. |
 | `target_lang` | string | Translation target language. |
@@ -209,6 +221,45 @@ Security note:
 | `cors_allow_origins` | string[] | Allowed frontend origins for CORS. |
 
 ---
+
+## 15) Contract Audit Performance
+
+CPU-only deployments should tune these keys together with the llama.cpp launch flags.
+
+### `contract_audit`
+
+| Key | Type | Description |
+|---|---|---|
+| `parallel_workers` | int | Clause chunks audited concurrently. Default `1`. Set `2` only when llama.cpp runs with `--parallel 2`; measured cost on a 20-core CPU is ~1.8x per-call latency for ~11% total wall-clock gain. |
+
+### `audit_token_policy`
+
+Budget planner for contract audits. Lowering `context_window_tokens` should match the llama.cpp per-slot context.
+
+| Key | Type | Description |
+|---|---|---|
+| `context_window_tokens` | int | Per-request window used for planning (default `16384`; CPU profile uses `8192`). |
+| `reserve_output_tokens` | int | Tokens kept for the completion (`2048`). |
+| `safety_margin_tokens` | int | Extra headroom (`1024`). |
+| `input_soft_limit_tokens` | int | Soft prompt limit; groups are split above it (`3584` at 8k). |
+| `input_hard_limit_tokens` | int | Hard prompt limit (`5120` at 8k). |
+| `clause_group_target_tokens` | int | Target clause tokens per chunk (`2800` at 8k). |
+| `chunk_output_tokens` | int | Output budget per chunk. |
+
+### `contract_preview.audit_build_manifest`
+
+| Key | Type | Description |
+|---|---|---|
+| `audit_build_manifest` | bool | When `false`, the audit skips preview manifest building. Building it runs MinerU for layout coordinates (tens of seconds on CPU). Set `false` on CPU deployments; the preview endpoint still builds it on demand when a user opens the document, but risk items will lack page coordinates until then. |
+
+### llama.cpp launch flags
+
+| Flag | Recommended | Description |
+|---|---|---|
+| `--ctx-size` | `8192` | Per-slot context. With `--parallel N`, llama.cpp splits this value across slots. |
+| `--parallel` | `1` (or `2` + `contract_audit.parallel_workers=2`) | Server slots. Single-sequence CPU inference already saturates the cores. |
+| `--cache-reuse` | `256` | KV cache reuse; automatically disabled by llama.cpp for contexts that do not support it (`cache_reuse is not supported by this context`). |
+| `--n-gpu-layers` | `0` | Keep inference on CPU. |
 
 ## Recommended Profiles
 

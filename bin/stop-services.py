@@ -74,8 +74,9 @@ def main() -> int:
     data = load_pid_file(pid_file)
     backend_pid = int(data.get("backend_pid") or 0)
     frontend_pid = int(data.get("frontend_pid") or 0)
+    llamacpp_pid = int(data.get("llamacpp_pid") or 0)
 
-    if backend_pid <= 0 and frontend_pid <= 0:
+    if backend_pid <= 0 and frontend_pid <= 0 and llamacpp_pid <= 0:
         log("未找到可停止的服务 PID。")
         return 0
 
@@ -85,6 +86,9 @@ def main() -> int:
     if backend_pid > 0:
         stop_pid(backend_pid)
         log(f"[OK] 已请求停止后端进程: {backend_pid}")
+    if llamacpp_pid > 0:
+        stop_pid(llamacpp_pid)
+        log(f"[OK] 已请求停止 llama.cpp 进程: {llamacpp_pid}")
 
     pid_file.unlink(missing_ok=True)
     log("[OK] 已清理 PID 文件。")

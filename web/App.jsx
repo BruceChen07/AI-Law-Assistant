@@ -14,9 +14,30 @@ const APP_LANG_STORAGE_KEY = "ui_lang"
 const AUDIT_PROGRESS_STARTUP_GRACE_MS = 6000
 const RISK_LOCATE_STRONG_CONFIDENCE = 0.78
 const RISK_LOCATE_OVERRIDE_DELTA = 0.12
+const ADMIN_TABS = new Set(["stats", "documents", "users", "prompts", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
+const normalizeView = (value) => (String(value || "").toLowerCase() === "admin" ? "admin" : "main")
+
+const readRouteFromHash = () => {
+  if (typeof window === "undefined") return { view: "main", adminTab: "documents" }
+  const hash = String(window.location.hash || "").replace(/^#/, "").trim()
+  if (!hash) return { view: "main", adminTab: "documents" }
+  const [viewRaw, adminTabRaw] = hash.split("/")
+  const view = normalizeView(viewRaw)
+  const adminTab = ADMIN_TABS.has(adminTabRaw) ? adminTabRaw : "documents"
+  return { view, adminTab }
+}
+
+const writeRouteToHash = (view, adminTab = "documents") => {
+  if (typeof window === "undefined") return
+  const nextView = normalizeView(view)
+  const nextTab = ADMIN_TABS.has(adminTab) ? adminTab : "documents"
+  const nextHash = nextView === "admin" ? `#admin/${nextTab}` : "#main"
+  if (window.location.hash === nextHash) return
+  window.history.replaceState(null, "", nextHash)
+}
 
 const getStoredTheme = () => {
   const v = String(localStorage.getItem(THEME_STORAGE_KEY) || "").toLowerCase()
@@ -94,9 +115,12 @@ export function resolveRiskLocateTarget({ risk, previewPages, pickHighlight }) {
 
 export default function App() {
   const initialUserRef = useRef(getCurrentUser())
+  const initialRouteRef = useRef(readRouteFromHash())
   const restoredAuditRef = useRef(loadCurrentAuditSnapshot(initialUserRef.current))
   const restoredAudit = restoredAuditRef.current.snapshot
-  const [view, setView] = useState("main")
+  const auditProgressTimerRef = useRef(null)
+  const [view, setView] = useState(initialRouteRef.current.view)
+  const [adminTab, setAdminTab] = useState(initialRouteRef.current.adminTab)
   const [user, setUser] = useState(initialUserRef.current)
 
   useEffect(() => {
@@ -114,6 +138,18 @@ export default function App() {
     }
     syncUser()
   }, [])
+  useEffect(() => {
+    const onHashChange = () => {
+      const nextRoute = readRouteFromHash()
+      setView(nextRoute.view)
+      setAdminTab(nextRoute.adminTab)
+    }
+    window.addEventListener("hashchange", onHashChange)
+    return () => window.removeEventListener("hashchange", onHashChange)
+  }, [])
+  useEffect(() => {
+    writeRouteToHash(view, adminTab)
+  }, [view, adminTab])
   const [uiLang, setUiLang] = useState(() => getStoredAppLang())
   const [theme, setTheme] = useState("dark")
   const [currentTaskId, setCurrentTaskId] = useState(() => restoredAudit?.taskId || createAuditTaskId())
@@ -150,6 +186,9 @@ export default function App() {
   const [expandedEvidence, setExpandedEvidence] = useState(() => restoredAudit?.expandedEvidence || {})
   const [contractProgress, setContractProgress] = useState(() => Number(restoredAudit?.contractProgress || 0) || 0)
   const [contractProgressStage, setContractProgressStage] = useState(() => restoredAudit?.contractProgressStage || "working")
+  const [contractProgressMessage, setContractProgressMessage] = useState("")
+  const [contractProgressDetail, setContractProgressDetail] = useState(null)
+  const [showEvidence, setShowEvidence] = useState(false)
   const [exportingFormat, setExportingFormat] = useState(() => restoredAudit?.exportingFormat || "")
   const [sourceDownloading, setSourceDownloading] = useState(() => !!restoredAudit?.sourceDownloading)
   const [exportError, setExportError] = useState(() => restoredAudit?.exportError || "")
@@ -238,6 +277,26 @@ export default function App() {
     if (!name) return ""
     return name.replace(/\.[^.]+$/, "")
   }
+  const buildExportFallbackName = (format, mode = "report") => {
+    const ext = String(format || "json").toLowerCase() === "docx" ? "docx" : "json"
+    const sourceName = String(
+      contractResult?.overview?.contract_filename || contractFile?.name || contract?.title || "contract"
+    ).trim()
+    const baseName = toContractTitle(sourceName) || "contract"
+    const now = new Date()
+    const pad = (value) => String(value).padStart(2, "0")
+    const timestamp = [
+      now.getFullYear(),
+      pad(now.getMonth() + 1),
+      pad(now.getDate())
+    ].join("") + "_" + [
+      pad(now.getHours()),
+      pad(now.getMinutes()),
+      pad(now.getSeconds())
+    ].join("")
+    const suffix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
+    return `${baseName}_${timestamp}_${suffix}.${ext}`
+  }
   const riskList = useMemo(() => (
     Array.isArray(contractResult?.risks) ? contractResult.risks : []
   ), [contractResult])
@@ -319,8 +378,8 @@ export default function App() {
     Array.isArray(auditLegalValidation?.issues) ? auditLegalValidation.issues.filter((item) => item && typeof item === "object") : []
   ), [auditLegalValidation])
   const auditIncomplete = useMemo(() => {
-    if (Boolean(contractResult?.audit_incomplete)) return true
-    if (Boolean(contractMeta?.audit_incomplete)) return true
+    if (contractResult?.audit_incomplete) return true
+    if (contractMeta?.audit_incomplete) return true
     if (auditLegalValidation && auditLegalValidation.ok === false && auditIncompleteIssues.length > 0) return true
     return false
   }, [auditIncompleteIssues.length, auditLegalValidation, contractMeta?.audit_incomplete, contractResult?.audit_incomplete])
@@ -338,6 +397,28 @@ export default function App() {
     failed: t.progressFailed,
     working: t.progressWorking
   }[contractProgressStage] || t.progressWorking
+  const llmProgressText = useMemo(() => {
+    const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
+    if (!detail) return ""
+    const current = Number(detail.llm_request_current_index || 0)
+    const planned = Number(detail.llm_request_total_planned || 0)
+    const upperBound = Number(detail.llm_request_total_upper_bound || 0)
+    const total = planned > 0 ? planned : upperBound
+    if (current <= 0 && total <= 0) return ""
+    const totalLabel = total > 0 ? String(total) : t.llmProgressDynamicTotal
+    const currentLabel = String(detail.llm_request_current_label || "").trim()
+    const executionPath = String(detail.execution_path || "").trim()
+    const executionLabel = executionPath === "classic"
+      ? t.executionPathClassic
+      : executionPath === "memory"
+        ? t.executionPathMemory
+        : executionPath
+    const chunks = [`${t.llmProgressMeta}: ${Math.max(0, current)} / ${totalLabel}`]
+    if (currentLabel) chunks.push(currentLabel)
+    if (executionLabel) chunks.push(executionLabel)
+    return chunks.join(" · ")
+  }, [contractProgressDetail, t])
+  const showAuditProgress = contractLoading || contractProgressStage === "failed"
   const previewSource = String(previewMeta?.source || "").toLowerCase()
   const previewCoordProvider = String(previewMeta?.coord_provider || "").toLowerCase()
   const previewConversion = previewMeta?.docx_pdf_conversion && typeof previewMeta.docx_pdf_conversion === "object"
@@ -399,6 +480,37 @@ export default function App() {
     const next = Math.max(0, Math.min(100, Number(percent) || 0))
     setContractProgress((p) => Math.max(p, next))
     if (stage) setContractProgressStage(stage)
+  }
+
+  const clearAuditProgressPolling = () => {
+    if (auditProgressTimerRef.current) {
+      clearInterval(auditProgressTimerRef.current)
+      auditProgressTimerRef.current = null
+    }
+  }
+
+  const applyServerAuditProgress = (payload) => {
+    if (!payload || typeof payload !== "object") return
+    const nextProgress = Math.max(0, Math.min(100, Number(payload.progress) || 0))
+    setContractProgress(nextProgress)
+    setContractProgressStage(String(payload.stage || "working"))
+    setContractProgressMessage(String(payload.message || ""))
+    setContractProgressDetail(payload.detail && typeof payload.detail === "object" ? payload.detail : null)
+  }
+
+  const startAuditProgressPolling = (auditId) => {
+    clearAuditProgressPolling()
+    if (!auditId) return
+    const pollOnce = async () => {
+      try {
+        const payload = await getAuditProgress(auditId)
+        applyServerAuditProgress(payload)
+      } catch {
+        // Ignore transient polling errors while the main audit request is still running.
+      }
+    }
+    pollOnce()
+    auditProgressTimerRef.current = setInterval(pollOnce, 1000)
   }
 
   const refreshSnapshotHistory = (targetUser = user) => {
@@ -643,32 +755,7 @@ export default function App() {
     })
   }, [])
 
-  useEffect(() => {
-    if (!contractLoading) {
-      setContractProgress(0)
-      setContractProgressStage("working")
-      return
-    }
-    bumpProgress(12, "uploading")
-    const timers = [
-      setTimeout(() => {
-        bumpProgress(32, "extracting")
-      }, 700),
-      setTimeout(() => {
-        bumpProgress(58, "retrieval")
-      }, 1800),
-      setTimeout(() => {
-        bumpProgress(75, "auditing")
-      }, 3200)
-    ]
-    const ticker = setInterval(() => {
-      setContractProgress((p) => Math.min(p + 1, 75))
-    }, 900)
-    return () => {
-      timers.forEach(clearTimeout)
-      clearInterval(ticker)
-    }
-  }, [contractLoading])
+  useEffect(() => () => clearAuditProgressPolling(), [])
 
   useEffect(() => {
     const stored = getStoredTheme()
@@ -1368,7 +1455,10 @@ export default function App() {
     setContractLoading(true)
     setRiskFilter("all")
     setActiveRiskIndex(-1)
-    bumpProgress(16, "uploading")
+    setContractProgress(5)
+    setContractProgressStage("uploading")
+    setContractProgressMessage("")
+    setContractProgressDetail(null)
     try {
       const form = new FormData()
       form.append("audit_id", nextAuditId)
@@ -1380,8 +1470,15 @@ export default function App() {
       form.append("date", contract.date)
       form.append("industry", contract.industry)
       form.append("tax_focus", String(contract.taxFocus))
+      form.append("audit_id", nextAuditId)
       form.append("file", contractFile)
+      startAuditProgressPolling(nextAuditId)
       const res = await auditContract(form)
+      clearAuditProgressPolling()
+      try {
+        const finalProgress = await getAuditProgress(nextAuditId)
+        applyServerAuditProgress(finalProgress)
+      } catch {}
       bumpProgress(100, "done")
       const resolvedAuditId = String(res.audit_id || nextAuditId)
       progressStartupGraceRef.current = {
@@ -1398,12 +1495,14 @@ export default function App() {
       setContract(prev => ({ ...prev, language: detectedLang }))
       setContractResult(res.result || null)
       setContractMeta(res.meta || null)
+      setShowEvidence(false)
       setDocumentId(nextDocumentId)
       // Preview loading can take longer than the audit itself, especially for
       // visual manifests with many pages. Do not keep the audit progress stuck
       // in the running state while preview assets are still loading.
       void loadContractPreview(nextDocumentId)
     } catch (err) {
+      clearAuditProgressPolling()
       bumpProgress(100, "failed")
       setContractError(normalizeContractAuditError(err, contract.language || uiLang))
       setContractResult(null)
@@ -1454,13 +1553,8 @@ export default function App() {
         throw new Error(t.exportFailed)
       }
       const ext = fmt === "docx" ? "docx" : "json"
-      const prefix = mode === "comments"
-        ? "contract_with_comments"
-        : mode === "digitized_source"
-          ? "contract_digitized_source"
-          : "contract_audit_report"
       const responseFilename = String(response?.filename || "").trim()
-      downloadBlobFile(blob, responseFilename || `${prefix}_${documentId}.${ext}`)
+      downloadBlobFile(blob, responseFilename || buildExportFallbackName(fmt, mode) || `contract_${documentId}.${ext}`)
     } catch (err) {
       setExportError(String(err?.message || err || t.exportFailed))
     } finally {
@@ -1533,13 +1627,18 @@ export default function App() {
   }
 
   if (!user) {
-    return <Login onLogin={() => { setUser(getCurrentUser()); setView("main") }} />
+    return <Login onLogin={() => {
+      setUser(getCurrentUser())
+      const nextRoute = readRouteFromHash()
+      setView(nextRoute.view)
+      setAdminTab(nextRoute.adminTab)
+    }} />
   }
 
   const canOpenAdmin = user.role === "admin" || user.username === "admin"
 
   if (view === "admin") {
-    return <Admin lang={uiLang} onLangChange={onUiLanguageChange} onBack={() => setView("main")} />
+    return <Admin lang={uiLang} onLangChange={onUiLanguageChange} tab={adminTab} onTabChange={setAdminTab} onBack={() => setView("main")} />
   }
 
   return (
@@ -1712,7 +1811,7 @@ export default function App() {
               {t.startNewTask}
             </button>
           </div>
-          {contractLoading && (
+          {showAuditProgress && (
             <div className="audit-progress">
               <div className="audit-progress-head">
                 <span>{t.progressTitle}</span>
@@ -1721,7 +1820,8 @@ export default function App() {
               <div className="audit-progress-bar">
                 <div className="audit-progress-fill" style={{ width: `${contractProgress}%` }} />
               </div>
-              <div className="audit-progress-note">{progressStageText}</div>
+              <div className="audit-progress-note">{contractProgressMessage || progressStageText}</div>
+              {llmProgressText && <div className="audit-progress-subnote">{llmProgressText}</div>}
             </div>
           )}
         </div>
@@ -1999,7 +2099,21 @@ export default function App() {
               <span>{t.modelMeta}: {contractMeta.llm_model || "-"}</span>
               <span>{t.retrievalMode}: {contractMeta.retrieval_mode || "-"}</span>
               <span>{t.taxFocusMeta}: {contractMeta.tax_focus ? "on" : "off"}</span>
-              <span>{t.evidenceMeta}: {contractMeta.evidence_count ?? 0}</span>
+              <span
+                className={`meta-clickable${showEvidence ? " active" : ""}`}
+                role="button"
+                tabIndex={0}
+                title={t.evidenceViewHint}
+                onClick={() => setShowEvidence(v => !v)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault()
+                    setShowEvidence(v => !v)
+                  }
+                }}
+              >
+                {t.evidenceMeta}: {contractMeta.evidence_count ?? 0} {showEvidence ? "▲" : "▼"}
+              </span>
               <span>{t.queryMeta}: {contractMeta.retrieval_queries ?? 0}</span>
               <span>{t.promptMeta}: {contractMeta.prompt_tokens_est ?? "-"}</span>
               <span>{t.clauseCount}: {contractMeta.preview_clause_total ?? previewMeta?.clause_total ?? "-"}</span>
@@ -2015,6 +2129,38 @@ export default function App() {
                 </>
               )}
               <span>ID: {documentId || "-"}</span>
+            </div>
+          )}
+          {contractMeta && showEvidence && (
+            <div className="evidence-detail-panel">
+              <div className="evidence-detail-title">
+                {t.evidenceListTitle} ({citationList.length})
+              </div>
+              {citationList.length > 0 ? (
+                <ol className="evidence-detail-list">
+                  {citationList.map((c, i) => {
+                    const title = buildCitationTitle(c)
+                    const content = getCitationContent(c)
+                    const cid = String(c?.citation_id || "").trim()
+                    return (
+                      <li key={cid || i} className="evidence-detail-item">
+                        <div className="evidence-detail-head">
+                          <span className="evidence-detail-index">E{i + 1}</span>
+                          {title && <span className="evidence-detail-law">{title}</span>}
+                          {cid && (
+                            <span className="evidence-detail-cid">
+                              {t.evidenceCidLabel}: {cid}
+                            </span>
+                          )}
+                        </div>
+                        {content && <div className="evidence-detail-body">{content}</div>}
+                      </li>
+                    )
+                  })}
+                </ol>
+              ) : (
+                <div className="empty-risk">{t.evidenceEmpty}</div>
+              )}
             </div>
           )}
         </section>

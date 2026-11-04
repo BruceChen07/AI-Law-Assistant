@@ -6,7 +6,7 @@ from app.services.tax_common import parse_llm_json_object
 from app.services.local_llm_runtime import (
     call_with_fallback,
     get_local_worker_limit,
-    is_high_risk_force_cloud,
+    is_high_risk_force_main,
 )
 from app.services.prompt_binding import render_prompt_messages
 from app.services.crud import (
@@ -93,9 +93,6 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
         len(matches),
     )
 
-    if llm is None:
-        raise ValueError("llm service is required")
-
     def process_match(m):
         label = str(m.get("match_label") or "")
         if label not in ["non_compliant", "not_mentioned"]:
@@ -150,7 +147,7 @@ def generate_issues_from_matches(cfg, contract_id: str, operator_id: str = "", l
             logger.error(f"LLM risk generation failed: {e}")
             fallback_meta = {
                 "fallback_used": False,
-                "fallback_reason": "exception",
+                "fallback_reason": "no_llm_service",
                 "final_model_role": "",
             }
 

@@ -85,6 +85,7 @@ from .preview2 import (  # noqa: F401
 )
 from .export import (  # noqa: F401
     export_contract_report,
+    _extract_report_risk_items,
 )
 
 def build_router(cfg):
