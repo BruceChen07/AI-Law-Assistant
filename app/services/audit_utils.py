@@ -81,7 +81,10 @@ def is_tax_related_text(value: Any) -> bool:
     # Mixed numeric cues: tax rate, amount+currency, and common tax expressions.
     if re.search(r"[0-9]+(?:\.[0-9]+)?\s*%", text):
         return True
-    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元)", text):
+    # A bare amount is not a tax signal on its own (e.g. "违约金100元"), so require
+    # an adjacent tax/invoice cue before treating money as tax related.
+    if re.search(r"[0-9]+(?:\.[0-9]+)?\s*(?:元|万元|亿元)", text) and re.search(
+            r"(?:税|发票|价外|含税|进项|销项)", text):
         return True
     if re.search(r"(?:rmb|cny|usd|\$)\s*[0-9]+", low):
         return True
