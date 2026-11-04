@@ -77,6 +77,12 @@ def create_app(
     logger = services.get("logger") or setup_logging(cfg)
     rag_logger = services.get("rag_logger") or get_pipeline_logger(
         cfg, name="rag_pipeline", filename="rag_pipeline.log")
+    if bool(cfg.get("startup_dependency_check", True)):
+        # 启动即自检，避免「服务起来了但审计必失败」：缺包 / MinerU 环境不匹配 /
+        # 本地权重缺失都会在这里以可读的方式打印出来（strict=true 时直接中止启动）。
+        from app.core.dependency_preflight import run_startup_preflight
+
+        run_startup_preflight(cfg, logger)
     if initialize:
         init_db(cfg)
         from app.core.database import ensure_embedding_columns, ensure_article_dsl_columns
