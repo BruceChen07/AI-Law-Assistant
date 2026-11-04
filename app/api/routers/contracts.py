@@ -422,7 +422,7 @@ def build_router(cfg):
         )
         # P0: return immediately, run the audit in a background task. A client
         # timeout, closed tab or dropped connection can no longer abort it.
-        audit_task_runner.submit(
+        enqueue_result = audit_task_runner.enqueue(
             cfg=cfg,
             services=services,
             file_path=save_path,
@@ -431,6 +431,7 @@ def build_router(cfg):
             audit_id=audit_id,
             document_id=doc_id,
             user_id=current_user["id"],
+            title=title or os.path.basename(file.filename or ""),
         )
 
         return JSONResponse(
@@ -442,6 +443,8 @@ def build_router(cfg):
                 "stage": "auditing",
                 "progress": 20,
                 "mode": "async",
+                "queued": True,
+                "queue_position": int(enqueue_result.get("ahead") or 0) + 1,
             },
         )
 
@@ -494,7 +497,7 @@ def build_router(cfg):
             reranker=reranker,
             translator=translator,
         )
-        audit_task_runner.submit(
+        enqueue_result = audit_task_runner.enqueue(
             cfg=cfg,
             services=services,
             file_path=file_path,
@@ -503,6 +506,7 @@ def build_router(cfg):
             audit_id=audit_id,
             document_id=document_id,
             user_id=current_user["id"],
+            title=str(doc.get("original_filename") or ""),
         )
         return JSONResponse(
             status_code=202,
@@ -513,8 +517,34 @@ def build_router(cfg):
                 "stage": "auditing",
                 "progress": 5,
                 "mode": "async",
+                "queued": True,
+                "queue_position": int(enqueue_result.get("ahead") or 0) + 1,
             },
         )
+
+    @router.get("/contracts/audit/queue")
+    def get_contract_audit_queue(current_user: dict = Depends(get_current_user)):
+        """当前排队与执行中的审计（单 worker，FIFO）。"""
+        _ = current_user
+        return audit_task_runner.queue_snapshot()
+
+    @router.delete("/contracts/audit/queue/{audit_id}")
+    def cancel_contract_audit_queue(
+        audit_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        """取消排队中的审计；已开始执行的任务不允许取消。"""
+        _ = current_user
+        outcome = audit_task_runner.cancel(audit_id)
+        if outcome == "missing":
+            raise HTTPException(
+                status_code=404, detail="queued audit not found")
+        if outcome == "running":
+            raise HTTPException(
+                status_code=409,
+                detail="audit is already running and cannot be cancelled",
+            )
+        return {"audit_id": audit_id, "status": "cancelled"}
 
     @router.get("/contracts/audit/{audit_id}/progress")
     def get_contract_audit_progress(audit_id: str, current_user: dict = Depends(get_current_user)):

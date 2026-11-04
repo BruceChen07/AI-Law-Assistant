@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, exportContractReport, getAuditProgress, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
+import { auditContract, cancelAuditQueueItem, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import History from "./History"
@@ -120,6 +120,7 @@ export default function App() {
   const [contractProgress, setContractProgress] = useState(0)
   const [contractProgressStage, setContractProgressStage] = useState("working")
   const [contractProgressMessage, setContractProgressMessage] = useState("")
+  const [auditQueue, setAuditQueue] = useState({ running: [], queued: [] })
   const [contractProgressDetail, setContractProgressDetail] = useState(null)
   const [activeAuditId, setActiveAuditId] = useState("")
   const [serverRunningAudits, setServerRunningAudits] = useState([])
@@ -457,6 +458,43 @@ export default function App() {
     return () => clearAuditProgressPolling()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    // 审计队列：单 worker 串行执行，这里只做展示与取消。
+    if (!user) return undefined
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await getAuditQueue()
+        if (!cancelled) {
+          setAuditQueue({
+            running: Array.isArray(data?.running) ? data.running : [],
+            queued: Array.isArray(data?.queued) ? data.queued : []
+          })
+        }
+      } catch {
+        // 队列接口不可用时不影响主流程
+      }
+    }
+    load()
+    const timer = setInterval(load, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [user])
+
+  const onCancelQueuedAudit = async (auditId) => {
+    try {
+      await cancelAuditQueueItem(auditId)
+      setAuditQueue((prev) => ({
+        ...prev,
+        queued: prev.queued.filter((item) => String(item.audit_id || "") !== String(auditId || ""))
+      }))
+    } catch (err) {
+      setContractError(String(err?.message || err || "cancel failed"))
+    }
+  }
 
   useEffect(() => {
     // P2: keep a server-side view of running audits so a task that outlives this
@@ -1047,6 +1085,12 @@ export default function App() {
       const nextDocumentId = String(job?.document_id || "")
       setContractProgressStage("auditing")
       setContractProgress(Number(job?.progress) || 20)
+      const queuePosition = Number(job?.queue_position) || 1
+      if (queuePosition > 1) {
+        setContractProgressMessage(
+          `${t.auditQueuedBehind || "已加入队列，前面还有"} ${queuePosition - 1} ${t.auditQueuedUnit || "个任务"}`
+        )
+      }
       if (nextDocumentId) {
         setDocumentId(nextDocumentId)
         loadContractPreview(nextDocumentId)
@@ -1294,6 +1338,30 @@ export default function App() {
                   {t.auditBackgroundTracking}: {String(activeAuditId).slice(0, 8)}
                 </div>
               )}
+            </div>
+          )}
+          {(auditQueue.queued.length > 0 || auditQueue.running.length > 0) && (
+            <div className="audit-progress audit-queue-panel">
+              <div className="audit-progress-head">
+                <span>{t.auditQueueTitle}</span>
+                <span>{auditQueue.queued.length}</span>
+              </div>
+              {auditQueue.running.map((item) => (
+                <div key={item.audit_id} className="audit-queue-item">
+                  <span className="audit-queue-name">{item.title || String(item.audit_id || "").slice(0, 8)}</span>
+                  <span className="audit-queue-state">{t.auditQueueRunning}</span>
+                </div>
+              ))}
+              {auditQueue.queued.map((item) => (
+                <div key={item.audit_id} className="audit-queue-item">
+                  <span className="audit-queue-name">
+                    {item.position}. {item.title || String(item.audit_id || "").slice(0, 8)}
+                  </span>
+                  <button type="button" onClick={() => onCancelQueuedAudit(item.audit_id)}>
+                    {t.auditQueueCancel}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
           {!contractLoading && idleServerAudits.length > 0 && (

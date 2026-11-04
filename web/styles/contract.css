@@ -147,6 +147,42 @@
   font-family: "JetBrains Mono", monospace;
 }
 
+/* 审计队列 */
+.audit-queue-panel {
+  gap: 6px;
+}
+
+.audit-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--progress-note);
+}
+
+.audit-queue-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audit-queue-state {
+  color: var(--muted);
+  font-family: "JetBrains Mono", monospace;
+  white-space: nowrap;
+}
+
+.audit-queue-item button {
+  border: 1px solid var(--progress-border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .contract-result {
   height: clamp(500px, 75vh, 920px);
   display: flex;
