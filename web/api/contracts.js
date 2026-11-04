@@ -106,3 +106,16 @@ export async function getContractSummary(documentId, language = "zh") {
     }
   )
 }
+
+export async function getAuditQueue() {
+  return requestJson(`${API_BASE}/contracts/audit/queue`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function cancelAuditQueueItem(auditId) {
+  return requestJson(`${API_BASE}/contracts/audit/queue/${auditId}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}

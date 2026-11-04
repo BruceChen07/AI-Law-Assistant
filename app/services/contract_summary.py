@@ -154,6 +154,24 @@ def _write_cache(path: str, payload: Dict[str, Any]) -> None:
         logger.warning("contract_summary_cache_write_failed path=%s", path)
 
 
+def lookup_cached_summary(cfg: Dict[str, Any], digest: str,
+                          lang: str) -> Optional[Dict[str, Any]]:
+    """只查缓存，不做文本抽取与模型调用。
+
+    队列会先用文件指纹生成摘要，接口据此快速返回；未命中时不触发重活，
+    由调用方决定是等待队列还是自己生成。
+    """
+    key = str(digest or "").strip()
+    if not key:
+        return None
+    cached = _read_cache(_cache_path(cfg, key, _norm_lang(lang)))
+    if not cached:
+        return None
+    result = dict(cached)
+    result.update({"enabled": True, "cache_hit": True, "status": "ok"})
+    return result
+
+
 def _clip(text: str, limit: int) -> str:
     value = str(text or "").strip()
     return value if len(value) <= limit else value[:limit].rstrip() + "……"

@@ -1,7 +1,6 @@
 import os
 import uuid
 import json
-import hashlib
 import logging
 import threading
 import zipfile
@@ -50,9 +49,9 @@ from app.services.export_filenames import (
     localized_export_suffix,
 )
 from app.services.audit_utils import _normalize_lang
-from app.core.utils import extract_text_with_config
+from app.core.utils import extract_text_with_config, file_digest
 from app.services.contract_audit import build_preview_clauses
-from app.services.contract_summary import build_contract_summary
+from app.services.contract_summary import build_contract_summary, lookup_cached_summary
 from app.core.config import get_config
 
 logger = logging.getLogger("law_assistant")
@@ -424,7 +423,7 @@ def build_router(cfg):
         )
         # P0: return immediately, run the audit in a background task. A client
         # timeout, closed tab or dropped connection can no longer abort it.
-        audit_task_runner.submit(
+        enqueue_result = audit_task_runner.enqueue(
             cfg=cfg,
             services=services,
             file_path=save_path,
@@ -433,6 +432,7 @@ def build_router(cfg):
             audit_id=audit_id,
             document_id=doc_id,
             user_id=current_user["id"],
+            title=title or os.path.basename(file.filename or ""),
         )
 
         return JSONResponse(
@@ -444,6 +444,8 @@ def build_router(cfg):
                 "stage": "auditing",
                 "progress": 20,
                 "mode": "async",
+                "queued": True,
+                "queue_position": int(enqueue_result.get("ahead") or 0) + 1,
             },
         )
 
@@ -496,7 +498,7 @@ def build_router(cfg):
             reranker=reranker,
             translator=translator,
         )
-        audit_task_runner.submit(
+        enqueue_result = audit_task_runner.enqueue(
             cfg=cfg,
             services=services,
             file_path=file_path,
@@ -505,6 +507,7 @@ def build_router(cfg):
             audit_id=audit_id,
             document_id=document_id,
             user_id=current_user["id"],
+            title=str(doc.get("original_filename") or ""),
         )
         return JSONResponse(
             status_code=202,
@@ -515,8 +518,34 @@ def build_router(cfg):
                 "stage": "auditing",
                 "progress": 5,
                 "mode": "async",
+                "queued": True,
+                "queue_position": int(enqueue_result.get("ahead") or 0) + 1,
             },
         )
+
+    @router.get("/contracts/audit/queue")
+    def get_contract_audit_queue(current_user: dict = Depends(get_current_user)):
+        """当前排队与执行中的审计（单 worker，FIFO）。"""
+        _ = current_user
+        return audit_task_runner.queue_snapshot()
+
+    @router.delete("/contracts/audit/queue/{audit_id}")
+    def cancel_contract_audit_queue(
+        audit_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        """取消排队中的审计；已开始执行的任务不允许取消。"""
+        _ = current_user
+        outcome = audit_task_runner.cancel(audit_id)
+        if outcome == "missing":
+            raise HTTPException(
+                status_code=404, detail="queued audit not found")
+        if outcome == "running":
+            raise HTTPException(
+                status_code=409,
+                detail="audit is already running and cannot be cancelled",
+            )
+        return {"audit_id": audit_id, "status": "cancelled"}
 
     @router.get("/contracts/audit/{audit_id}/progress")
     def get_contract_audit_progress(audit_id: str, current_user: dict = Depends(get_current_user)):
@@ -1151,41 +1180,70 @@ def build_router(cfg):
                 "filename") or f"{document_id}"
         ).strip()
         norm_lang = _normalize_lang(str(language or "zh"), default="zh")
+        cache_key = file_digest(file_path)
+        preview_clauses = []
+        summary_result = lookup_cached_summary(cfg, cache_key, norm_lang)
 
-        try:
-            text, meta = extract_text_with_config(cfg, file_path)
-            preview_clauses = build_preview_clauses(text)
-            source_sha256 = hashlib.sha256(
-                str(text or "").encode("utf-8")).hexdigest()
-            summary_result = build_contract_summary(
-                cfg,
-                llm,
-                text,
-                norm_lang,
-                page_count=int(meta.get("page_count") or 0),
-                clause_count=len(preview_clauses),
-                source_filename=source_filename,
-                document_id=document_id,
-                source_sha256=source_sha256,
-            )
-        except Exception as exc:
-            logger.exception(
-                "contract_summary_endpoint_failed document_id=%s file=%s",
-                document_id,
-                file_path,
-            )
-            summary_result = {
-                "enabled": bool(cfg.get("contract_summary_enabled", True)),
-                "title": "",
-                "about": "",
-                "core": "",
-                "tax": "",
-                "source_file": source_filename,
-                "status": "error",
-                "source": "error",
-                "error": str(exc),
+        if summary_result is None and audit_task_runner.has_active_document(document_id):
+            # 该文档正在队列里跑「摘要优先」阶段：接口立即返回 pending，前端轮询。
+            return {
+                "document_id": document_id,
+                "summary": {
+                    "title": "",
+                    "about": "",
+                    "core": "",
+                    "tax": "",
+                    "source_file": source_filename,
+                },
+                "meta": {
+                    "contract_summary_enabled": bool(cfg.get("contract_summary_enabled", True)),
+                    "contract_summary_status": "pending",
+                    "contract_summary_chars": 0,
+                    "contract_summary_source": "queue",
+                    "contract_summary_error": "",
+                    "contract_summary_language": norm_lang,
+                    "contract_summary_truncated": False,
+                    "contract_summary_source_chars": 0,
+                    "contract_summary_cache_hit": False,
+                    "contract_summary_map_reduce": False,
+                    "contract_summary_map_chunks": 0,
+                    "preview_clause_total": 0,
+                },
             }
-            preview_clauses = []
+
+        if summary_result is None:
+            try:
+                text, meta = extract_text_with_config(cfg, file_path)
+                preview_clauses = build_preview_clauses(text)
+                summary_result = build_contract_summary(
+                    cfg,
+                    llm,
+                    text,
+                    norm_lang,
+                    page_count=int(meta.get("page_count") or 0),
+                    clause_count=len(preview_clauses),
+                    source_filename=source_filename,
+                    document_id=document_id,
+                    source_sha256=cache_key,
+                )
+            except Exception as exc:
+                logger.exception(
+                    "contract_summary_endpoint_failed document_id=%s file=%s",
+                    document_id,
+                    file_path,
+                )
+                summary_result = {
+                    "enabled": bool(cfg.get("contract_summary_enabled", True)),
+                    "title": "",
+                    "about": "",
+                    "core": "",
+                    "tax": "",
+                    "source_file": source_filename,
+                    "status": "error",
+                    "source": "error",
+                    "error": str(exc),
+                }
+                preview_clauses = []
 
         summary_payload = {
             "title": str(summary_result.get("title") or "").strip(),

@@ -152,6 +152,11 @@ def _file_digest(path: str) -> str:
         return ""
 
 
+def file_digest(path: str) -> str:
+    """文件内容的 sha256（用于摘要/抽取缓存键）。"""
+    return _file_digest(path)
+
+
 def _text_cache_path(cfg: Dict[str, Any], digest: str) -> str:
     data_dir = str(cfg.get("data_dir") or "data")
     return os.path.join(data_dir, "memory", "text_cache", digest[:2], f"{digest}.json")

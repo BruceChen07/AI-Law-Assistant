@@ -11,7 +11,7 @@ import json
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import structlog
 
@@ -26,7 +26,10 @@ from app.services.crud import (
 logger = structlog.get_logger(__name__)
 
 _running: Dict[str, Dict[str, Any]] = {}
+_pending: List[Dict[str, Any]] = []
 _lock = threading.Lock()
+_cond = threading.Condition(_lock)
+_worker_started = False
 
 # Small subset of the audit meta the UI needs to restore a finished task.
 _RESULT_META_KEYS = (
@@ -68,6 +71,19 @@ def is_audit_running(audit_id: str) -> bool:
         return str(audit_id or "") in _running
 
 
+def has_active_document(document_id: str) -> bool:
+    """该文档是否有排队中或执行中的审计（用于摘要接口快速返回 pending）。"""
+    target = str(document_id or "")
+    if not target:
+        return False
+    with _lock:
+        if any(str(item.get("document_id") or "") == target
+               for item in _running.values()):
+            return True
+        return any(str(job.get("document_id") or "") == target
+                   for job in _pending)
+
+
 def _record_progress(
     cfg: Dict[str, Any],
     audit_id: str,
@@ -95,7 +111,97 @@ def _record_progress(
                        audit_id=audit_id, error=str(exc))
 
 
-def submit(
+def _ensure_worker_locked() -> None:
+    global _worker_started
+    if _worker_started:
+        return
+    _worker_started = True
+    threading.Thread(
+        target=_worker_loop,
+        name="audit-queue-worker",
+        daemon=True,
+    ).start()
+
+
+def _generate_summary_before_audit(job: Dict[str, Any]) -> None:
+    """审计前先生成合同摘要，让用户先看到「合同讲什么」。
+
+    摘要失败不影响审计；摘要结果写入缓存，接口据此可秒回。
+    """
+    cfg = job.get("cfg") or {}
+    if not bool(cfg.get("contract_summary_enabled", True)):
+        return
+    services = job.get("services")
+    llm = getattr(services, "llm", None)
+    file_path = str(job.get("file_path") or "")
+    if llm is None or not file_path:
+        return
+    audit_id = str(job.get("audit_id") or "")
+    try:
+        from app.core.utils import extract_text_with_config, file_digest
+        from app.services.contract_summary import build_contract_summary
+
+        text, meta = extract_text_with_config(cfg, file_path)
+        build_contract_summary(
+            cfg,
+            llm,
+            text,
+            str(job.get("lang") or "zh"),
+            page_count=int((meta or {}).get("page_count") or 0),
+            source_filename=str(job.get("title") or ""),
+            document_id=str(job.get("document_id") or ""),
+            source_sha256=file_digest(file_path),
+        )
+    except Exception:
+        logger.warning("audit_queue_summary_failed", audit_id=audit_id)
+
+
+def _worker_loop() -> None:
+    while True:
+        with _cond:
+            while not _pending:
+                _cond.wait()
+            job = _pending.pop(0)
+        audit_id = str(job.get("audit_id") or "")
+        with _lock:
+            _running[audit_id] = {
+                "audit_id": audit_id,
+                "document_id": str(job.get("document_id") or ""),
+                "title": str(job.get("title") or ""),
+                "started_at": _utc_now_iso(),
+            }
+        _record_progress(
+            job["cfg"], audit_id,
+            status="running", stage="summarizing", percent=2,
+            message="generating contract summary",
+            document_id=str(job.get("document_id") or "") or None,
+        )
+        # 摘要优先：先出摘要，再进入审计流水线。
+        _generate_summary_before_audit(job)
+        _record_progress(
+            job["cfg"], audit_id,
+            status="running", stage="starting", percent=4,
+            message="audit started",
+            document_id=str(job.get("document_id") or "") or None,
+        )
+        try:
+            # 只传 _run 认识的参数；job 里还带 title 等展示用字段。
+            _run(**{
+                key: job[key]
+                for key in (
+                    "cfg", "services", "file_path", "lang",
+                    "retrieval_options", "audit_id", "document_id",
+                    "user_id", "on_finish",
+                )
+            })
+        except Exception:  # pragma: no cover - worker must survive any job
+            logger.exception("audit_queue_worker_failed", audit_id=audit_id)
+        finally:
+            with _lock:
+                _running.pop(audit_id, None)
+
+
+def enqueue(
     *,
     cfg: Dict[str, Any],
     services: Any,
@@ -106,37 +212,97 @@ def submit(
     document_id: str,
     user_id: str = "",
     on_finish: Optional[Callable[[str, Dict[str, Any]], None]] = None,
-) -> None:
-    """Start the audit in a daemon thread and return immediately."""
-    started_at = _utc_now_iso()
-    with _lock:
-        _running[audit_id] = {
-            "audit_id": audit_id,
-            "document_id": document_id,
-            "started_at": started_at,
-        }
+    title: str = "",
+) -> Dict[str, Any]:
+    """把审计加入 FIFO 队列；空闲时由唯一的工作线程立即执行。
 
-    thread = threading.Thread(
-        target=_run,
-        name=f"contract-audit-{audit_id[:8]}",
-        daemon=True,
-        kwargs={
-            "cfg": cfg,
-            "services": services,
-            "file_path": file_path,
-            "lang": lang,
-            "retrieval_options": retrieval_options,
-            "audit_id": audit_id,
-            "document_id": document_id,
-            "user_id": user_id,
-            "on_finish": on_finish,
-        },
+    同一时刻只跑一个审计，避免多个任务争抢同一个 llama.cpp 槽位。
+    """
+    job = {
+        "cfg": cfg,
+        "services": services,
+        "file_path": file_path,
+        "lang": lang,
+        "retrieval_options": retrieval_options,
+        "audit_id": audit_id,
+        "document_id": document_id,
+        "user_id": user_id,
+        "on_finish": on_finish,
+        "title": title,
+    }
+    with _cond:
+        _pending.append(job)
+        position = len(_pending)
+        running_count = len(_running)
+        _ensure_worker_locked()
+        _cond.notify()
+    # ahead：前面还有几个任务（含正在执行的那个），用于前端提示“前面还有 N 个”。
+    ahead = (1 if running_count else 0) + (position - 1)
+    _record_progress(
+        cfg, audit_id,
+        status="queued", stage="queued", percent=0,
+        message=f"waiting in queue (position {position})",
+        detail={"position": position, "ahead": ahead},
+        document_id=document_id or None,
     )
-    thread.start()
-    logger.info(
-        "audit_task_submitted audit_id=%s document_id=%s file=%s",
-        audit_id, document_id, file_path,
+    logger.info("audit_task_enqueued", audit_id=audit_id,
+                position=position, ahead=ahead)
+    return {
+        "audit_id": audit_id,
+        "position": position,
+        "ahead": ahead,
+        "queued": True,
+    }
+
+
+def submit(**kwargs: Any) -> Dict[str, Any]:
+    """兼容旧调用：等价于 enqueue。"""
+    return enqueue(**kwargs)
+
+
+def queue_snapshot() -> Dict[str, Any]:
+    with _lock:
+        queued = [
+            {
+                "audit_id": str(job.get("audit_id") or ""),
+                "document_id": str(job.get("document_id") or ""),
+                "title": str(job.get("title") or ""),
+                "position": index + 1,
+            }
+            for index, job in enumerate(_pending)
+        ]
+        running = [dict(item) for item in _running.values()]
+    return {
+        "running": running,
+        "queued": queued,
+        "running_count": len(running),
+        "queued_count": len(queued),
+    }
+
+
+def cancel(audit_id: str) -> str:
+    """取消排队中的任务；已开始执行的不允许取消。"""
+    target = str(audit_id or "")
+    with _lock:
+        if target in _running:
+            return "running"
+        for index, job in enumerate(_pending):
+            if str(job.get("audit_id") or "") == target:
+                _pending.pop(index)
+                cfg = job.get("cfg") or {}
+                document_id = str(job.get("document_id") or "")
+                break
+        else:
+            return "missing"
+    _record_progress(
+        cfg, target,
+        status="cancelled", stage="cancelled", percent=100,
+        message="cancelled by user",
+        detail={"cancelled": True},
+        document_id=document_id or None,
     )
+    logger.info("audit_task_cancelled", audit_id=target)
+    return "cancelled"
 
 
 def _run(
