@@ -39,11 +39,11 @@
     "ocr_dpi": 220,
     "ocr_engine": "auto",
     "ocr_engine_order": [
-        "tesseract",
-        "mineru"
+        "mineru",
+        "tesseract"
     ],
     "ocr_engine_by_type": {
-        "pdf": "tesseract"
+        "pdf": "mineru"
     },
     "ocr_engines": {
         "mineru": {
@@ -63,7 +63,9 @@
         "device": "cpu",
         "formula": true,
         "table": true,
-        "model_source": "local_files",
+        "model_source": "local",
+        "local_models_dir": "../models/mineru",
+        "local_config_path": "",
         "timeout": 900
     },
     "llm_config": {
