@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "generator": "generate_synthetic_fixtures.py",
+  "samples": [
+    {
+      "sample_id": "synthetic-fragmented-797",
+      "type": "txt",
+      "language": "zh",
+      "pages": 1,
+      "expected_source_spans": 797,
+      "expected_risks": [],
+      "authorization_ref": "synthetic-generated",
+      "path": "fragmented_797.txt",
+      "sha256": "4137583e56edbebafae89f764bc64f553f0476030ac568d0ab79d53a71f0179c",
+      "bytes": 22897
+    },
+    {
+      "sample_id": "synthetic-oversized-clause",
+      "type": "txt",
+      "language": "zh",
+      "pages": 1,
+      "expected_source_spans": 1,
+      "expected_risks": [],
+      "authorization_ref": "synthetic-generated",
+      "path": "oversized_clause.txt",
+      "sha256": "096caef2698c62e57c268d04100d6739dd5ead04d8bcb7c5295243f639202cd6",
+      "bytes": 94844
+    },
+    {
+      "sample_id": "synthetic-tail-tax-risk",
+      "type": "txt",
+      "language": "zh",
+      "pages": 1,
+      "expected_source_spans": 80,
+      "expected_risks": [
+        {
+          "risk_category": "vat_rate_mismatch",
+          "marker": "按6%开具服务发票"
+        }
+      ],
+      "authorization_ref": "synthetic-generated",
+      "path": "tail_tax_risk.txt",
+      "sha256": "461c0356155e359d32049c230b143d1ec33ad296887260fbf724720b6d8d3ca7",
+      "bytes": 2518
+    }
+  ]
+}
