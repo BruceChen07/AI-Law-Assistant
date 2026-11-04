@@ -96,3 +96,8 @@ data/files/contract_reports/
 data/files/tax_audit_reports/
 data/files/contract_markdown/
 
+
+# Downloaded model weights (large binaries)
+models/bge-reranker-base/
+models/bge-small-en-v1.5/
+models/bge-small-zh-v1.5/
