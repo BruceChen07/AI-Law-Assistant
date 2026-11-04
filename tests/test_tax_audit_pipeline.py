@@ -9,6 +9,14 @@ from app.core.database import init_db
 
 client = TestClient(app)
 
+# This is an end-to-end flow against the real app, real database and the real local
+# model (it can take minutes). Keep it opt-in so the default suite stays fast and
+# deterministic; run it explicitly with RUN_TAX_AUDIT_E2E=1.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("RUN_TAX_AUDIT_E2E") != "1",
+    reason="set RUN_TAX_AUDIT_E2E=1 to run the end-to-end tax audit pipeline",
+)
+
 
 @pytest.fixture(scope="module")
 def setup_test_env():
@@ -18,15 +26,23 @@ def setup_test_env():
     # 初始化数据库
     init_db(cfg)
 
-    # 模拟登录获取 token
+    # 使用专用的测试管理员，避免依赖 bootstrap 密码，也不改动真实账号
+    from app.core.auth import create_user, get_user_by_username
+
+    test_username = "tax_pipeline_e2e_admin"
+    test_password = "tax_pipeline_e2e_password"
+    if not get_user_by_username(test_username):
+        create_user(
+            test_username,
+            f"{test_username}@example.com",
+            test_password,
+            role="admin",
+        )
     login_resp = client.post(
-        "/api/auth/login", json={"username": "admin", "password": "adminpassword"})
-    if login_resp.status_code != 200:
-        # 如果admin不存在，先注册一个
-        client.post("/api/auth/register", json={"username": "admin",
-                    "password": "adminpassword", "email": "admin@example.com"})
-        login_resp = client.post(
-            "/api/auth/login", json={"username": "admin", "password": "adminpassword"})
+        "/api/auth/login",
+        json={"username": test_username, "password": test_password},
+    )
+    assert login_resp.status_code == 200, login_resp.text
 
     token = login_resp.json().get("access_token")
     headers = {"Authorization": f"Bearer {token}"}
