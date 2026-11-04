@@ -2,12 +2,6 @@ import os
 import json
 import uuid
 import pytest
-from fastapi.testclient import TestClient
-from app.main import app
-from app.core.config import get_config
-from app.core.database import init_db
-
-client = TestClient(app)
 
 # This is an end-to-end flow against the real app, real database and the real local
 # model (it can take minutes). Keep it opt-in so the default suite stays fast and
@@ -20,6 +14,16 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture(scope="module")
 def setup_test_env():
+    # Build the app/client lazily: importing app.main at module import time would
+    # spin up the real application (and its native services) even when this
+    # end-to-end test is skipped.
+    from fastapi.testclient import TestClient
+
+    from app.core.config import get_config
+    from app.core.database import init_db
+    from app.main import app
+
+    client = TestClient(app)
     # 确保存放测试文件的目录存在
     cfg = get_config()
     os.makedirs(cfg.get("files_dir", "data/files"), exist_ok=True)
