@@ -99,7 +99,7 @@ def main():
         cfg_path = resolve_path(app_dir, args.config_path)
         cfg_base_dir = os.path.dirname(cfg_path)
         if os.path.exists(cfg_path):
-            with open(cfg_path, "r", encoding="utf-8") as f:
+            with open(cfg_path, "r", encoding="utf-8-sig") as f:
                 cfg = json.load(f)
             if args.reranker:
                 cfg["reranker_model_path"] = os.path.relpath(

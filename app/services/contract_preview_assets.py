@@ -181,7 +181,7 @@ def _extract_pdf_text_blocks(file_path: str, max_pages: int) -> Tuple[Dict[int, 
 def _load_json(path: str) -> Any:
     if not path or not os.path.exists(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 
@@ -613,7 +613,7 @@ def build_contract_preview_manifest(cfg: Dict[str, Any], document_id: str, file_
 
     if os.path.exists(manifest_path):
         try:
-            with open(manifest_path, "r", encoding="utf-8") as f:
+            with open(manifest_path, "r", encoding="utf-8-sig") as f:
                 cached = json.load(f)
             same = (
                 str(cached.get("file_signature") or "") == signature

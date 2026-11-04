@@ -88,7 +88,8 @@ def _read_config(repo_root: Path) -> dict | None:
         "APP_CONFIG", str(repo_root / "app" / "config.json"))
     if not os.path.exists(config_path):
         return None
-    with open(config_path, "r", encoding="utf-8") as f:
+    # utf-8-sig：容忍 Windows 编辑器写入的 BOM，否则 json 解析会直接失败。
+    with open(config_path, "r", encoding="utf-8-sig") as f:
         return json.load(f)
 
 

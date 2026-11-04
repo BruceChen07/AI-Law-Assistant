@@ -121,7 +121,7 @@ def _create_test_config() -> str:
         print(f"[ERROR] Production config not found: {prod}")
         sys.exit(1)
 
-    with open(prod, "r", encoding="utf-8") as fh:
+    with open(prod, "r", encoding="utf-8-sig") as fh:
         cfg = json.load(fh)
 
     model_name = DEFAULTS["model_filename"]

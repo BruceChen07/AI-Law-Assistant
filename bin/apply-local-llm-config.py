@@ -174,7 +174,7 @@ def main() -> int:
     print("=== Apply Local LLM Config ===")
     print(f"Config: {config_path}")
 
-    with config_path.open("r", encoding="utf-8") as file_obj:
+    with config_path.open("r", encoding="utf-8-sig") as file_obj:
         config = json.load(file_obj)
 
     previous_enabled = None

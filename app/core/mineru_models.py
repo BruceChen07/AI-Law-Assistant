@@ -242,7 +242,7 @@ def _load_manifest(root: str) -> Dict[str, Any]:
     if not os.path.exists(path):
         return {}
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, "r", encoding="utf-8-sig") as fh:
             data = json.load(fh)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
@@ -366,7 +366,7 @@ def write_mineru_config(cfg: Optional[Dict[str, Any]] = None,
     payload = _mineru_config_payload(models_root)
     if os.path.exists(config_path):
         try:
-            with open(config_path, "r", encoding="utf-8") as fh:
+            with open(config_path, "r", encoding="utf-8-sig") as fh:
                 existing = json.load(fh)
             if existing == payload:
                 return config_path

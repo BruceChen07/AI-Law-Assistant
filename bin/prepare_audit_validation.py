@@ -87,7 +87,7 @@ def prepare_environment(
     if not output_dir.is_absolute():
         raise ValueError("output-dir must be an absolute path")
 
-    with source_config.open("r", encoding="utf-8") as handle:
+    with source_config.open("r", encoding="utf-8-sig") as handle:
         source = json.load(handle)
     production_data = _resolve_config_value(source_config, source.get("data_dir"))
     output_dir = output_dir.resolve()

@@ -18,7 +18,7 @@ def resolve_config_item_path(value: str, base_dir: Path) -> Path | None:
 
 
 def load_config(config_path: Path) -> dict:
-    with config_path.open("r", encoding="utf-8") as file_obj:
+    with config_path.open("r", encoding="utf-8-sig") as file_obj:
         return json.load(file_obj)
 
 

@@ -74,7 +74,7 @@ def _probe_endpoint(name: str, url: str, timeout: int) -> dict:
 
 
 def _load_config(config_path: Path) -> dict:
-    with config_path.open("r", encoding="utf-8") as file_obj:
+    with config_path.open("r", encoding="utf-8-sig") as file_obj:
         return json.load(file_obj)
 
 

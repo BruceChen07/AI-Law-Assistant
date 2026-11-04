@@ -71,6 +71,16 @@ def _normalize_paths(cfg: dict, base_dir: str):
     return normalized
 
 
+def _read_json_config(path: str) -> dict:
+    """读取 JSON 配置，容忍 Windows 编辑器写入的 UTF-8 BOM。
+
+    记事本等工具保存 UTF-8 时会加 BOM，``encoding="utf-8"`` 会让 json 解析
+    直接失败（``Unexpected UTF-8 BOM``）。``utf-8-sig`` 在无 BOM 时行为一致。
+    """
+    with open(path, "r", encoding="utf-8-sig") as f:
+        return json.load(f)
+
+
 @lru_cache()
 def load_config(base_dir: str = None):
     if base_dir is None:
@@ -80,14 +90,12 @@ def load_config(base_dir: str = None):
     if not os.path.exists(config_path):
         alt = os.path.join(base_dir, "config.example.json")
         if os.path.exists(alt):
-            with open(alt, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                return _normalize_paths(cfg, os.path.dirname(os.path.abspath(alt)))
+            cfg = _read_json_config(alt)
+            return _normalize_paths(cfg, os.path.dirname(os.path.abspath(alt)))
         raise RuntimeError(
             f"config.json not found at {config_path} and no example at {alt}")
-    with open(config_path, "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-        return _normalize_paths(cfg, os.path.dirname(os.path.abspath(config_path)))
+    cfg = _read_json_config(config_path)
+    return _normalize_paths(cfg, os.path.dirname(os.path.abspath(config_path)))
 
 
 def get_config(base_dir: str = None):
@@ -118,7 +126,7 @@ def update_config_patch(patch: dict, base_dir: str = None) -> dict:
     path = get_config_path(base_dir)
     if not os.path.exists(path):
         raise RuntimeError(f"config.json not found at {path}")
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r", encoding="utf-8-sig") as f:
         cfg = json.load(f)
     for k, v in patch.items():
         cfg[k] = v
