@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from app.core.llm_admission import admission_slot
 from app.core.token_utils import estimate_messages_tokens
 from app.core.llm_router import resolve_llm_route
 from app.core.llm_trace import LlmTraceCollector, get_trace_collector
@@ -436,6 +437,8 @@ class LLMService:
                     error_message=str(e))
             raise
         except httpx.ReadError as e:
+            if cfg.get("implicit_retry_enabled") is False:
+                raise
             logger.warning(
                 "ollama_request_read_retry url=%s model=%s timeout=%s err=%s",
                 request_url,
@@ -456,6 +459,8 @@ class LLMService:
                     f"ollama request failed after read retry: {str(e2)}"
                 ) from e2
         except httpx.TimeoutException:
+            if cfg.get("implicit_retry_enabled") is False:
+                raise
             # ---- first retry: extended timeout + reduced max_tokens ----
             if trace_span and trace_collector:
                 trace_collector.record_error(
@@ -575,6 +580,8 @@ class LLMService:
             raw = self._post_json(request_url, request_body,
                                   request_headers, timeout)
         except httpx.TimeoutException as e:
+            if cfg.get("implicit_retry_enabled") is False:
+                raise
             retry_timeout = max(timeout, int(cfg.get("timeout_retry", 240)))
             retry_max_tokens = max(220, min(max_tokens, int(max_tokens * 0.6)))
             retry_body = self._build_openai_compatible_body(
@@ -759,31 +766,41 @@ class LLMService:
             len(messages)
         )
         try:
-            if provider == "ollama":
-                content, parsed = self._chat_via_ollama(
-                    api_base,
-                    model,
-                    messages,
-                    temperature,
-                    max_tokens,
-                    timeout,
-                    cfg,
-                    extra_headers,
-                    trace_span=trace_span,
-                    trace_collector=trace_collector,
-                )
-            else:
-                content, parsed = self._chat_via_openai_compatible(
-                    api_base,
-                    model,
-                    messages,
-                    temperature,
-                    max_tokens,
-                    timeout,
-                    cfg,
-                    api_key,
-                    extra_headers,
-                )
+            admission_timeout = float(
+                cfg.get("admission_timeout_sec")
+                if cfg.get("admission_timeout_sec") is not None
+                else timeout
+            )
+            with admission_slot(
+                api_base,
+                timeout_seconds=admission_timeout,
+                capacity=1,
+            ):
+                if provider == "ollama":
+                    content, parsed = self._chat_via_ollama(
+                        api_base,
+                        model,
+                        messages,
+                        temperature,
+                        max_tokens,
+                        timeout,
+                        cfg,
+                        extra_headers,
+                        trace_span=trace_span,
+                        trace_collector=trace_collector,
+                    )
+                else:
+                    content, parsed = self._chat_via_openai_compatible(
+                        api_base,
+                        model,
+                        messages,
+                        temperature,
+                        max_tokens,
+                        timeout,
+                        cfg,
+                        api_key,
+                        extra_headers,
+                    )
         except Exception as e:
             logger.exception(
                 "llm_request_failed provider=%s api_base=%s base_url=%s model=%s timeout=%s raw_api_base=%r api_key=%s headers=%s",
