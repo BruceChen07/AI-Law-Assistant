@@ -1,16 +1,63 @@
-import { API_BASE, getAuthHeaders, getContractAuditTimeoutMs, requestBlob, requestJson } from "./base"
+import { API_BASE, getAuthHeaders, getLongRequestTimeoutMs, isTransportError, requestBlob, requestJson } from "./base"
+
+export { isTransportError }
 
 export async function auditContract(formData) {
+  // Submission only registers a background task, so this stays a short request.
   return requestJson(`${API_BASE}/contracts/audit`, {
     method: "POST",
     body: formData,
     headers: { ...getAuthHeaders() },
-    timeoutMs: getContractAuditTimeoutMs()
+    timeoutMs: getLongRequestTimeoutMs(120)
+  })
+}
+
+export async function getAuditHistory({ limit = 30, offset = 0, status = "" } = {}) {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset),
+    status: String(status || "")
+  }).toString()
+  return requestJson(`${API_BASE}/contracts/audits/history?${query}`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function getAuditArtifacts(auditId) {
+  return requestJson(`${API_BASE}/contracts/audits/${auditId}/artifacts`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function rebuildAuditArtifacts(auditId) {
+  return requestJson(`${API_BASE}/contracts/audits/${auditId}/artifacts/rebuild`, {
+    method: "POST",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function downloadAuditArtifact(auditId, name) {
+  return requestBlob(`${API_BASE}/contracts/audits/${auditId}/artifacts/${name}`, {
+    headers: { ...getAuthHeaders() },
+    returnResponseMeta: true
+  })
+}
+
+export async function getRunningAudits(limit = 20) {
+  const query = new URLSearchParams({ limit: String(limit) }).toString()
+  return requestJson(`${API_BASE}/contracts/audits/running?${query}`, {
+    headers: { ...getAuthHeaders() }
   })
 }
 
 export async function getAuditProgress(auditId) {
   return requestJson(`${API_BASE}/contracts/audit/${auditId}/progress`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function getAuditTask(auditId) {
+  return requestJson(`${API_BASE}/contracts/audit/${auditId}/task`, {
     headers: { ...getAuthHeaders() }
   })
 }

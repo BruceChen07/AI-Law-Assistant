@@ -59,7 +59,7 @@ def test_export_commented_original_uses_final_report_risk_items(tmp_path, monkey
             )
         }
 
-    def fake_insert(input_path, output_path, risks):
+    def fake_insert(input_path, output_path, risks, locale=None):
         captured["input_path"] = input_path
         captured["output_path"] = output_path
         captured["risks"] = list(risks)

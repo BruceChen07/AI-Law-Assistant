@@ -1,7 +1,7 @@
 export let API_BASE = import.meta.env.VITE_API_BASE || ""
 const API_REQUEST_TIMEOUT_MS = 8000
 const API_LONG_REQUEST_TIMEOUT_MS = 15 * 60 * 1000
-const API_CONTRACT_AUDIT_TIMEOUT_MS = 60 * 60 * 1000
+const API_CONTRACT_AUDIT_TIMEOUT_MS = 90 * 60 * 1000
 
 function dedupe(items) {
   return [...new Set(items.filter(Boolean))]
@@ -68,8 +68,17 @@ async function fetchWithTimeout(url, options = {}) {
   }
 }
 
+function isIdempotentMethod(method) {
+  const m = String(method || "GET").toUpperCase()
+  return m === "GET" || m === "HEAD" || m === "OPTIONS"
+}
+
 async function requestWithFallback(url, options = {}) {
   const attemptUrls = buildCandidateUrls(url)
+  // Non-idempotent requests (audit submission) must never be replayed against a
+  // second base URL: a dropped connection does not mean the server did nothing,
+  // and replaying would start a second audit for the same contract.
+  const idempotent = isIdempotentMethod(options && options.method)
   let lastError = null
   for (const attemptUrl of attemptUrls) {
     try {
@@ -86,10 +95,23 @@ async function requestWithFallback(url, options = {}) {
       if (err?.name === "RequestTimeoutError") {
         throw err
       }
+      if (!idempotent) {
+        if (err && typeof err === "object") err.transport = true
+        throw err
+      }
       lastError = err
     }
   }
   throw lastError || new Error("request failed")
+}
+
+export function isTransportError(err) {
+  if (!err) return false
+  return (
+    err.transport === true ||
+    err.name === "RequestTimeoutError" ||
+    err.name === "AbortError"
+  )
 }
 
 export function getToken() {
@@ -118,7 +140,9 @@ export async function ensureOk(res) {
   } catch {
     message = text
   }
-  throw new Error(message)
+  const error = new Error(message)
+  error.status = Number(res.status) || 0
+  throw error
 }
 
 export async function requestJson(url, options) {

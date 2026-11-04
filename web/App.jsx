@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, exportContractReport, getAuditProgress, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { auditContract, exportContractReport, getAuditProgress, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
+import History from "./History"
 import { appI18n } from "./i18n/appI18n"
 
 const THEME_STORAGE_KEY = "ui_theme"
 const APP_LANG_STORAGE_KEY = "ui_lang"
+const ACTIVE_AUDIT_STORAGE_KEY = "active_contract_audit_id"
 const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
 const normalizeAppLang = (value) => (String(value || "").toLowerCase() === "en" ? "en" : "zh")
-const normalizeView = (value) => (String(value || "").toLowerCase() === "admin" ? "admin" : "main")
+const VIEWS = new Set(["main", "admin", "history"])
+const normalizeView = (value) => {
+  const next = String(value || "").toLowerCase()
+  return VIEWS.has(next) ? next : "main"
+}
 
 const readRouteFromHash = () => {
   if (typeof window === "undefined") return { view: "main", adminTab: "documents" }
@@ -26,7 +32,7 @@ const writeRouteToHash = (view, adminTab = "documents") => {
   if (typeof window === "undefined") return
   const nextView = normalizeView(view)
   const nextTab = ADMIN_TABS.has(adminTab) ? adminTab : "documents"
-  const nextHash = nextView === "admin" ? `#admin/${nextTab}` : "#main"
+  const nextHash = nextView === "admin" ? `#admin/${nextTab}` : (nextView === "history" ? "#history" : "#main")
   if (window.location.hash === nextHash) return
   window.history.replaceState(null, "", nextHash)
 }
@@ -92,6 +98,7 @@ export default function App() {
   const [contractMeta, setContractMeta] = useState(null)
   const [showEvidence, setShowEvidence] = useState(false)
   const [documentId, setDocumentId] = useState("")
+  const [documentFilename, setDocumentFilename] = useState("")
   const [uiConfig, setUiConfig] = useState({ showCitationSource: false, defaultTheme: "dark", previewContinuousEnabled: true })
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState("")
@@ -114,6 +121,8 @@ export default function App() {
   const [contractProgressStage, setContractProgressStage] = useState("working")
   const [contractProgressMessage, setContractProgressMessage] = useState("")
   const [contractProgressDetail, setContractProgressDetail] = useState(null)
+  const [activeAuditId, setActiveAuditId] = useState("")
+  const [serverRunningAudits, setServerRunningAudits] = useState([])
   const [exportingFormat, setExportingFormat] = useState("")
   const [exportError, setExportError] = useState("")
   const previewScrollRef = useRef(null)
@@ -128,6 +137,7 @@ export default function App() {
   const previewFailedPagesRef = useRef({})
   const previewLoadingPagesRef = useRef({})
   const auditProgressTimerRef = useRef(null)
+  const auditTaskIdRef = useRef("")
 
   const t = appI18n[uiLang] || appI18n.zh
   const fileInputRef = useRef(null)
@@ -183,12 +193,27 @@ export default function App() {
     if (!name) return ""
     return name.replace(/\.[^.]+$/, "")
   }
+  const sanitizeExportStem = (value) => {
+    const raw = String(value || "")
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_")
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_")
+      .replace(/\.[^.]+$/, "")
+      .replace(/^[\s._]+|[\s._]+$/g, "")
+    return raw.slice(0, 80)
+  }
+
   const buildExportFallbackName = (format, mode = "report") => {
     const ext = String(format || "json").toLowerCase() === "docx" ? "docx" : "json"
+    const isZh = String(uiLang || "zh").toLowerCase().startsWith("zh")
     const sourceName = String(
-      contractResult?.overview?.contract_filename || contractFile?.name || contract?.title || "contract"
+      documentFilename ||
+      contractResult?.overview?.contract_filename ||
+      contractFile?.name ||
+      contract?.title ||
+      ""
     ).trim()
-    const baseName = toContractTitle(sourceName) || "contract"
+    const baseName = sanitizeExportStem(sourceName) || (isZh ? "合同" : "contract")
     const now = new Date()
     const pad = (value) => String(value).padStart(2, "0")
     const timestamp = [
@@ -200,8 +225,11 @@ export default function App() {
       pad(now.getMinutes()),
       pad(now.getSeconds())
     ].join("")
-    const suffix = mode === "comments" ? "contract_with_comments" : "contract_audit_report"
-    return `${baseName}_${timestamp}_${suffix}.${ext}`
+    const kind = mode === "comments" ? "comments" : (ext === "json" ? "data" : "report")
+    const labels = isZh
+      ? { report: "审计报告", data: "审计数据", comments: "批注版" }
+      : { report: "audit_report", data: "audit_data", comments: "commented" }
+    return `${baseName}_${timestamp}_${labels[kind]}.${ext}`
   }
   const riskList = useMemo(() => (
     Array.isArray(contractResult?.risks) ? contractResult.risks : []
@@ -221,15 +249,24 @@ export default function App() {
     return riskList.filter((risk) => String(risk?.level || "").toLowerCase() === riskFilter)
   }, [riskList, riskFilter])
   const summaryText = String(contractResult?.summary || "").trim()
+  const normalizedProgressStage = {
+    received: "uploading",
+    saved: "uploading",
+    document: "uploading",
+    extract_done: "extracting",
+    retrieval_done: "retrieval",
+    audit_done: "finalizing"
+  }[contractProgressStage] || contractProgressStage
   const progressStageText = {
     uploading: t.progressUploading,
     extracting: t.progressExtracting,
     retrieval: t.progressRetrieval,
     auditing: t.progressAuditing,
+    finalizing: t.progressFinalizing,
     done: t.progressDone,
     failed: t.progressFailed,
     working: t.progressWorking
-  }[contractProgressStage] || t.progressWorking
+  }[normalizedProgressStage] || contractProgressMessage || t.progressWorking
   const llmProgressText = useMemo(() => {
     const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
     if (!detail) return ""
@@ -251,7 +288,10 @@ export default function App() {
     if (executionLabel) chunks.push(executionLabel)
     return chunks.join(" · ")
   }, [contractProgressDetail, t])
-  const showAuditProgress = contractLoading || contractProgressStage === "failed"
+  const showAuditProgress = Boolean(activeAuditId) || contractLoading || contractProgressStage === "failed"
+  const idleServerAudits = serverRunningAudits.filter(
+    item => String(item?.audit_id || "") && String(item?.audit_id || "") !== activeAuditId
+  )
   const previewSource = String(previewMeta?.source || "").toLowerCase()
   const previewCoordProvider = String(previewMeta?.coord_provider || "").toLowerCase()
   const previewConversion = previewMeta?.docx_pdf_conversion && typeof previewMeta.docx_pdf_conversion === "object"
@@ -302,20 +342,143 @@ export default function App() {
     setContractProgressDetail(payload.detail && typeof payload.detail === "object" ? payload.detail : null)
   }
 
-  const startAuditProgressPolling = (auditId) => {
+  const rememberAuditTask = (auditId) => {
+    auditTaskIdRef.current = String(auditId || "")
+    try {
+      if (auditTaskIdRef.current) {
+        localStorage.setItem(ACTIVE_AUDIT_STORAGE_KEY, auditTaskIdRef.current)
+      } else {
+        localStorage.removeItem(ACTIVE_AUDIT_STORAGE_KEY)
+      }
+    } catch {}
+  }
+
+  const readStoredAuditTask = () => {
+    try {
+      return String(localStorage.getItem(ACTIVE_AUDIT_STORAGE_KEY) || "")
+    } catch {
+      return ""
+    }
+  }
+
+  const applyAuditTaskResult = async (task) => {
+    const nextDoc = String(task?.document_id || "")
+    if (task?.meta && typeof task.meta === "object") setContractMeta(task.meta)
+    if (task?.has_result && task.result) setContractResult(task.result)
+    if (!nextDoc) return
+    setDocumentId(nextDoc)
+    await loadContractPreview(nextDoc)
+  }
+
+  const finalizeResumedAudit = async (auditId, status, progressPayload) => {
+    try {
+      const task = await getAuditTask(auditId)
+      if (status === "done") {
+        bumpProgress(100, "done")
+        setContractLoading(false)
+        setActiveAuditId("")
+        await applyAuditTaskResult(task)
+        return
+      }
+      bumpProgress(100, "failed")
+      setContractLoading(false)
+      setActiveAuditId("")
+      setContractError(String(progressPayload?.message || t.auditResumeFailed))
+    } catch (err) {
+      setContractLoading(false)
+      setActiveAuditId("")
+      if (Number(err?.status) === 401) setContractError(t.sessionExpired)
+    }
+  }
+
+  const startAuditProgressPolling = (auditId, options = {}) => {
     clearAuditProgressPolling()
     if (!auditId) return
+    const resume = Boolean(options.resume)
     const pollOnce = async () => {
       try {
         const payload = await getAuditProgress(auditId)
         applyServerAuditProgress(payload)
-      } catch {
+        const status = String(payload?.status || "")
+        if (status === "done" || status === "failed") {
+          clearAuditProgressPolling()
+          if (resume) await finalizeResumedAudit(auditId, status, payload)
+        }
+      } catch (err) {
+        if (Number(err?.status) === 401) {
+          // Auth lost: polling can no longer observe the audit. Say so instead of failing silently.
+          clearAuditProgressPolling()
+          if (resume) setContractError(t.sessionExpired)
+          return
+        }
         // Ignore transient polling errors while the main audit request is still running.
       }
     }
     pollOnce()
     auditProgressTimerRef.current = setInterval(pollOnce, 1000)
   }
+
+  const resumeAuditFromStorage = async () => {
+    const stored = readStoredAuditTask()
+    if (!stored) return
+    auditTaskIdRef.current = stored
+    setActiveAuditId(stored)
+    let task = null
+    try {
+      task = await getAuditTask(stored)
+    } catch (err) {
+      if (Number(err?.status) === 401) setContractError(t.sessionExpired)
+      return
+    }
+    const progress = task?.progress && typeof task.progress === "object" ? task.progress : {}
+    applyServerAuditProgress(progress)
+    const status = String(task?.status || progress.status || "")
+    if (status === "done") {
+      setContractProgress(100)
+      setContractProgressStage("done")
+      setContractLoading(false)
+      setActiveAuditId("")
+      await applyAuditTaskResult(task)
+      return
+    }
+    if (status === "failed") {
+      setContractProgressStage("failed")
+      setActiveAuditId("")
+      setContractError(String(progress.message || t.auditResumeFailed))
+      return
+    }
+    setContractLoading(true)
+    setContractProgressStage(String(progress.stage || "auditing"))
+    startAuditProgressPolling(stored, { resume: true })
+  }
+
+  useEffect(() => {
+    resumeAuditFromStorage()
+    return () => clearAuditProgressPolling()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    // P2: keep a server-side view of running audits so a task that outlives this
+    // tab is still visible (and re-attachable) from the UI.
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await getRunningAudits(10)
+        if (!cancelled) {
+          setServerRunningAudits(Array.isArray(data?.items) ? data.items : [])
+        }
+      } catch {
+        if (!cancelled) setServerRunningAudits([])
+      }
+    }
+    load()
+    const timer = setInterval(load, 30000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
 
   useEffect(() => {
     setActiveRiskIndex(-1)
@@ -700,6 +863,7 @@ export default function App() {
     setPreviewError("")
     try {
       const manifest = await getContractPreviewManifest(nextDocumentId)
+      if (manifest?.filename) setDocumentFilename(String(manifest.filename))
       const mode = String(manifest?.mode || "text") === "visual" ? "visual" : "text"
       const pages = Array.isArray(manifest?.pages) ? manifest.pages : []
       clearPreviewUrls()
@@ -817,6 +981,31 @@ export default function App() {
     setExpandedEvidence(prev => ({ ...prev, [key]: !prev[key] }))
   }
 
+  const resetContractResultState = () => {
+    setContractResult(null)
+    setContractMeta(null)
+    setDocumentId("")
+    clearPreviewUrls()
+    previewLastBlockByPageRef.current = {}
+    setPreviewMode("text")
+    setPreviewPages([])
+    setActivePreviewPage(1)
+    setActivePreviewHighlight(null)
+    setPreviewText("")
+    setPreviewMeta(null)
+    setPreviewError("")
+  }
+
+  const trackBackgroundAudit = (auditId) => {
+    // P0/P1: the audit now runs server-side. Keep tracking it through the durable
+    // task endpoints even if the submission request or this tab went away.
+    rememberAuditTask(auditId)
+    setActiveAuditId(auditId)
+    setContractLoading(true)
+    setContractProgressStage("auditing")
+    startAuditProgressPolling(auditId, { resume: true })
+  }
+
   const onContractUpload = async (e) => {
     e.preventDefault()
     if (!contractFile) return
@@ -835,11 +1024,11 @@ export default function App() {
     setContractProgressStage("uploading")
     setContractProgressMessage("")
     setContractProgressDetail(null)
+    const nextAuditId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+      ? crypto.randomUUID()
+      : `audit-${Date.now()}`
     try {
       const form = new FormData()
-      const nextAuditId = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-        ? crypto.randomUUID()
-        : `audit-${Date.now()}`
       const customTitle = String(contract.title || "").trim()
       form.append("title", customTitle || toContractTitle(contractFile.name))
       form.append("language", contract.language)
@@ -850,42 +1039,43 @@ export default function App() {
       form.append("tax_focus", String(contract.taxFocus))
       form.append("audit_id", nextAuditId)
       form.append("file", contractFile)
+      setDocumentFilename(String(contractFile?.name || ""))
+      rememberAuditTask(nextAuditId)
+      setActiveAuditId(nextAuditId)
       startAuditProgressPolling(nextAuditId)
-      const res = await auditContract(form)
-      clearAuditProgressPolling()
-      try {
-        const finalProgress = await getAuditProgress(nextAuditId)
-        applyServerAuditProgress(finalProgress)
-      } catch {}
-      bumpProgress(100, "done")
-      const nextDocumentId = String(res.document_id || "")
-      const detectedLang = normalizeAppLang(res?.meta?.language || contract.language)
-      setUiLang(detectedLang)
-      setContract(prev => ({ ...prev, language: detectedLang }))
-      setContractResult(res.result || null)
-      setContractMeta(res.meta || null)
-      setShowEvidence(false)
-      setDocumentId(nextDocumentId)
-      await loadContractPreview(nextDocumentId)
+      const job = await auditContract(form)
+      const nextDocumentId = String(job?.document_id || "")
+      setContractProgressStage("auditing")
+      setContractProgress(Number(job?.progress) || 20)
+      if (nextDocumentId) {
+        setDocumentId(nextDocumentId)
+        loadContractPreview(nextDocumentId)
+      }
+      // Submission only registers the task; keep polling until the task finishes.
+      trackBackgroundAudit(String(job?.audit_id || nextAuditId))
     } catch (err) {
+      if (Number(err?.status) === 409) {
+        setContractError(t.auditAlreadyRunning)
+        trackBackgroundAudit(nextAuditId)
+        return
+      }
+      if (isTransportError(err)) {
+        // Request aborted locally: the audit may well still be running server-side.
+        setContractError(t.auditStillRunning)
+        trackBackgroundAudit(nextAuditId)
+        return
+      }
       clearAuditProgressPolling()
       bumpProgress(100, "failed")
-      setContractError(String(err?.message || err || "Audit failed"))
-      setContractResult(null)
-      setContractMeta(null)
-      setDocumentId("")
-      clearPreviewUrls()
-      previewLastBlockByPageRef.current = {}
-      setPreviewMode("text")
-      setPreviewPages([])
-      setActivePreviewPage(1)
-      setActivePreviewHighlight(null)
-      setPreviewText("")
-      setPreviewMeta(null)
-      setPreviewError("")
-    } finally {
-      clearAuditProgressPolling()
       setContractLoading(false)
+      setActiveAuditId("")
+      if (Number(err?.status) === 401) {
+        rememberAuditTask("")
+        setContractError(t.sessionExpired)
+      } else {
+        setContractError(String(err?.message || err || "Audit failed"))
+      }
+      resetContractResultState()
     }
   }
 
@@ -952,6 +1142,34 @@ export default function App() {
     )
   }
 
+  const openArchivedAudit = async (auditId) => {
+    const id = String(auditId || "")
+    if (!id) return
+    setExportError("")
+    try {
+      const task = await getAuditTask(id)
+      rememberAuditTask(id)
+      setActiveAuditId("")
+      setContractLoading(false)
+      bumpProgress(100, "done")
+      await applyAuditTaskResult(task)
+      setView("main")
+    } catch (err) {
+      setContractError(String(err?.message || err || t.historyOpenFailed))
+      setView("main")
+    }
+  }
+
+  if (view === "history") {
+    return (
+      <History
+        lang={uiLang}
+        onOpenAudit={openArchivedAudit}
+        onBack={() => setView("main")}
+      />
+    )
+  }
+
   return (
     <div className="page contract-shell">
       <header className="contract-header">
@@ -978,6 +1196,7 @@ export default function App() {
           <div className="user-pill">
             <span>{user.username}</span>
             <em>{user.role}</em>
+            <button className="ghost" onClick={() => setView("history")}>{t.auditHistory}</button>
             {canOpenAdmin && <button className="ghost" onClick={() => setView("admin")}>Admin</button>}
             <button className="ghost" onClick={() => { logout(); setUser(null); }}>Logout</button>
           </div>
@@ -1068,8 +1287,30 @@ export default function App() {
               <div className="audit-progress-bar">
                 <div className="audit-progress-fill" style={{ width: `${contractProgress}%` }} />
               </div>
-              <div className="audit-progress-note">{contractProgressMessage || progressStageText}</div>
+              <div className="audit-progress-note">{progressStageText}</div>
               {llmProgressText && <div className="audit-progress-subnote">{llmProgressText}</div>}
+              {activeAuditId && (
+                <div className="audit-progress-subnote">
+                  {t.auditBackgroundTracking}: {String(activeAuditId).slice(0, 8)}
+                </div>
+              )}
+            </div>
+          )}
+          {!contractLoading && idleServerAudits.length > 0 && (
+            <div className="audit-progress">
+              <div className="audit-progress-head">
+                <span>{String(t.auditServerRunning || "Server audits running: {n}").replace("{n}", String(idleServerAudits.length))}</span>
+                <span>{idleServerAudits[0]?.percent ?? 0}%</span>
+              </div>
+              <div className="audit-progress-note">
+                {String(idleServerAudits[0]?.message || "")}
+              </div>
+              <button
+                type="button"
+                onClick={() => trackBackgroundAudit(String(idleServerAudits[0]?.audit_id || ""))}
+              >
+                {t.auditTrackTask}
+              </button>
             </div>
           )}
         </div>

@@ -567,3 +567,57 @@
     align-items: stretch;
   }
 }
+
+/* ---- audit history page ---- */
+.history-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin: 12px 0 16px;
+}
+
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.history-item {
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.06);
+}
+
+.history-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+
+.history-item-head strong {
+  font-size: 1rem;
+  word-break: break-all;
+}
+
+.history-item-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.history-status {
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+}
+
+.history-status-done { color: #34d399; }
+.history-status-running { color: #60a5fa; }
+.history-status-failed { color: #f87171; }
+.history-status-interrupted { color: #fbbf24; }
+.history-status-unknown { color: #94a3b8; }
