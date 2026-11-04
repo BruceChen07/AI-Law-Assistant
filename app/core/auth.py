@@ -19,7 +19,21 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    """Verify a password, treating an unreadable stored hash as "does not match".
+
+    Legacy rows can hold hashes produced by another passlib/backend version; raising
+    UnknownHashError there would break login and admin bootstrap instead of letting
+    the caller re-seed the credential.
+    """
+    stored = str(hashed_password or "")
+    if not stored:
+        return False
+    try:
+        return bool(pwd_context.verify(plain_password, stored))
+    except Exception as exc:
+        if exc.__class__.__name__ == "UnknownHashError":
+            return False
+        raise
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
