@@ -21,6 +21,13 @@ def _job(audit_id, tag=""):
 
 
 def _reset():
+    # 等上一个用例的任务真正结束，避免跨用例串扰。
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        snap = runner.queue_snapshot()
+        if not snap["queued_count"] and not snap["running_count"]:
+            break
+        time.sleep(0.02)
     with runner._lock:
         runner._pending.clear()
         runner._running.clear()

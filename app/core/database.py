@@ -201,6 +201,25 @@ def init_db(cfg):
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_contract_audit_progress_document ON contract_audit_progress(document_id, updated_at)")
 
+    # Durable audit queue: keeps queued jobs across restarts so a deploy/restart
+    # does not silently drop the contracts the user is waiting on.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_queue(
+        audit_id TEXT PRIMARY KEY,
+        document_id TEXT,
+        file_path TEXT NOT NULL,
+        lang TEXT,
+        retrieval_options_json TEXT,
+        title TEXT,
+        user_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_queue_status ON audit_queue(status, created_at)")
+
     # Existing tables
     cur.execute("""
     CREATE TABLE IF NOT EXISTS regulation(

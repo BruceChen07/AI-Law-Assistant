@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, Request
@@ -186,6 +187,26 @@ def create_app(
         logger.info("model_preflight_disabled")
     llm = services.get("llm") or LLMService(cfg)
     translator = services.get("translator") or TranslationService(cfg)
+
+    # 重启后恢复未完成的排队任务（队列持久化）。测试进程跳过，避免污染用例。
+    if "pytest" not in sys.modules and bool(cfg.get("audit_queue_resume_on_startup", True)):
+        try:
+            from app.services import audit_task_runner
+            from app.services.audit_orchestrator import AuditServices
+
+            resumed = audit_task_runner.resume_pending(
+                cfg,
+                services_factory=lambda: AuditServices(
+                    llm=llm,
+                    embedder=embedder,
+                    reranker=reranker,
+                    translator=translator,
+                ),
+            )
+            if resumed:
+                logger.warning("audit_queue_resumed_on_startup count=%s", resumed)
+        except Exception:
+            logger.exception("audit_queue_resume_failed")
 
     app = FastAPI(title="Law Assistant")
 

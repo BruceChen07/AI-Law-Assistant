@@ -111,6 +111,103 @@ def _record_progress(
                        audit_id=audit_id, error=str(exc))
 
 
+def _persist_queue_row(cfg: Dict[str, Any], job: Dict[str, Any]) -> None:
+    try:
+        from app.services.crud import save_audit_queue_item
+
+        save_audit_queue_item(
+            cfg,
+            audit_id=str(job.get("audit_id") or ""),
+            document_id=str(job.get("document_id") or ""),
+            file_path=str(job.get("file_path") or ""),
+            lang=str(job.get("lang") or ""),
+            retrieval_options=job.get("retrieval_options"),
+            title=str(job.get("title") or ""),
+            user_id=str(job.get("user_id") or ""),
+        )
+    except Exception as exc:  # pragma: no cover - persistence is best effort
+        logger.warning("audit_queue_persist_failed",
+                       audit_id=str(job.get("audit_id") or ""), error=str(exc))
+
+
+def _set_queue_row_status(cfg: Dict[str, Any], audit_id: str, status: str) -> None:
+    try:
+        from app.services.crud import update_audit_queue_status
+
+        update_audit_queue_status(cfg, audit_id, status)
+    except Exception:  # pragma: no cover
+        logger.warning("audit_queue_status_update_failed", audit_id=audit_id)
+
+
+def _drop_queue_row(cfg: Dict[str, Any], audit_id: str) -> None:
+    try:
+        from app.services.crud import delete_audit_queue_item
+
+        delete_audit_queue_item(cfg, audit_id)
+    except Exception:  # pragma: no cover
+        logger.warning("audit_queue_row_delete_failed", audit_id=audit_id)
+
+
+def resume_pending(
+    cfg: Dict[str, Any],
+    services_factory: Optional[Callable[[], Any]] = None,
+) -> int:
+    """进程重启后恢复上次未跑完的排队任务（按入队顺序）。
+
+    ``services_factory`` 在应用启动、各服务实例就绪后传入，用于重建 LLM /
+    embedder 等依赖；没有工厂时只恢复成 queued 状态而不执行。
+    """
+    resumed = 0
+    try:
+        from app.services.crud import list_audit_queue_items
+
+        items = list_audit_queue_items(cfg, statuses=("queued", "running"))
+    except Exception as exc:  # pragma: no cover - startup must never fail
+        logger.warning("audit_queue_resume_read_failed", error=str(exc))
+        return 0
+    for row in items:
+        audit_id = str(row.get("audit_id") or "")
+        file_path = str(row.get("file_path") or "")
+        if not audit_id or not file_path:
+            continue
+        if is_audit_running(audit_id):
+            continue
+        if not callable(services_factory):
+            _set_queue_row_status(cfg, audit_id, "queued")
+            continue
+        try:
+            services = services_factory()
+        except Exception:  # pragma: no cover
+            logger.exception("audit_queue_resume_services_failed", audit_id=audit_id)
+            continue
+        _set_queue_row_status(cfg, audit_id, "queued")
+        enqueue(
+            cfg=cfg,
+            services=services,
+            file_path=file_path,
+            lang=str(row.get("lang") or "zh"),
+            retrieval_options=_loads_json(row.get("retrieval_options_json")),
+            audit_id=audit_id,
+            document_id=str(row.get("document_id") or ""),
+            user_id=str(row.get("user_id") or ""),
+            title=str(row.get("title") or ""),
+        )
+        resumed += 1
+    if resumed:
+        logger.info("audit_queue_resumed count=%s", resumed)
+    return resumed
+
+
+def _loads_json(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    try:
+        value = json.loads(str(raw or "") or "{}")
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
 def _ensure_worker_locked() -> None:
     global _worker_started
     if _worker_started:
@@ -176,6 +273,7 @@ def _worker_loop() -> None:
             message="generating contract summary",
             document_id=str(job.get("document_id") or "") or None,
         )
+        _set_queue_row_status(job["cfg"], audit_id, "running")
         # 摘要优先：先出摘要，再进入审计流水线。
         _generate_summary_before_audit(job)
         _record_progress(
@@ -199,6 +297,7 @@ def _worker_loop() -> None:
         finally:
             with _lock:
                 _running.pop(audit_id, None)
+            _drop_queue_row(job["cfg"], audit_id)
 
 
 def enqueue(
@@ -247,6 +346,7 @@ def enqueue(
     )
     logger.info("audit_task_enqueued", audit_id=audit_id,
                 position=position, ahead=ahead)
+    _persist_queue_row(cfg, job)
     return {
         "audit_id": audit_id,
         "position": position,
@@ -301,6 +401,7 @@ def cancel(audit_id: str) -> str:
         detail={"cancelled": True},
         document_id=document_id or None,
     )
+    _drop_queue_row(cfg, target)
     logger.info("audit_task_cancelled", audit_id=target)
     return "cancelled"
 

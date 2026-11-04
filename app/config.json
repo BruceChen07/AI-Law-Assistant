@@ -173,6 +173,7 @@
     "startup_dependency_check": true,
     "startup_dependency_strict": false,
     "contract_summary_enabled": true,
+    "audit_queue_resume_on_startup": true,
     "rag_trace_enabled": true,
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,

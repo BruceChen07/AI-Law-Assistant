@@ -1452,3 +1452,74 @@ def list_evidence_anchors_by_contract(cfg, contract_id, limit=500):
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Durable audit queue
+# ---------------------------------------------------------------------------
+
+
+def save_audit_queue_item(cfg, *, audit_id, document_id, file_path, lang,
+                          retrieval_options=None, title="", user_id=""):
+    import json as _json
+
+    now = _utc_now_iso()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO audit_queue(
+            audit_id, document_id, file_path, lang, retrieval_options_json,
+            title, user_id, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+        """,
+        (
+            str(audit_id),
+            str(document_id or ""),
+            str(file_path or ""),
+            str(lang or ""),
+            _json.dumps(retrieval_options or {}, ensure_ascii=False),
+            str(title or ""),
+            str(user_id or ""),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_audit_queue_status(cfg, audit_id, status):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE audit_queue SET status=?, updated_at=? WHERE audit_id=?",
+        (str(status or ""), _utc_now_iso(), str(audit_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_audit_queue_item(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM audit_queue WHERE audit_id=?", (str(audit_id),))
+    conn.commit()
+    conn.close()
+
+
+def list_audit_queue_items(cfg, statuses=("queued", "running"), limit=200):
+    values = [str(item) for item in (statuses or ()) if str(item)]
+    if not values:
+        return []
+    placeholders = ",".join("?" for _ in values)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT * FROM audit_queue WHERE status IN ({placeholders}) "
+        "ORDER BY created_at ASC LIMIT ?",
+        (*values, int(limit)),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows
