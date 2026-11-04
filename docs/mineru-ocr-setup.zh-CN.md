@@ -52,3 +52,40 @@ app\.venv\Scripts\python.exe -c "import pyclipper, omegaconf, dill; print('ok')"
 - `app/requirements.txt` 已声明 `pyclipper` / `omegaconf` / `dill`，重建环境时请用该文件安装；
 - 部署时尽量只用一套虚拟环境，避免 `app/venv` 与 `app/.venv` 混用；
 - 更换机器后先跑一次扫描件 PDF 的抽取验证，再批量审计。
+
+## 启动自检与体检命令
+
+服务启动时会自动做一次依赖自检（`app/core/dependency_preflight.py`），检查：
+
+| 检查项 | 说明 | 不通过时 |
+|---|---|---|
+| 服务依赖 | 服务进程自身懒加载的包（onnxruntime/jieba/numpy/httpx） | 阻塞 |
+| MinerU 命令行 | 能否找到并执行 `mineru` | 阻塞 |
+| MinerU 运行环境 | **MinerU 所在解释器**是否装了 `pyclipper`/`omegaconf`/`dill` | 阻塞 |
+| MinerU 本地模型 | `model_source=local` 时权重是否完整 | 阻塞 |
+| 向量模型 | `embedding_profiles` 指向的文件是否存在 | 阻塞 |
+| LLM 服务 | `llm_config.api_base` 是否可达 | 仅告警 |
+
+不通过时会在控制台打印一段可读报告（含修复命令），日志里记 `startup_dependency_check` / `startup_dependency_issue`，同时 `/health` 返回：
+
+```json
+{ "preflight": { "ok": false, "critical_count": 1, "warning_count": 1, "issues": ["mineru_env"] } }
+```
+
+也可以不启动服务、单独体检：
+
+```powershell
+python bin/doctor.py          # 人类可读，关键项失败时退出码 1
+python bin/doctor.py --json   # 机器可读
+```
+
+相关配置：
+
+```json
+{
+  "startup_dependency_check": true,
+  "startup_dependency_strict": false
+}
+```
+
+`startup_dependency_strict=true` 时，关键项不通过会直接中止启动（适合部署流水线），默认只告警并继续启动。
