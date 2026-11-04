@@ -54,12 +54,15 @@ data/memory/
 data/app.db
 data/llm_trace.db
 data/llm_traces_full/
+data/audit_logs/
+data/verify/
 logs/
 log/
 models/embedding/
 models/reranker/
 models/translation/
 models/llm/
+models/mineru/
 
 # Local runtime binaries
 third_party/llama.cpp/bin-win-cpu-x64/
