@@ -172,6 +172,7 @@
     "model_preflight_require_all": false,
     "startup_dependency_check": true,
     "startup_dependency_strict": false,
+    "contract_summary_enabled": true,
     "rag_trace_enabled": true,
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,

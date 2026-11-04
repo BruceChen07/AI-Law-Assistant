@@ -95,3 +95,14 @@ export async function exportContractReport(documentId, payload) {
     returnResponseMeta: true
   })
 }
+
+export async function getContractSummary(documentId, language = "zh") {
+  // 摘要可能要跑一轮 LLM（CPU 上 1~2 分钟），用长超时。
+  return requestJson(
+    `${API_BASE}/contracts/${documentId}/summary?language=${encodeURIComponent(language)}`,
+    {
+      headers: { ...getAuthHeaders() },
+      timeoutMs: getLongRequestTimeoutMs(300)
+    }
+  )
+}
