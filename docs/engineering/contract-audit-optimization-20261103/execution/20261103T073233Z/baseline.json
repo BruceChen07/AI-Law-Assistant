@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "run_id": "20261103T073233Z",
+  "captured_at": "2026-11-03T07:38:48.5883744Z",
+  "git": {
+    "branch": "feature/contract-audit-optimization-v2",
+    "head": "ca8da9da042e362a624ec1157f3113cc325cfe53",
+    "dirty_file_count": 35,
+    "worktree_preserved": true
+  },
+  "tools": {
+    "python": "3.12.0",
+    "pytest": "8.3.5",
+    "node": "24.13.0",
+    "npm": "11.6.2",
+    "git": "2.53.0.windows.1"
+  },
+  "runtime": {
+    "configured_provider": "llama_cpp",
+    "configured_api_base": "http://127.0.0.1:18080/v1",
+    "port_18080": "not_listening",
+    "port_8000": "not_listening",
+    "port_11434": "ollama_listening",
+    "project_uses_running_ollama": false,
+    "system_drive_free_gib_observed": 25.7
+  },
+  "artifacts": {
+    "config": {
+      "path": "app/config.json",
+      "bytes": 7879,
+      "sha256": "2D352F0BF2CD94FDA187EA585350AE4F0BEDCF81D76D0457272952116D43C701"
+    },
+    "production_db": {
+      "path": "data/app.db",
+      "bytes": 18485248,
+      "mtime_utc": "2026-11-03T05:57:09.9855658Z",
+      "sha256": "C6055FDD083341EBACB964EE5FFBD0C35846C7E445E44B9DEFAE94FDAA152E43"
+    },
+    "model": {
+      "path": "models/llm/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf",
+      "bytes": 22134528992,
+      "sha256": "9024B5C12B6CEC6E7046253A8170AF086529699A341577B5CC2E6A2C3115D9E1"
+    },
+    "runtime_binary": {
+      "path": "third_party/llama.cpp/bin-win-cpu-x64/llama-server.exe",
+      "bytes": 9216,
+      "sha256": "C56619DE2E6657508734C5C012D5307340F0EBE8545278A6738B4010647229C9",
+      "warning": "File size is unusually small; P6 runtime packaging must verify the complete executable and dependent DLL set."
+    }
+  },
+  "validation": {
+    "config": "D:/AuditValidation/20261103T073233Z/config.json",
+    "data_dir": "D:/AuditValidation/20261103T073233Z/data",
+    "production_touched": false,
+    "targeted_tests": {
+      "passed": 34,
+      "failed": 0,
+      "warnings": 21,
+      "junit": "D:/AuditValidation/20261103T073233Z/evidence/pytest-targeted.xml"
+    }
+  }
+}

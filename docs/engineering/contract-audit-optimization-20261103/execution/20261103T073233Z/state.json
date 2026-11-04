@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "design_version": "1.0",
+  "run_id": "20261103T073233Z",
+  "head": "ca8da9da042e362a624ec1157f3113cc325cfe53",
+  "dirty_file_count_at_start": 35,
+  "phase": "P1",
+  "task_id": "T12",
+  "task_status": "IN_PROGRESS",
+  "last_completed_task": "T11",
+  "next_action": "将未完成块重规划接入v2编排器并验证计划版本与覆盖",
+  "blocking_dependencies": [],
+  "approved_exceptions": [],
+  "evidence_files": [
+    "baseline.json",
+    "tasks.json",
+    "T00-summary.md",
+    "T01-summary.md",
+    "T02-summary.md",
+    "T10-summary.md",
+    "T11-summary.md",
+    "issues.md"
+  ],
+  "external_evidence": [
+    "D:/AuditValidation/20261103T073233Z/evidence/pytest-targeted.xml",
+    "D:/AuditValidation/20261103T073233Z/evidence/pytest-p0.xml"
+  ],
+  "updated_at": "2026-11-03T07:55:00Z"
+}

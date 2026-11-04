@@ -1,0 +1,29 @@
+{
+  "captured_at": "2026-11-03T07:01:14Z",
+  "branch_before": "feature/local-llm-llamacpp",
+  "implementation_branch": "feature/contract-audit-optimization-v2",
+  "head": "ca8da9da042e362a624ec1157f3113cc325cfe53",
+  "worktree_dirty_before_branch": true,
+  "existing_changes_preserved": true,
+  "committed_or_pushed": false,
+  "versions": {
+    "python": "3.12.0",
+    "node": "24.13.0",
+    "npm": "11.6.2",
+    "git": "2.53.0.windows.1",
+    "pytest": "9.2.0"
+  },
+  "services": {
+    "application_8000_listening": false,
+    "llama_cpp_18080_listening": false,
+    "vite_5173_listening": false,
+    "ollama_process_running": true
+  },
+  "production_touched": false,
+  "notes": [
+    "未启动、停止或重启任何服务。",
+    "未修改业务数据库。",
+    "当前未提交改动原样带入新分支，原分支指针不变。",
+    "app.main import 会调用 create_app，现有 API 测试存在生产初始化风险，T01 需修复。"
+  ]
+}

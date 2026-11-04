@@ -99,7 +99,42 @@ python -m app.main --init
 .\bin\init.ps1
 ```
 
-### 5. 启动服务
+### 5. 创建管理员账号
+
+使用项目提供的命令行脚本创建管理员账号，所有脚本需在项目根目录 `AI-Law-Assistant` 下执行。
+
+#### 创建 / 提升管理员
+
+使用 `bin/create_admin.py`：
+
+```bash
+# 使用默认值创建管理员（username=admin, password=admin123, email=admin@example.com）
+python bin/create_admin.py
+
+# 自定义管理员信息
+python bin/create_admin.py --username superadmin --email root@company.com --password MyStr0ngP@ss
+
+# 把已有的普通用户 jack 提升为管理员（保留其原密码）
+python bin/create_admin.py --username jack --no-reset-password
+```
+
+脚本逻辑：若用户不存在则新建 `role=admin` 的账号；若已存在则将其角色升级为 admin，并可选择是否重置密码。
+
+#### 列出现有账号
+
+使用 `bin/list_users.py`：
+
+```bash
+# 列出所有用户（按创建时间倒序）
+python bin/list_users.py
+
+# 按用户名过滤查询
+python bin/list_users.py --username admin
+```
+
+输出格式：`ID | 用户名 | 邮箱 | 角色 | 是否激活 | 创建时间`
+
+### 6. 启动服务
 
 启动后端服务：
 
@@ -128,11 +163,58 @@ npm run test
 npm run storybook
 ```
 
-### 6. 访问系统
+### 7. 访问系统
 
 打开浏览器访问 <http://localhost:5173> 即可使用。
 
 ## 使用指南
+
+### 用户与账号管理
+
+项目提供了完整的命令行工具用于用户管理，所有脚本均需在项目根目录下执行。
+
+#### 创建管理员账号
+
+使用 `bin/create_admin.py` 创建或升级管理员：
+
+```bash
+# 默认创建（admin / admin123）
+python bin/create_admin.py
+
+# 指定账号信息
+python bin/create_admin.py --username <用户名> --email <邮箱> --password <密码>
+
+# 已有用户仅升级角色，不重置密码
+python bin/create_admin.py --username <用户名> --no-reset-password
+```
+
+#### 创建普通用户
+
+使用 `bin/create_user.py` 创建普通账号：
+
+```bash
+# 创建普通用户
+python bin/create_user.py --username alice --email alice@company.com --password Passw0rd
+
+# 直接创建指定角色用户（user/admin）
+python bin/create_user.py --username bob --email bob@company.com --password Passw0rd --role admin
+```
+
+> 注意：`create_user.py` 要求用户名必须不存在，已存在将报错退出；如需修改已有用户，请使用 `bin/user_modify.py`。
+
+#### 列出所有账号
+
+使用 `bin/list_users.py` 查询账号列表：
+
+```bash
+# 列出全部用户
+python bin/list_users.py
+
+# 查询指定用户
+python bin/list_users.py --username admin
+```
+
+输出字段格式：`ID | 用户名 | 邮箱 | 角色(user/admin) | 是否激活 | 创建时间`
 
 ### 合同审计（主界面）
 

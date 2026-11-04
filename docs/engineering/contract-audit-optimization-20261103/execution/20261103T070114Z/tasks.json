@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "run_id": "20261103T070114Z",
+  "tasks": [
+    {"id":"T00","phase":"P0","status":"DONE","depends_on":[],"started_at":"2026-11-03T07:01:14Z","finished_at":"2026-11-03T07:01:14Z","files_changed":["baseline.json","state.json","T00-summary.md"],"test_ids":["G0-baseline","G0-runtime"],"evidence":["baseline.json","T00-summary.md"],"blocker":null,"reviewer":null},
+    {"id":"T01","phase":"P0","status":"DONE","depends_on":["T00"],"started_at":"2026-11-03T07:01:14Z","finished_at":"2026-11-03T07:12:27Z","files_changed":["app/app_factory.py","bin/prepare_audit_validation.py","tests/test_validation_environment.py"],"test_ids":["isolation"],"evidence":["T01-T20-summary.md"],"blocker":null,"reviewer":null},
+    {"id":"T02","phase":"P0","status":"IN_PROGRESS","depends_on":["T01"],"started_at":"2026-11-03T07:12:27Z","finished_at":null,"files_changed":["tests/test_audit_planner_v2.py"],"test_ids":["UT04"],"evidence":["T01-T20-summary.md"],"blocker":"完整fixture manifest和受控真实样本尚未建立","reviewer":null},
+    {"id":"T10","phase":"P1","status":"DONE","depends_on":["T02"],"started_at":"2026-11-03T07:01:14Z","finished_at":"2026-11-03T07:12:27Z","files_changed":["app/services/audit_types.py","app/services/audit_source.py","app/services/audit_normalizer.py"],"test_ids":["UT01","UT02","UT03"],"evidence":["T01-T20-summary.md"],"blocker":null,"reviewer":null},
+    {"id":"T11","phase":"P1","status":"DONE","depends_on":["T10"],"started_at":"2026-11-03T07:01:14Z","finished_at":"2026-11-03T07:12:27Z","files_changed":["app/services/audit_planner.py","app/services/audit_token_policy.py"],"test_ids":["UT04","UT05"],"evidence":["T01-T20-summary.md"],"blocker":null,"reviewer":null},
+    {"id":"T12","phase":"P1","status":"DONE","depends_on":["T11"],"started_at":"2026-11-03T07:01:14Z","finished_at":"2026-11-03T07:12:27Z","files_changed":["app/services/contract_audit.py","tests/test_contract_audit_v2.py"],"test_ids":["P1-integration"],"evidence":["T01-T20-summary.md"],"blocker":null,"reviewer":null},
+    {"id":"T20","phase":"P2","status":"DONE","depends_on":["T12"],"started_at":"2026-11-03T07:01:14Z","finished_at":"2026-11-03T07:12:27Z","files_changed":["app/services/audit_prompt_v2.py","app/config.example.json"],"test_ids":["UT07"],"evidence":["T01-T20-summary.md"],"blocker":null,"reviewer":null},
+    {"id":"T21","phase":"P2","status":"IN_PROGRESS","depends_on":["T20"],"started_at":"2026-11-03T07:12:27Z","finished_at":null,"files_changed":["app/core/llm_admission.py","app/core/llm.py","tests/test_llm_admission.py"],"test_ids":["UT08"],"evidence":["T01-T20-summary.md"],"blocker":"llama.cpp真实tokenizer与KV cache能力尚未在线探测","reviewer":null},
+    {"id":"T22","phase":"P2","status":"TODO","depends_on":["T21"]},
+    {"id":"T30","phase":"P3","status":"TODO","depends_on":["T22"]},
+    {"id":"T31","phase":"P3","status":"TODO","depends_on":["T30"]},
+    {"id":"T32","phase":"P3","status":"TODO","depends_on":["T31"]},
+    {"id":"T40","phase":"P4","status":"TODO","depends_on":["T32"]},
+    {"id":"T41","phase":"P4","status":"TODO","depends_on":["T40"]},
+    {"id":"T50","phase":"P5","status":"TODO","depends_on":["T41"]},
+    {"id":"T51","phase":"P5","status":"TODO","depends_on":["T50"]},
+    {"id":"T52","phase":"P5","status":"TODO","depends_on":["T51"]},
+    {"id":"T60","phase":"P6","status":"TODO","depends_on":["T52"]},
+    {"id":"T61","phase":"P6","status":"TODO","depends_on":["T60"]}
+  ]
+}

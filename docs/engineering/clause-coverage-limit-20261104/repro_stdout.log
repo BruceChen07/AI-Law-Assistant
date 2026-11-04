@@ -1,0 +1,638 @@
+﻿app\.venv\Scripts\python.exe : D:\Workspace\AI-Law-Assistant\app\.venv\Lib\site-packages\jieba\_compat.py:18: UserWarni
+ng: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resourc
+es package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+所在位置 行:15 字符: 2053
++ ... M = 'dumb'; app\.venv\Scripts\python.exe .runtime\validation-temp\cla ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (D:\Workspace\AI... Setuptools<81.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  import pkg_resources
+2026-11-04 11:53:40 [info     ] audit_llm_plan_created         audit_id=audit_repro_160_20 execution_path=classic llm_request_exact_total_known=True llm_request_total_planned=20
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=1
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=1 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=2
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=2 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=3
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=3 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=4
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=4 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=5
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=5 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=6
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=6 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=7
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=7 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=8
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=8 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=9
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=9 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=10
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=10 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=11
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=11 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=12
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=12 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=13
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=13 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=14
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=14 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=15
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=15 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=16
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=16 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=17
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=17 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=18
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=18 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=19
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=19 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=20
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=20 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_plan_created         audit_id=audit_repro_200_25 execution_path=classic llm_request_exact_total_known=True llm_request_total_planned=25
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=1
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=1 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=2
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=2 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=3
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=3 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=4
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=4 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=5
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=5 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=6
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=6 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=7
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=7 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=8
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=8 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=9
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=9 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=10
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=10 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=11
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=11 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=12
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=12 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=13
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=13 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=14
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=14 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=15
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=15 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=16
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=16 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=17
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=17 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=18
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=18 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=19
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=19 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=20
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=20 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-021 execution_path=classic llm_request_current_index=21 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=21
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-021 execution_path=classic llm_request_current_index=21 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=21 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-022 execution_path=classic llm_request_current_index=22 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=22
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-022 execution_path=classic llm_request_current_index=22 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=22 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-023 execution_path=classic llm_request_current_index=23 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=23
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-023 execution_path=classic llm_request_current_index=23 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=23 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-024 execution_path=classic llm_request_current_index=24 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=24
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-024 execution_path=classic llm_request_current_index=24 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=24 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_200_25 chunk_id=chunk-025 execution_path=classic llm_request_current_index=25 llm_request_total_planned=25 request_kind=chunk retry_index=0 round_index=25
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_200_25 chunk_id=chunk-025 execution_path=classic llm_request_current_index=25 llm_request_total_planned=25 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=25 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_plan_created         audit_id=audit_repro_160_20 execution_path=classic llm_request_exact_total_known=True llm_request_total_planned=20
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=1
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=1 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=2
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=2 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=3
+2026-11-04 11:53:40 [warning  ] classic_audit_json_parse_failed audit_id=audit_repro_160_20_r3_try0 completion_tokens=12 max_tokens=4096 response_head=not-json response_length=8
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=20 parse_failed_flag=True request_kind=chunk retry_index=0 risk_count=0 round_index=3 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=4
+2026-11-04 11:53:40 [warning  ] classic_audit_json_parse_failed audit_id=audit_repro_160_20_r4_try0 completion_tokens=12 max_tokens=4096 response_head=not-json response_length=8
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=20 parse_failed_flag=True request_kind=chunk retry_index=0 risk_count=0 round_index=4 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=5
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=5 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=6
+2026-11-04 11:53:40 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=6 truncated_flag=False
+2026-11-04 11:53:40 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=7
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=7 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=8
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=8 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=9
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=9 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=10
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=10 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=11
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=11 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=12
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=12 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=13
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=13 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=14
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=14 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=15
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=15 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=16
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=16 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=17
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=17 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=18
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=18 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=19
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=19 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=20
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=20 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_plan_adjusted        audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_total_planned_after=21 llm_request_total_planned_before=20 reason=reliability_retry
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=21 llm_request_total_planned=21 request_kind=retry retry_index=1 round_index=3
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=21 llm_request_total_planned=21 parse_failed_flag=False request_kind=retry retry_index=1 risk_count=1 round_index=3 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_plan_adjusted        audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_total_planned_after=22 llm_request_total_planned_before=21 reason=reliability_retry
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=22 llm_request_total_planned=22 request_kind=retry retry_index=1 round_index=4
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=22 llm_request_total_planned=22 parse_failed_flag=False request_kind=retry retry_index=1 risk_count=1 round_index=4 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_plan_created         audit_id=audit_repro_160_20 execution_path=classic llm_request_exact_total_known=True llm_request_total_planned=20
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=1
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-001 execution_path=classic llm_request_current_index=1 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=1 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=2
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-002 execution_path=classic llm_request_current_index=2 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=2 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=3
+2026-11-04 11:53:41 [warning  ] classic_audit_json_parse_failed audit_id=audit_repro_160_20_r3_try0 completion_tokens=12 max_tokens=4096 response_head=not-json response_length=8
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-003 execution_path=classic llm_request_current_index=3 llm_request_total_planned=20 parse_failed_flag=True request_kind=chunk retry_index=0 risk_count=0 round_index=3 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=4
+2026-11-04 11:53:41 [warning  ] classic_audit_json_parse_failed audit_id=audit_repro_160_20_r4_try0 completion_tokens=12 max_tokens=4096 response_head=not-json response_length=8
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-004 execution_path=classic llm_request_current_index=4 llm_request_total_planned=20 parse_failed_flag=True request_kind=chunk retry_index=0 risk_count=0 round_index=4 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=5
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-005 execution_path=classic llm_request_current_index=5 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=5 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=6
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-006 execution_path=classic llm_request_current_index=6 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=6 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=7
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-007 execution_path=classic llm_request_current_index=7 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=7 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=8
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-008 execution_path=classic llm_request_current_index=8 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=8 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=9
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-009 execution_path=classic llm_request_current_index=9 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=0 round_index=9 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=10
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-010 execution_path=classic llm_request_current_index=10 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=10 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=11
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-011 execution_path=classic llm_request_current_index=11 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=11 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=12
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-012 execution_path=classic llm_request_current_index=12 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=12 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=13
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-013 execution_path=classic llm_request_current_index=13 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=13 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=14
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-014 execution_path=classic llm_request_current_index=14 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=14 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=15
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-015 execution_path=classic llm_request_current_index=15 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=15 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=16
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-016 execution_path=classic llm_request_current_index=16 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=16 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=17
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-017 execution_path=classic llm_request_current_index=17 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=17 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=18
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-018 execution_path=classic llm_request_current_index=18 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=18 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=19
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-019 execution_path=classic llm_request_current_index=19 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=19 truncated_flag=False
+2026-11-04 11:53:41 [info     ] audit_llm_request_start        audit_id=audit_repro_160_20 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=20 request_kind=chunk retry_index=0 round_index=20
+2026-11-04 11:53:41 [info     ] audit_llm_request_done         audit_id=audit_repro_160_20 chunk_id=chunk-020 execution_path=classic llm_request_current_index=20 llm_request_total_planned=20 parse_failed_flag=False request_kind=chunk retry_index=0 risk_count=1 round_index=20 truncated_flag=False
+{
+  "runtime_config_path": "D:\\Workspace\\AI-Law-Assistant\\app\\config.json",
+  "runtime_policy": {
+    "enabled": true,
+    "context_window_tokens": 16384,
+    "default_output_tokens": 2048,
+    "reserve_output_tokens": 2048,
+    "safety_margin_tokens": 1024,
+    "input_soft_limit_tokens": 11776,
+    "input_hard_limit_tokens": 13312,
+    "force_multi_pass_when_exceed": true,
+    "force_multi_pass_when_prompt_truncated": true,
+    "clause_group_target_tokens": 4200,
+    "max_clauses_per_group": 8,
+    "chunk_output_tokens": 1536,
+    "max_evidence_items_per_round": 12,
+    "max_rounds": 20,
+    "theoretical_clause_capacity": 160
+  },
+  "runtime_has_audit_token_policy": false,
+  "runtime_has_audit_optimization": false,
+  "runtime_v2_enabled": false,
+  "avg_synthetic_clause_tokens": 108.0,
+  "plan_boundaries": [
+    {
+      "clause_count": 159,
+      "status": "ok",
+      "round_count": 20,
+      "round_sizes": [
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        7
+      ],
+      "first_round_clause_ids": [
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8"
+      ],
+      "last_round_clause_ids": [
+        "c153",
+        "c154",
+        "c155",
+        "c156",
+        "c157",
+        "c158",
+        "c159"
+      ],
+      "duration_ms": 2.74
+    },
+    {
+      "clause_count": 160,
+      "status": "ok",
+      "round_count": 20,
+      "round_sizes": [
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8,
+        8
+      ],
+      "first_round_clause_ids": [
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8"
+      ],
+      "last_round_clause_ids": [
+        "c153",
+        "c154",
+        "c155",
+        "c156",
+        "c157",
+        "c158",
+        "c159",
+        "c160"
+      ],
+      "duration_ms": 3.75
+    },
+    {
+      "clause_count": 161,
+      "status": "error",
+      "error_type": "LegacyAuditCoverageError",
+      "error_code": "COVERAGE_INCOMPLETE",
+      "error": "COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round",
+      "duration_ms": 1.88
+    },
+    {
+      "clause_count": 200,
+      "status": "error",
+      "error_type": "LegacyAuditCoverageError",
+      "error_code": "COVERAGE_INCOMPLETE",
+      "error": "COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round",
+      "duration_ms": 2.72
+    },
+    {
+      "clause_count": 571,
+      "status": "error",
+      "error_type": "LegacyAuditCoverageError",
+      "error_code": "COVERAGE_INCOMPLETE",
+      "error": "COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round",
+      "duration_ms": 1.67
+    }
+  ],
+  "plan_with_25_rounds": {
+    "clause_count": 200,
+    "status": "ok",
+    "round_count": 25,
+    "round_sizes": [
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8,
+      8
+    ],
+    "first_round_clause_ids": [
+      "c1",
+      "c2",
+      "c3",
+      "c4",
+      "c5",
+      "c6",
+      "c7",
+      "c8"
+    ],
+    "last_round_clause_ids": [
+      "c193",
+      "c194",
+      "c195",
+      "c196",
+      "c197",
+      "c198",
+      "c199",
+      "c200"
+    ],
+    "duration_ms": 4.75
+  },
+  "pipeline_160_runtime_policy": {
+    "clause_count": 160,
+    "policy_override": {},
+    "status": "ok",
+    "llm_calls": 20,
+    "execution_path": "multipass_classic_stage1",
+    "multipass_round_count": 20,
+    "classic_parse_failed": false,
+    "parse_failed_rounds": 0,
+    "truncated_rounds": 0,
+    "risk_count": 11,
+    "progress_events": 41,
+    "last_progress": {
+      "stage": "auditing",
+      "percent": 95,
+      "message": "llm request 20/20: chunk-020 (done)",
+      "detail": {
+        "execution_path": "classic",
+        "llm_request_total_planned": 20,
+        "llm_request_total_upper_bound": 20,
+        "llm_request_exact_total_known": true,
+        "llm_request_started": 20,
+        "llm_request_completed": 20,
+        "llm_request_current_index": 20,
+        "llm_request_current_label": "chunk-020",
+        "llm_request_kind": "chunk",
+        "llm_request_status": "done",
+        "llm_request_retry_index": 0,
+        "llm_request_round_index": 20,
+        "llm_request_clause_id": "",
+        "llm_request_last_completed_label": "chunk-020",
+        "llm_request_last_error": ""
+      }
+    },
+    "duration_ms": 76.62
+  },
+  "pipeline_200_runtime_policy": {
+    "clause_count": 200,
+    "policy_override": {},
+    "status": "error",
+    "error_type": "LegacyAuditCoverageError",
+    "error_code": "COVERAGE_INCOMPLETE",
+    "error": "COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round",
+    "llm_calls": 0,
+    "progress_events": 0,
+    "last_progress": {},
+    "traceback_tail": [
+      "  File \"D:\\Workspace\\AI-Law-Assistant\\app\\services\\audit_token_policy.py\", line 200, in plan_clause_groups",
+      "    raise LegacyAuditCoverageError(",
+      "app.services.audit_token_policy.LegacyAuditCoverageError: COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round"
+    ],
+    "duration_ms": 5.21
+  },
+  "pipeline_200_max_rounds_25": {
+    "clause_count": 200,
+    "policy_override": {
+      "max_rounds": 25
+    },
+    "status": "ok",
+    "llm_calls": 25,
+    "execution_path": "multipass_classic_stage1",
+    "multipass_round_count": 25,
+    "classic_parse_failed": false,
+    "parse_failed_rounds": 0,
+    "truncated_rounds": 0,
+    "risk_count": 16,
+    "progress_events": 51,
+    "last_progress": {
+      "stage": "auditing",
+      "percent": 95,
+      "message": "llm request 25/25: chunk-025 (done)",
+      "detail": {
+        "execution_path": "classic",
+        "llm_request_total_planned": 25,
+        "llm_request_total_upper_bound": 25,
+        "llm_request_exact_total_known": true,
+        "llm_request_started": 25,
+        "llm_request_completed": 25,
+        "llm_request_current_index": 25,
+        "llm_request_current_label": "chunk-025",
+        "llm_request_kind": "chunk",
+        "llm_request_status": "done",
+        "llm_request_retry_index": 0,
+        "llm_request_round_index": 25,
+        "llm_request_clause_id": "",
+        "llm_request_last_completed_label": "chunk-025",
+        "llm_request_last_error": ""
+      }
+    },
+    "duration_ms": 82.39
+  },
+  "pipeline_571_runtime_policy": {
+    "clause_count": 571,
+    "policy_override": {},
+    "status": "error",
+    "error_type": "LegacyAuditCoverageError",
+    "error_code": "COVERAGE_INCOMPLETE",
+    "error": "COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round",
+    "llm_calls": 0,
+    "progress_events": 0,
+    "last_progress": {},
+    "traceback_tail": [
+      "  File \"D:\\Workspace\\AI-Law-Assistant\\app\\services\\audit_token_policy.py\", line 200, in plan_clause_groups",
+      "    raise LegacyAuditCoverageError(",
+      "app.services.audit_token_policy.LegacyAuditCoverageError: COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; refusing to append unchecked clauses to the final round"
+    ],
+    "duration_ms": 1.62
+  },
+  "pipeline_160_parse_failed_round": {
+    "clause_count": 160,
+    "policy_override": {},
+    "status": "ok",
+    "llm_calls": 22,
+    "execution_path": "multipass_classic_stage1",
+    "multipass_round_count": 20,
+    "classic_parse_failed": false,
+    "parse_failed_rounds": 0,
+    "truncated_rounds": 0,
+    "risk_count": 13,
+    "progress_events": 45,
+    "last_progress": {
+      "stage": "auditing",
+      "percent": 95,
+      "message": "llm request 22/22: chunk-004 (done)",
+      "detail": {
+        "execution_path": "classic",
+        "llm_request_total_planned": 22,
+        "llm_request_total_upper_bound": 22,
+        "llm_request_exact_total_known": true,
+        "llm_request_started": 22,
+        "llm_request_completed": 22,
+        "llm_request_current_index": 22,
+        "llm_request_current_label": "chunk-004",
+        "llm_request_kind": "retry",
+        "llm_request_status": "done",
+        "llm_request_retry_index": 1,
+        "llm_request_round_index": 4,
+        "llm_request_clause_id": "",
+        "llm_request_last_completed_label": "chunk-004",
+        "llm_request_last_error": ""
+      }
+    },
+    "duration_ms": 74.13
+  },
+  "pipeline_160_parse_failed_no_retry": {
+    "clause_count": 160,
+    "policy_override": {},
+    "status": "ok",
+    "llm_calls": 20,
+    "execution_path": "multipass_classic_stage1",
+    "multipass_round_count": 20,
+    "classic_parse_failed": true,
+    "parse_failed_rounds": 2,
+    "truncated_rounds": 0,
+    "risk_count": 11,
+    "progress_events": 41,
+    "last_progress": {
+      "stage": "auditing",
+      "percent": 95,
+      "message": "llm request 20/20: chunk-020 (done)",
+      "detail": {
+        "execution_path": "classic",
+        "llm_request_total_planned": 20,
+        "llm_request_total_upper_bound": 20,
+        "llm_request_exact_total_known": true,
+        "llm_request_started": 20,
+        "llm_request_completed": 20,
+        "llm_request_current_index": 20,
+        "llm_request_current_label": "chunk-020",
+        "llm_request_kind": "chunk",
+        "llm_request_status": "done",
+        "llm_request_retry_index": 0,
+        "llm_request_round_index": 20,
+        "llm_request_clause_id": "",
+        "llm_request_last_completed_label": "chunk-020",
+        "llm_request_last_error": ""
+      }
+    },
+    "duration_ms": 56.08
+  },
+  "storage_200": {
+    "clause_count": 200,
+    "status": "done",
+    "payload_bytes": 190329,
+    "roundtrip_sha256_match": true,
+    "stored_bytes": 190329,
+    "stored_risk_count": 200,
+    "sqlite_version": "3.42.0",
+    "sqlite_length_limit": 1000000000,
+    "db_file_bytes": 761856,
+    "write_duration_ms": 16.29,
+    "db_path": "D:\\Workspace\\AI-Law-Assistant\\.runtime\\validation-temp\\clause-coverage-20261104\\clause-storage-200-odtlalz5\\app.db"
+  },
+  "storage_571": {
+    "clause_count": 571,
+    "status": "done",
+    "payload_bytes": 544890,
+    "roundtrip_sha256_match": true,
+    "stored_bytes": 544890,
+    "stored_risk_count": 571,
+    "sqlite_version": "3.42.0",
+    "sqlite_length_limit": 1000000000,
+    "db_file_bytes": 1118208,
+    "write_duration_ms": 14.03,
+    "db_path": "D:\\Workspace\\AI-Law-Assistant\\.runtime\\validation-temp\\clause-coverage-20261104\\clause-storage-571-iy2govzg\\app.db"
+  },
+  "v2_pipeline_200": {
+    "clause_count": 200,
+    "status": "ok",
+    "llm_calls": 2,
+    "execution_path": "classic_v2",
+    "chunks_total": 2,
+    "chunks_completed": 2,
+    "coverage_audited": 1.0,
+    "duration_ms": 108.52
+  },
+  "v2_pipeline_571": {
+    "clause_count": 571,
+    "status": "ok",
+    "llm_calls": 6,
+    "execution_path": "classic_v2",
+    "chunks_total": 6,
+    "chunks_completed": 6,
+    "coverage_audited": 1.0,
+    "duration_ms": 495.97
+  },
+  "api_error_message": {
+    "status": "ok",
+    "zh_message": "合同审计失败。请检查【Admin -> 模型配置】中的 LLM 参数后重试。",
+    "en_message": "Contract audit failed. Check LLM settings in Admin -> Model Config and retry.",
+    "error_code_matched_by_mapping": false
+  },
+  "real_document": {
+    "status": "ok",
+    "text_chars": 85271,
+    "clause_count": 571,
+    "total_clause_tokens": 39268,
+    "avg_clause_tokens": 68.8,
+    "extract_duration_ms": 176.83,
+    "meta_keys": [
+      "ext",
+      "ocr_engine",
+      "ocr_used",
+      "page_count"
+    ]
+  }
+}

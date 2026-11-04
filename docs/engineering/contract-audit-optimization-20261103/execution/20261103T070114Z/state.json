@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "design_version": "1.0",
+  "run_id": "20261103T070114Z",
+  "head": "ca8da9da042e362a624ec1157f3113cc325cfe53",
+  "branch": "feature/contract-audit-optimization-v2",
+  "dirty_files": [
+    "README.zh-CN.md",
+    "app/api/routers/contracts.py",
+    "app/config.json",
+    "app/services/contract_audit.py",
+    "app/services/contract_audit_modules/memory_pipeline/prompt_templates.py",
+    "bin/start-services.ps1",
+    "bin/stop-services.ps1",
+    "memory/experience/feedback_events.jsonl",
+    "web/App.jsx",
+    "web/api/base.js",
+    "web/i18n/appI18n.js",
+    "web/package-lock.json"
+  ],
+  "phase": "P2",
+  "task_id": "T21",
+  "task_status": "IN_PROGRESS",
+  "last_completed_task": "T20",
+  "next_action": "补充模型缓存能力探测、跨条款缺失风险复核和确定性聚合验证",
+  "blocking_dependencies": [],
+  "approved_exceptions": [],
+  "evidence_files": [
+    "baseline.json",
+    "T00-summary.md",
+    "T01-T20-summary.md"
+  ],
+  "updated_at": "2026-11-03T07:12:27Z"
+}
