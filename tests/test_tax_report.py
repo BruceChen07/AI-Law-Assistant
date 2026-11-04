@@ -125,6 +125,6 @@ def test_build_and_export_tax_audit_report(tmp_path, caplog):
     assert os.path.exists(exported["file_path"])
     assert exported["size"] > 0
     assert re.match(
-        r"^采购合同_\d{8}_\d{6}_tax_audit_report\.json$",
+        r"^采购合同_\d{8}_\d{6}_税务审计数据\.json$",
         exported["file_name"],
     )

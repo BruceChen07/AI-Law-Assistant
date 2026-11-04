@@ -3,7 +3,11 @@ import json
 import logging
 from datetime import datetime, timezone
 from app.services.docx_renderer import render_tax_audit_docx
-from app.services.export_filenames import build_export_filename
+from app.services.export_filenames import (
+    build_export_filename,
+    export_fallback_stem,
+    localized_export_suffix,
+)
 from app.services.crud import (
     get_tax_contract_document,
     list_tax_audit_issues_by_contract,
@@ -169,12 +173,21 @@ def export_tax_audit_report(
     report_dir = os.path.join(cfg["files_dir"], "tax_audit_reports")
     os.makedirs(report_dir, exist_ok=True)
     ext = "json" if fmt == "json" else "docx"
+    overview = report.get("overview") if isinstance(
+        report.get("overview"), dict) else {}
+    source_filename = str(
+        report.get("contract_filename") or overview.get("contract_filename") or "")
+    if not source_filename:
+        contract = get_tax_contract_document(cfg, contract_id) or {}
+        source_filename = str(contract.get("original_filename") or "")
     filename = build_export_filename(
-        source_filename=str(report.get("contract_filename") or ""),
-        generated_at=report.get("generated_at"),
-        suffix="tax_audit_report",
+        source_filename=source_filename,
+        # Export time, not audit time: keeps repeated exports distinguishable.
+        generated_at=datetime.utcnow().isoformat(),
+        suffix=localized_export_suffix(
+            "tax_data" if fmt == "json" else "tax_report", locale),
         ext=ext,
-        fallback_stem="contract",
+        fallback_stem=export_fallback_stem(locale),
     )
     file_path = os.path.join(report_dir, filename)
     if fmt == "json":
