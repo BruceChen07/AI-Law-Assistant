@@ -16,6 +16,7 @@ function Stop-IfAlive([int]$pid) {
 
 if (Test-Path $pidFile) {
   $data = Get-Content $pidFile -Raw | ConvertFrom-Json
+  Stop-IfAlive ([int]$data.llamacpp_pid)
   Stop-IfAlive ([int]$data.backend_pid)
   Stop-IfAlive ([int]$data.frontend_pid)
   Remove-Item $pidFile -Force
@@ -25,7 +26,7 @@ if (Test-Path $pidFile) {
 }
 
 if ($KillByPortFallback) {
-  foreach ($port in @(8000, 5173)) {
+  foreach ($port in @(8000, 5173, 18080)) {
     $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
     foreach ($c in $conns) {
       if ($c.OwningProcess) {

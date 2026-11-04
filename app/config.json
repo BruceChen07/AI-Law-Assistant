@@ -64,10 +64,11 @@
         "provider": "llama_cpp",
         "api_base": "http://127.0.0.1:18080/v1",
         "api_key": "",
-        "model": "auto",
+        "model": "Qwen3.6-35B-A3B-UD-Q4_K_M",
         "temperature": 0.2,
         "max_tokens": 2048,
         "timeout": 600,
+        "sleep_idle_seconds": 1200,
         "headers": {}
     },
     "network_policy": {
@@ -98,7 +99,7 @@
             "provider": "llama_cpp",
             "api_base": "http://127.0.0.1:18080/v1",
             "api_key": "",
-            "model": "auto",
+            "model": "Qwen3.6-35B-A3B-UD-Q4_K_M",
             "temperature": 0.2,
             "max_tokens": 2048,
             "timeout": 600,
@@ -228,8 +229,18 @@
         "reason": "edge_llm_context_limit",
         "trigger_source": "ops_temporary_disable_2026-07-03"
     },
+    "audit_optimization": {
+        "enabled": true,
+        "context_tokens": 16384,
+        "safety_tokens": 1024,
+        "output_tokens": 1536,
+        "input_target_tokens": 7000,
+        "max_chunks": 64,
+        "max_attempts_per_chunk": 2,
+        "max_retries_per_job": 3
+    },
     "ui_config": {
-        "show_citation_source": false,
+        "show_citation_source": true,
         "default_theme": "light"
     }
 }

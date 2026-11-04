@@ -160,6 +160,7 @@
             "temperature": 0.2,
             "max_tokens": 2048,
             "timeout": 600,
+            "sleep_idle_seconds": 1200,
             "headers": {}
         },
         "local_llm": {
@@ -199,6 +200,16 @@
         "chunk_output_tokens": 1536,
         "max_evidence_items_per_round": 12,
         "max_rounds": 12
+    },
+    "audit_optimization": {
+        "enabled": false,
+        "context_tokens": 16384,
+        "safety_tokens": 1024,
+        "output_tokens": 1536,
+        "input_target_tokens": 7000,
+        "max_chunks": 64,
+        "max_attempts_per_chunk": 2,
+        "max_retries_per_job": 3
     },
     "audit_risk_rule_engine": {
         "dedupe_similarity_threshold": 0.9,
