@@ -92,6 +92,38 @@ def aggregate_chunk_audit_results(
     kept_risks, removed_conflicts = reconcile_cross_clause_conflicts(
         deduped_risks, preview_clauses, global_tax_context)
 
+    # Per-chunk audits number their risks locally ("classic-r1" in every chunk), so
+    # after aggregation several risks would share an id and no report/comment could
+    # be traced back to one specific risk. Re-number them globally and keep the
+    # chunk-local id plus the owning chunk for traceability.
+    clause_to_chunk: Dict[str, str] = {}
+    for chunk in list(chunk_audit_results or []):
+        if not isinstance(chunk, dict):
+            continue
+        chunk_id = str(chunk.get("chunk_id") or "")
+        clause_range = chunk.get("clause_range") if isinstance(
+            chunk.get("clause_range"), dict) else {}
+        for clause_id in list(clause_range.get("clause_ids") or []):
+            key = str(clause_id or "").strip()
+            if key and key not in clause_to_chunk:
+                clause_to_chunk[key] = chunk_id
+    for index, risk in enumerate(kept_risks, start=1):
+        if not isinstance(risk, dict):
+            continue
+        location = risk.get("location") if isinstance(
+            risk.get("location"), dict) else {}
+        original_risk_id = str(location.get("risk_id") or risk.get("risk_id") or "")
+        traceable_id = f"risk-{index:03d}"
+        location["risk_id"] = traceable_id
+        if original_risk_id and original_risk_id != traceable_id:
+            location["source_risk_id"] = original_risk_id
+        clause_id = str(location.get("clause_id") or "")
+        chunk_id = clause_to_chunk.get(clause_id, "")
+        if chunk_id:
+            location["chunk_id"] = chunk_id
+        risk["location"] = location
+        risk["risk_id"] = traceable_id
+
     if rule_config.get("require_citation_for_high_risk", True):
         for risk in kept_risks:
             if _normalize_risk_level(risk.get("level")) != "high":

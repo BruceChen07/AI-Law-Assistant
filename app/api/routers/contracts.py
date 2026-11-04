@@ -60,6 +60,32 @@ _audit_progress_lock = threading.Lock()
 
 
 
+
+def _normalize_export_risk_ids(risk_items: list) -> list:
+    """Give every exported risk a unique, traceable id.
+
+    Chunk-level audits number their risks locally, so aggregated or legacy results
+    can contain several "classic-r1" entries; without this the exported comments
+    (and any report) cannot be traced back to one specific risk.
+    """
+    for index, item in enumerate(list(risk_items or []), start=1):
+        if not isinstance(item, dict):
+            continue
+        location = item.get("location") if isinstance(
+            item.get("location"), dict) else {}
+        traceable_id = f"risk-{index:03d}"
+        source_risk_id = str(
+            location.get("risk_id") or item.get("risk_id") or item.get("issue_id") or "")
+        location["risk_id"] = traceable_id
+        if source_risk_id and source_risk_id != traceable_id:
+            location["source_risk_id"] = source_risk_id
+        item["location"] = location
+        item["risk_id"] = traceable_id
+        if not str(item.get("issue_id") or "").strip():
+            item["issue_id"] = traceable_id
+    return risk_items
+
+
 def _enrich_comment_locators(cfg: Dict[str, Any], doc: Dict[str, Any], risk_items: list) -> None:
     """Backfill clause locators on export so comments anchor to real paragraphs.
 
@@ -925,6 +951,8 @@ def build_router(cfg):
                 "review_conclusions": [],
                 "exception_items": [],
             }
+        risk_items = _normalize_export_risk_ids(risk_items)
+        report["risk_items"] = risk_items
         report_dir = os.path.join(cfg["files_dir"], "contract_reports")
         os.makedirs(report_dir, exist_ok=True)
         export_mode = str((payload or {}).get("export_mode") or "report").lower()
