@@ -97,6 +97,65 @@ def insert_contract_audit(cfg, audit_id, document_id, status, result_json, model
     conn.close()
 
 
+def list_contract_audits_paginated(cfg, limit=30, offset=0, status=None):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    sql = """
+        SELECT ca.id AS audit_id, ca.document_id, ca.status, ca.created_at, ca.result_json,
+               d.original_filename AS filename
+        FROM contract_audit ca
+        LEFT JOIN documents d ON d.id = ca.document_id
+        WHERE 1=1
+    """
+    params = []
+    if status:
+        sql += " AND ca.status = ?"
+        params.append(str(status))
+    sql += " ORDER BY ca.created_at DESC LIMIT ? OFFSET ?"
+    params.extend([int(limit or 30), int(offset or 0)])
+    cur.execute(sql, params)
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def list_contract_audit_progress_pending(cfg, limit=20):
+    """Progress rows without a finished contract_audit record (running/interrupted)."""
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT p.audit_id, p.document_id, p.status, p.percent, p.message, p.updated_at,
+               d.original_filename AS filename
+        FROM contract_audit_progress p
+        LEFT JOIN documents d ON d.id = p.document_id
+        WHERE p.audit_id NOT IN (SELECT id FROM contract_audit)
+        ORDER BY p.updated_at DESC
+        LIMIT ?
+        """,
+        (int(limit or 20),),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def get_contract_audit_by_id(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, document_id, status, result_json, model_provider, model_name, created_at
+        FROM contract_audit
+        WHERE id=?
+        """,
+        (str(audit_id),),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
 def get_latest_contract_audit_by_document(cfg, document_id, status="done"):
     conn = get_conn(cfg)
     cur = conn.cursor()
@@ -113,6 +172,269 @@ def get_latest_contract_audit_by_document(cfg, document_id, status="done"):
     row = cur.fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+def upsert_contract_audit_chunk(
+    cfg,
+    *,
+    audit_id,
+    chunk_id,
+    ordinal=0,
+    source_hash="",
+    plan_hash="",
+    clause_ids=None,
+    source_spans=None,
+    prompt_hash="",
+    prefix_hash="",
+    input_tokens=0,
+    output_tokens=0,
+    attempts=1,
+    status="ok",
+    raw_response="",
+    parsed_json=None,
+    error="",
+    reviewed=0,
+):
+    import json as _json
+
+    now = _utc_now_iso()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO contract_audit_chunk(
+            audit_id, chunk_id, ordinal, source_hash, plan_hash, clause_ids, source_spans,
+            prompt_hash, prefix_hash, input_tokens, output_tokens, attempts, status,
+            raw_response, parsed_json, error, reviewed, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(audit_id, chunk_id) DO UPDATE SET
+            ordinal=excluded.ordinal,
+            source_hash=excluded.source_hash,
+            plan_hash=excluded.plan_hash,
+            clause_ids=excluded.clause_ids,
+            source_spans=excluded.source_spans,
+            prompt_hash=excluded.prompt_hash,
+            prefix_hash=excluded.prefix_hash,
+            input_tokens=excluded.input_tokens,
+            output_tokens=excluded.output_tokens,
+            attempts=excluded.attempts,
+            status=excluded.status,
+            raw_response=excluded.raw_response,
+            parsed_json=excluded.parsed_json,
+            error=excluded.error,
+            reviewed=MAX(excluded.reviewed, contract_audit_chunk.reviewed),
+            updated_at=excluded.updated_at
+        """,
+        (
+            str(audit_id),
+            str(chunk_id),
+            int(ordinal or 0),
+            str(source_hash or ""),
+            str(plan_hash or ""),
+            _json.dumps(list(clause_ids or []), ensure_ascii=False),
+            _json.dumps(list(source_spans or []), ensure_ascii=False),
+            str(prompt_hash or ""),
+            str(prefix_hash or ""),
+            int(input_tokens or 0),
+            int(output_tokens or 0),
+            int(attempts or 0),
+            str(status or ""),
+            str(raw_response or ""),
+            _json.dumps(parsed_json, ensure_ascii=False) if parsed_json is not None else "",
+            str(error or ""),
+            int(reviewed or 0),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def list_contract_audit_chunks(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, chunk_id, ordinal, source_hash, plan_hash, clause_ids, source_spans,
+               prompt_hash, prefix_hash, input_tokens, output_tokens, attempts, status,
+               raw_response, parsed_json, error, reviewed, created_at, updated_at
+        FROM contract_audit_chunk
+        WHERE audit_id=?
+        ORDER BY ordinal ASC, chunk_id ASC
+        """,
+        (str(audit_id),),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def find_reusable_contract_audit_chunks(cfg, source_hash, plan_hash):
+    """Completed chunk results from an earlier audit of the same source and plan."""
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, chunk_id, parsed_json, raw_response, output_tokens, attempts, reviewed, updated_at
+        FROM contract_audit_chunk
+        WHERE source_hash=? AND plan_hash=? AND status='ok'
+        ORDER BY updated_at DESC
+        """,
+        (str(source_hash or ""), str(plan_hash or "")),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def upsert_contract_audit_progress(
+    cfg,
+    *,
+    audit_id,
+    status="running",
+    stage="",
+    percent=0,
+    message="",
+    detail=None,
+    document_id=None,
+    user_id=None,
+    plan_json=None,
+    plan_hash=None,
+    source_hash=None,
+    chunks_total=None,
+):
+    import json as _json
+
+    now = _utc_now_iso()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO contract_audit_progress(
+            audit_id, document_id, user_id, status, stage, percent, message, detail_json,
+            plan_json, plan_hash, source_hash, chunks_total, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(audit_id) DO UPDATE SET
+            document_id=COALESCE(excluded.document_id, contract_audit_progress.document_id),
+            user_id=COALESCE(excluded.user_id, contract_audit_progress.user_id),
+            status=excluded.status,
+            stage=COALESCE(NULLIF(excluded.stage, ''), contract_audit_progress.stage),
+            percent=excluded.percent,
+            message=COALESCE(NULLIF(excluded.message, ''), contract_audit_progress.message),
+            detail_json=COALESCE(NULLIF(excluded.detail_json, ''), contract_audit_progress.detail_json),
+            plan_json=COALESCE(NULLIF(excluded.plan_json, ''), contract_audit_progress.plan_json),
+            plan_hash=COALESCE(NULLIF(excluded.plan_hash, ''), contract_audit_progress.plan_hash),
+            source_hash=COALESCE(NULLIF(excluded.source_hash, ''), contract_audit_progress.source_hash),
+            chunks_total=MAX(excluded.chunks_total, contract_audit_progress.chunks_total),
+            updated_at=excluded.updated_at
+        """,
+        (
+            str(audit_id),
+            document_id,
+            user_id,
+            str(status or "running"),
+            str(stage or ""),
+            int(percent or 0),
+            str(message or ""),
+            _json.dumps(detail, ensure_ascii=False) if detail is not None else "",
+            _json.dumps(plan_json, ensure_ascii=False) if plan_json is not None else "",
+            str(plan_hash or ""),
+            str(source_hash or ""),
+            int(chunks_total or 0),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_contract_audit_progress(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, document_id, user_id, status, stage, percent, message, detail_json,
+               plan_json, plan_hash, source_hash, chunks_total, created_at, updated_at
+        FROM contract_audit_progress
+        WHERE audit_id=?
+        """,
+        (str(audit_id),),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_running_contract_audit_progress(cfg, limit=20):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, document_id, user_id, status, stage, percent, message,
+               chunks_total, updated_at
+        FROM contract_audit_progress
+        WHERE status='running'
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (int(limit or 20),),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def mark_stale_contract_audit_progress(cfg, *, stale_after_minutes=10):
+    """Mark orphaned running audits (killed process / lost heartbeat) as interrupted."""
+    from datetime import timedelta
+
+    minutes = max(1, int(stale_after_minutes or 10))
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(minutes=minutes)).isoformat()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE contract_audit_progress
+        SET status='interrupted',
+            stage='interrupted',
+            message=?,
+            updated_at=?
+        WHERE status='running' AND updated_at < ?
+        """,
+        (
+            "audit interrupted: no heartbeat for more than "
+            f"{minutes} minutes (process restart or lost connection); "
+            "finished chunks are kept and can be reused on retry",
+            now.isoformat(),
+            cutoff,
+        ),
+    )
+    updated = int(cur.rowcount or 0)
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def list_contract_audit_progress_by_document(cfg, document_id, limit=10):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, document_id, user_id, status, stage, percent, message,
+               plan_hash, source_hash, chunks_total, created_at, updated_at
+        FROM contract_audit_progress
+        WHERE document_id=?
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (str(document_id), int(limit or 10)),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
 
 
 def insert_document(cfg, doc_id, filename, original_filename, file_path, file_size, mime_type, user_id,

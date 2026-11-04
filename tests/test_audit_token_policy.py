@@ -1,6 +1,9 @@
 import json
 
+import pytest
+
 from app.services.audit_token_policy import (
+    LegacyAuditCoverageError,
     build_contract_audit_budget,
     get_audit_token_policy,
     plan_clause_groups,
@@ -99,6 +102,27 @@ def test_plan_clause_groups_preserves_order():
     assert plan["round_count"] >= 3
     assert plan["rounds"][0]["clause_ids"][0] == "c1"
     assert plan["rounds"][1]["clause_ids"][0] in {"c2", "c3"}
+
+
+def test_plan_clause_groups_rejects_overflow_instead_of_growing_final_round():
+    preview_clauses = [
+        {
+            "clause_id": f"c{i}",
+            "clause_text": f"第{i}项税务约定",
+            "clause_path": f"第{i}项",
+        }
+        for i in range(1, 798)
+    ]
+
+    with pytest.raises(LegacyAuditCoverageError, match="max_rounds"):
+        plan_clause_groups(
+            preview_clauses,
+            {
+                "clause_group_target_tokens": 1200,
+                "max_clauses_per_group": 8,
+                "max_rounds": 12,
+            },
+        )
 
 
 def test_build_multipass_classic_audit_returns_rounds_and_merged_risks():

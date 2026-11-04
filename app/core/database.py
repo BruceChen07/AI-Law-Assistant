@@ -147,6 +147,60 @@ def init_db(cfg):
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_contract_audit_created_at ON contract_audit(created_at)")
 
+    # Per-chunk audit results: written as each chunk finishes so a long audit can be
+    # resumed, inspected, and re-audited without losing finished work.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS contract_audit_chunk(
+        audit_id TEXT NOT NULL,
+        chunk_id TEXT NOT NULL,
+        ordinal INTEGER DEFAULT 0,
+        source_hash TEXT,
+        plan_hash TEXT,
+        clause_ids TEXT,
+        source_spans TEXT,
+        prompt_hash TEXT,
+        prefix_hash TEXT,
+        input_tokens INTEGER DEFAULT 0,
+        output_tokens INTEGER DEFAULT 0,
+        attempts INTEGER DEFAULT 1,
+        status TEXT,
+        raw_response TEXT,
+        parsed_json TEXT,
+        error TEXT,
+        reviewed INTEGER DEFAULT 0,
+        created_at TEXT,
+        updated_at TEXT,
+        PRIMARY KEY (audit_id, chunk_id)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_audit_chunk_plan ON contract_audit_chunk(source_hash, plan_hash, status)")
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_audit_chunk_audit ON contract_audit_chunk(audit_id)")
+
+    # Durable audit progress, so a running audit stays observable across page reloads,
+    # restarts and token expiry (the in-memory progress map is lost on restart).
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS contract_audit_progress(
+        audit_id TEXT PRIMARY KEY,
+        document_id TEXT,
+        user_id TEXT,
+        status TEXT NOT NULL,
+        stage TEXT,
+        percent INTEGER DEFAULT 0,
+        message TEXT,
+        detail_json TEXT,
+        plan_json TEXT,
+        plan_hash TEXT,
+        source_hash TEXT,
+        chunks_total INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_audit_progress_document ON contract_audit_progress(document_id, updated_at)")
+
     # Existing tables
     cur.execute("""
     CREATE TABLE IF NOT EXISTS regulation(
@@ -748,6 +802,13 @@ def init_db(cfg):
         "CREATE INDEX IF NOT EXISTS idx_audit_runtime_skill_run_session_position ON audit_runtime_skill_run(session_id, position_no)")
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_audit_runtime_skill_run_session_status ON audit_runtime_skill_run(session_id, status)")
+
+    # Additive migration for databases created before per-chunk review tracking.
+    cur.execute("PRAGMA table_info(contract_audit_chunk)")
+    chunk_cols = {row[1] for row in cur.fetchall()}
+    if "reviewed" not in chunk_cols:
+        cur.execute(
+            "ALTER TABLE contract_audit_chunk ADD COLUMN reviewed INTEGER DEFAULT 0")
 
     conn.commit()
     conn.close()

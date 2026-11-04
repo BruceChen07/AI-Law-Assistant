@@ -45,6 +45,7 @@ def run_contract_audit(
     lang: str = "zh",
     retrieval_options: Optional[Dict[str, Any]] = None,
     progress_cb: Optional[Callable[..., None]] = None,
+    audit_id: str = "",
 ) -> Dict[str, Any]:
     """Run the contract audit flow (memory/classic depending on config)."""
     from app.services.contract_audit import audit_contract
@@ -59,6 +60,7 @@ def run_contract_audit(
         translator=services.translator,
         retrieval_options=retrieval_options,
         progress_cb=progress_cb,
+        audit_id=audit_id,
     )
 
 
@@ -70,6 +72,7 @@ def run_contract_pipeline_bundle(
     lang: str = "zh",
     retrieval_options: Optional[Dict[str, Any]] = None,
     progress_cb: Optional[Callable[..., None]] = None,
+    audit_id: str = "",
 ) -> Dict[str, Any]:
     """Run contract audit and return normalized bundle output."""
     result = run_contract_audit(
@@ -79,6 +82,7 @@ def run_contract_pipeline_bundle(
         lang=lang,
         retrieval_options=retrieval_options,
         progress_cb=progress_cb,
+        audit_id=audit_id,
     )
     audit = result.get("audit") if isinstance(result, dict) else {}
     if not isinstance(audit, dict):

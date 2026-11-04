@@ -5,6 +5,10 @@ from typing import Any, Dict, List
 from app.core.token_utils import estimate_messages_tokens, estimate_text_tokens
 
 
+class LegacyAuditCoverageError(RuntimeError):
+    code = "COVERAGE_INCOMPLETE"
+
+
 def _safe_int(value: Any, default: int) -> int:
     try:
         return int(value)
@@ -71,7 +75,7 @@ def get_audit_token_policy(cfg: Dict[str, Any]) -> Dict[str, Any]:
             512, _safe_int(raw.get("chunk_output_tokens"), 1536)),
         "max_evidence_items_per_round": max(
             4, _safe_int(raw.get("max_evidence_items_per_round"), 12)),
-        "max_rounds": max(1, _safe_int(raw.get("max_rounds"), 12)),
+        "max_rounds": max(1, _safe_int(raw.get("max_rounds"), 20)),
     }
 
 
@@ -179,7 +183,6 @@ def plan_clause_groups(
     max_rounds = max(1, int(policy.get("max_rounds") or 1))
     max_clauses_per_group = max(1, int(policy.get("max_clauses_per_group") or 1))
     target_tokens = max(1200, int(policy.get("clause_group_target_tokens") or 1200))
-    overflow_clause_count = 0
     for clause in clauses:
         clause_tokens = estimate_text_tokens(
             f"{clause.get('title') or clause.get('clause_path') or ''}\n"
@@ -194,12 +197,10 @@ def plan_clause_groups(
             current_group = []
             current_tokens = 0
         if len(groups) >= max_rounds:
-            overflow_clause_count += 1
-            if groups:
-                groups[-1].append(clause)
-            else:
-                groups.append([clause])
-            continue
+            raise LegacyAuditCoverageError(
+                "COVERAGE_INCOMPLETE: legacy audit plan exceeds max_rounds; "
+                "refusing to append unchecked clauses to the final round"
+            )
         current_group.append(clause)
         current_tokens += clause_tokens
     if current_group:
@@ -226,7 +227,7 @@ def plan_clause_groups(
         )
     return {
         "round_count": len(round_plans),
-        "overflow_clause_count": overflow_clause_count,
+        "overflow_clause_count": 0,
         "rounds": round_plans,
         "groups": groups,
     }
