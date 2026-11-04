@@ -149,6 +149,25 @@ def _build_mineru_subprocess_env(base_env: Dict[str, str], mineru_cfg: Dict[str,
     return env
 
 
+def _project_venv_mineru_paths() -> List[str]:
+    """仓库内虚拟环境里的 mineru（服务可能由系统 Python 启动，不在 PATH 上）。"""
+    repo_root = Path(__file__).resolve().parents[2]
+    names = ["mineru.exe", "mineru"] if os.name == "nt" else ["mineru"]
+    dirs = (
+        ["Scripts"] if os.name == "nt" else ["bin"]
+    )
+    roots = [repo_root / "app", repo_root]
+    found: List[str] = []
+    for root in roots:
+        for venv_dir in (".venv", "venv"):
+            for sub in dirs:
+                for name in names:
+                    candidate = root / venv_dir / sub / name
+                    if candidate.exists():
+                        found.append(str(candidate))
+    return found
+
+
 def _candidate_mineru_paths() -> List[str]:
     candidates: List[str] = []
     exe_dir = Path(sys.executable).resolve().parent
@@ -157,6 +176,7 @@ def _candidate_mineru_paths() -> List[str]:
         local_path = exe_dir / name
         if local_path.exists():
             candidates.append(str(local_path))
+    candidates.extend(_project_venv_mineru_paths())
     path_hit = shutil.which("mineru")
     if path_hit:
         candidates.append(path_hit)
