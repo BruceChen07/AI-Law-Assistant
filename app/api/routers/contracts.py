@@ -643,6 +643,34 @@ def build_router(cfg):
             raise HTTPException(status_code=404, detail="audit queue item not found")
         return {"audit_id": audit_id, "status": "cancelled"}
 
+    @router.post("/contracts/audit/queue/{audit_id}/pin")
+    def pin_contract_audit_queue(
+        audit_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        """Move a queued audit to the front of the queue (it runs next)."""
+        _ = current_user
+        outcome = audit_task_runner.pin(audit_id)
+        if outcome == "running":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AUDIT_ALREADY_RUNNING",
+                    "audit_id": audit_id,
+                    "message": "该审计已在执行，无法置顶排队。",
+                },
+            )
+        if outcome == "missing":
+            raise HTTPException(status_code=404, detail="audit queue item not found")
+        snapshot = audit_task_runner.queue_snapshot()
+        return {
+            "audit_id": audit_id,
+            "status": "queued",
+            "pinned": True,
+            "position": 1,
+            "queue": snapshot,
+        }
+
     @router.get("/contracts/audits/history")
     def list_contract_audit_history(
         limit: int = Query(30, ge=1, le=200),

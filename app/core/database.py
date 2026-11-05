@@ -159,6 +159,7 @@ def init_db(cfg):
         title TEXT,
         user_id TEXT,
         status TEXT NOT NULL,
+        priority INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT
     )
@@ -828,6 +829,13 @@ def init_db(cfg):
     if "reviewed" not in chunk_cols:
         cur.execute(
             "ALTER TABLE contract_audit_chunk ADD COLUMN reviewed INTEGER DEFAULT 0")
+
+    # Additive migration for queues created before manual prioritisation.
+    cur.execute("PRAGMA table_info(audit_queue)")
+    queue_cols = {row[1] for row in cur.fetchall()}
+    if queue_cols and "priority" not in queue_cols:
+        cur.execute(
+            "ALTER TABLE audit_queue ADD COLUMN priority INTEGER DEFAULT 0")
 
     conn.commit()
     conn.close()

@@ -269,6 +269,7 @@ def submit(**kwargs: Any) -> Dict[str, Any]:
 
 
 def queue_snapshot() -> Dict[str, Any]:
+    """Current queue: the running audit plus the waiting contracts in order."""
     with _lock:
         queued = [
             {
@@ -279,13 +280,66 @@ def queue_snapshot() -> Dict[str, Any]:
             }
             for index, job in enumerate(_pending)
         ]
-        running = [dict(item) for item in _running.values()]
+        running = [
+            {
+                "audit_id": str(item.get("audit_id") or ""),
+                "document_id": str(item.get("document_id") or ""),
+                "title": str(item.get("title") or ""),
+                "started_at": str(item.get("started_at") or ""),
+                "position": 0,
+            }
+            for item in _running.values()
+        ]
     return {
         "running": running,
         "queued": queued,
         "running_count": len(running),
         "queued_count": len(queued),
+        "order": [item["title"] or item["audit_id"] for item in running + queued],
     }
+
+
+def pin(audit_id: str) -> str:
+    """Move a queued audit to the front of the queue."""
+    target = str(audit_id or "")
+    cfg: Dict[str, Any] = {}
+    moved = False
+    with _lock:
+        if target in _running:
+            return "running"
+        for index, job in enumerate(_pending):
+            if str(job.get("audit_id") or "") != target:
+                continue
+            if index == 0:
+                return "already_first"
+            _pending.insert(0, _pending.pop(index))
+            cfg = job.get("cfg") or {}
+            moved = True
+            break
+        else:
+            return "missing"
+        # Re-number positions so every waiting job reports its new slot.
+        running_count = 1 if _running else 0
+        for index, job in enumerate(_pending):
+            job_audit_id = str(job.get("audit_id") or "")
+            job_cfg = job.get("cfg") or {}
+            _record_progress(
+                job_cfg, job_audit_id,
+                status="queued", stage="queued", percent=0,
+                message=f"waiting in queue (position {index + 1})",
+                detail={"position": index + 1,
+                        "ahead": running_count + index,
+                        "document_id": str(job.get("document_id") or "")},
+                document_id=str(job.get("document_id") or "") or None,
+            )
+    try:
+        from app.services.crud import bump_audit_queue_priority
+
+        bump_audit_queue_priority(cfg, target)
+    except Exception:  # pragma: no cover - durability is best effort
+        logger.warning("audit_queue_priority_write_failed", audit_id=target)
+    logger.info("audit_task_pinned", audit_id=target, moved=moved)
+    return "pinned"
 
 
 def cancel(audit_id: str) -> str:

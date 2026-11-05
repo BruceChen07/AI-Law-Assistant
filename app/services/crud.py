@@ -107,6 +107,7 @@ def save_audit_queue_item(
     retrieval_options=None,
     title="",
     user_id="",
+    priority=0,
 ):
     import json as _json
 
@@ -117,8 +118,8 @@ def save_audit_queue_item(
         """
         INSERT INTO audit_queue(
             audit_id, document_id, file_path, lang, retrieval_options_json,
-            title, user_id, status, created_at, updated_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?)
+            title, user_id, status, priority, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(audit_id) DO UPDATE SET
             document_id=excluded.document_id,
             file_path=excluded.file_path,
@@ -127,6 +128,7 @@ def save_audit_queue_item(
             title=excluded.title,
             user_id=excluded.user_id,
             status=excluded.status,
+            priority=MAX(excluded.priority, audit_queue.priority),
             updated_at=excluded.updated_at
         """,
         (
@@ -138,6 +140,7 @@ def save_audit_queue_item(
             str(title or ""),
             str(user_id or ""),
             "queued",
+            int(priority or 0),
             now,
             now,
         ),
@@ -175,10 +178,10 @@ def list_audit_queue_items(cfg, statuses=("queued", "running"), limit=200):
     cur.execute(
         f"""
         SELECT audit_id, document_id, file_path, lang, retrieval_options_json,
-               title, user_id, status, created_at, updated_at
+               title, user_id, status, priority, created_at, updated_at
         FROM audit_queue
         WHERE status IN ({placeholders})
-        ORDER BY created_at ASC
+        ORDER BY priority DESC, created_at ASC
         LIMIT ?
         """,
         (*wanted, int(limit or 200)),
@@ -186,6 +189,23 @@ def list_audit_queue_items(cfg, statuses=("queued", "running"), limit=200):
     rows = [dict(row) for row in cur.fetchall()]
     conn.close()
     return rows
+
+
+def bump_audit_queue_priority(cfg, audit_id):
+    """Move one queued audit ahead of every other queued audit (survives restart)."""
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("SELECT MAX(priority) FROM audit_queue")
+    row = cur.fetchone()
+    next_priority = int((row[0] if row and row[0] is not None else 0) or 0) + 1
+    cur.execute(
+        "UPDATE audit_queue SET priority=?, updated_at=? WHERE audit_id=?",
+        (next_priority, _utc_now_iso(), str(audit_id)),
+    )
+    updated = int(cur.rowcount or 0)
+    conn.commit()
+    conn.close()
+    return updated
 
 
 def list_contract_audits_paginated(cfg, limit=30, offset=0, status=None):

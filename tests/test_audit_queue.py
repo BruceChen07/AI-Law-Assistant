@@ -26,6 +26,34 @@ def _cfg(tmp_path: Path) -> dict:
     return cfg
 
 
+def _contracts_client(cfg):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.dependencies import (
+        get_app_embedder,
+        get_app_llm,
+        get_app_reranker,
+        get_app_translator,
+        get_current_user,
+    )
+    from app.api.routers import contracts as contracts_router
+
+    class _FakeEmbedder:
+        def get_registry_status(self):
+            return {"ready": True, "default_language": "zh", "languages": ["zh"]}
+
+    app = FastAPI()
+    app.include_router(contracts_router.build_router(cfg))
+    app.dependency_overrides[get_current_user] = lambda: {
+        "id": "user-1", "role": "admin"}
+    app.dependency_overrides[get_app_llm] = lambda: None
+    app.dependency_overrides[get_app_embedder] = lambda: _FakeEmbedder()
+    app.dependency_overrides[get_app_reranker] = lambda: None
+    app.dependency_overrides[get_app_translator] = lambda: None
+    return TestClient(app)
+
+
 def _wait_until(predicate, timeout: float = 10.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -172,3 +200,77 @@ def test_resume_pending_requeues_after_restart(tmp_path, monkeypatch):
         lambda: get_contract_audit_progress(cfg, "audit-recovered")["status"] == "done")
     # the durable queue row is dropped after the job returns, not with the result
     assert _wait_until(lambda: list_audit_queue_items(cfg) == [])
+
+def test_pin_moves_a_queued_audit_to_the_front(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    gate = type("Gate", (), {"started": threading.Event(), "release": threading.Event()})()
+    _install_pipeline(monkeypatch, gate=gate)
+
+    _submit(cfg, "audit-run")
+    assert gate.started.wait(5)
+    _submit(cfg, "audit-first")
+    _submit(cfg, "audit-second")
+    _submit(cfg, "audit-third")
+
+    assert [item["audit_id"] for item in audit_task_runner.queue_snapshot()["queued"]] == [
+        "audit-first", "audit-second", "audit-third"]
+
+    assert audit_task_runner.pin("audit-third") == "pinned"
+
+    queued = audit_task_runner.queue_snapshot()["queued"]
+    assert [item["audit_id"] for item in queued] == [
+        "audit-third", "audit-first", "audit-second"]
+    assert [item["position"] for item in queued] == [1, 2, 3]
+    pinned = get_contract_audit_progress(cfg, "audit-third")
+    assert pinned["status"] == "queued"
+    detail = json.loads(pinned["detail_json"])
+    assert detail["position"] == 1 and detail["ahead"] == 1
+
+    # pinning the head again is a no-op, unknown ids and running audits are refused
+    assert audit_task_runner.pin("audit-third") == "already_first"
+    assert audit_task_runner.pin("missing-audit") == "missing"
+    assert audit_task_runner.pin("audit-run") == "running"
+
+    gate.release.set()
+
+
+def test_queue_snapshot_lists_contract_titles_in_order(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    gate = type("Gate", (), {"started": threading.Event(), "release": threading.Event()})()
+    _install_pipeline(monkeypatch, gate=gate)
+
+    _submit(cfg, "audit-alpha")
+    assert gate.started.wait(5)
+    _submit(cfg, "audit-beta")
+    _submit(cfg, "audit-gamma")
+
+    snapshot = audit_task_runner.queue_snapshot()
+    assert snapshot["running"][0]["title"] == "audit-alpha"
+    assert [item["title"] for item in snapshot["queued"]] == ["audit-beta", "audit-gamma"]
+    assert snapshot["order"] == ["audit-alpha", "audit-beta", "audit-gamma"]
+
+    gate.release.set()
+
+
+def test_pin_endpoint_rejects_running_and_unknown(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    client = _contracts_client(cfg)
+
+    monkeypatch.setattr(audit_task_runner, "pin", lambda audit_id: "running")
+    running = client.post("/contracts/audit/queue/audit-x/pin")
+    assert running.status_code == 409
+    assert running.json()["detail"]["code"] == "AUDIT_ALREADY_RUNNING"
+
+    monkeypatch.setattr(audit_task_runner, "pin", lambda audit_id: "missing")
+    missing = client.post("/contracts/audit/queue/audit-y/pin")
+    assert missing.status_code == 404
+
+    monkeypatch.setattr(audit_task_runner, "pin", lambda audit_id: "pinned")
+    monkeypatch.setattr(audit_task_runner, "queue_snapshot", lambda: {
+        "running": [], "queued": [{"audit_id": "audit-y", "position": 1}],
+        "running_count": 0, "queued_count": 1,
+    })
+    pinned = client.post("/contracts/audit/queue/audit-y/pin")
+    assert pinned.status_code == 200
+    body = pinned.json()
+    assert body["pinned"] is True and body["position"] == 1
