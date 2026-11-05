@@ -147,6 +147,25 @@ def init_db(cfg):
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_contract_audit_created_at ON contract_audit(created_at)")
 
+    # Durable FIFO queue for contract audits: one audit runs at a time (the local
+    # llama.cpp server has a single slot) and queued jobs survive a restart.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS audit_queue(
+        audit_id TEXT PRIMARY KEY,
+        document_id TEXT,
+        file_path TEXT NOT NULL,
+        lang TEXT,
+        retrieval_options_json TEXT,
+        title TEXT,
+        user_id TEXT,
+        status TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_audit_queue_status ON audit_queue(status, created_at)")
+
     # Per-chunk audit results: written as each chunk finishes so a long audit can be
     # resumed, inspected, and re-audited without losing finished work.
     cur.execute("""

@@ -97,6 +97,97 @@ def insert_contract_audit(cfg, audit_id, document_id, status, result_json, model
     conn.close()
 
 
+def save_audit_queue_item(
+    cfg,
+    *,
+    audit_id,
+    document_id,
+    file_path,
+    lang,
+    retrieval_options=None,
+    title="",
+    user_id="",
+):
+    import json as _json
+
+    now = _utc_now_iso()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO audit_queue(
+            audit_id, document_id, file_path, lang, retrieval_options_json,
+            title, user_id, status, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(audit_id) DO UPDATE SET
+            document_id=excluded.document_id,
+            file_path=excluded.file_path,
+            lang=excluded.lang,
+            retrieval_options_json=excluded.retrieval_options_json,
+            title=excluded.title,
+            user_id=excluded.user_id,
+            status=excluded.status,
+            updated_at=excluded.updated_at
+        """,
+        (
+            str(audit_id),
+            str(document_id or ""),
+            str(file_path or ""),
+            str(lang or ""),
+            _json.dumps(retrieval_options or {}, ensure_ascii=False),
+            str(title or ""),
+            str(user_id or ""),
+            "queued",
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_audit_queue_status(cfg, audit_id, status):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE audit_queue SET status=?, updated_at=? WHERE audit_id=?",
+        (str(status or ""), _utc_now_iso(), str(audit_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_audit_queue_item(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM audit_queue WHERE audit_id=?", (str(audit_id),))
+    conn.commit()
+    conn.close()
+
+
+def list_audit_queue_items(cfg, statuses=("queued", "running"), limit=200):
+    wanted = [str(item) for item in (statuses or ())]
+    if not wanted:
+        return []
+    placeholders = ",".join("?" for _ in wanted)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        f"""
+        SELECT audit_id, document_id, file_path, lang, retrieval_options_json,
+               title, user_id, status, created_at, updated_at
+        FROM audit_queue
+        WHERE status IN ({placeholders})
+        ORDER BY created_at ASC
+        LIMIT ?
+        """,
+        (*wanted, int(limit or 200)),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
 def list_contract_audits_paginated(cfg, limit=30, offset=0, status=None):
     conn = get_conn(cfg)
     cur = conn.cursor()
