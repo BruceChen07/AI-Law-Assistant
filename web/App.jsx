@@ -1197,6 +1197,20 @@ export default function App() {
     }
   }
 
+  // true/false = the server does/does not know this audit; null = cannot tell (offline).
+  const auditExistsOnServer = async (auditId) => {
+    const id = String(auditId || "")
+    if (!id) return null
+    try {
+      const task = await getAuditTask(id)
+      return Boolean(String(task?.status || ""))
+    } catch (err) {
+      if (Number(err?.status) === 404) return false
+      if (Number(err?.status) === 401) return null
+      return null
+    }
+  }
+
   const onContractUpload = async (e) => {
     e.preventDefault()
     if (!contractFile) return
@@ -1268,9 +1282,27 @@ export default function App() {
         return
       }
       if (isTransportError(err)) {
-        // Request aborted locally: the audit may well still be running server-side.
+        // The request may have died locally while the server kept working — or it may
+        // never have arrived. Ask the server before claiming a background task,
+        // otherwise the page tracks an audit id nobody knows (the "0% ghost" case).
+        const registered = await auditExistsOnServer(nextAuditId)
+        if (registered === true) {
+          setContractError(t.auditStillRunning)
+          trackBackgroundAudit(nextAuditId)
+          return
+        }
+        clearAuditProgressPolling()
+        setContractLoading(false)
+        setActiveAuditId("")
+        rememberAuditTask("")
+        if (registered === false) {
+          bumpProgress(0, "failed")
+          setContractError(t.auditSubmitNotReceived)
+          return
+        }
+        // The probe failed too (backend unreachable): keep the cautious message.
+        bumpProgress(0, "failed")
         setContractError(t.auditStillRunning)
-        trackBackgroundAudit(nextAuditId)
         return
       }
       clearAuditProgressPolling()
