@@ -8,6 +8,7 @@ timeout, closed tab or dropped connection can no longer abort or orphan an audit
 from __future__ import annotations
 
 import json
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,6 +31,9 @@ _pending: List[Dict[str, Any]] = []
 _lock = threading.Lock()
 _cond = threading.Condition(_lock)
 _worker_started = False
+# Tests import app.main, which builds the real app and would otherwise resume the
+# production queue inside the test process. Tests may opt in explicitly.
+_allow_resume_in_tests = False
 
 # Small subset of the audit meta the UI needs to restore a finished task.
 _RESULT_META_KEYS = (
@@ -98,17 +102,24 @@ def _record_progress(
                        audit_id=audit_id, error=str(exc))
 
 
-def has_active_document(document_id: str) -> bool:
-    """True when the document already has a queued or running audit."""
+def active_audit_for_document(document_id: str) -> str:
+    """audit_id of the queued/running audit for this document (empty when none)."""
     target = str(document_id or "")
     if not target:
-        return False
+        return ""
     with _lock:
-        if any(str(item.get("document_id") or "") == target
-               for item in _running.values()):
-            return True
-        return any(str(job.get("document_id") or "") == target
-                   for job in _pending)
+        for item in _running.values():
+            if str(item.get("document_id") or "") == target:
+                return str(item.get("audit_id") or "")
+        for job in _pending:
+            if str(job.get("document_id") or "") == target:
+                return str(job.get("audit_id") or "")
+    return ""
+
+
+def has_active_document(document_id: str) -> bool:
+    """True when the document already has a queued or running audit."""
+    return bool(active_audit_for_document(document_id))
 
 
 def _persist_queue_row(cfg: Dict[str, Any], job: Dict[str, Any]) -> None:
@@ -308,13 +319,26 @@ def cancel(audit_id: str) -> str:
 def resume_pending(
     cfg: Dict[str, Any],
     services_factory: Optional[Callable[[], Any]] = None,
+    min_age_seconds: Optional[int] = None,
 ) -> int:
-    """Re-enqueue audits left queued/running by a previous process."""
+    """Re-enqueue audits left queued/running by a previous process.
+
+    Rows with a fresh heartbeat (a live worker in another process) and rows created by
+    a test process are skipped, otherwise a second process could run the same audit.
+    """
+    if "pytest" in sys.modules and not _allow_resume_in_tests:
+        logger.info("audit_queue_resume_skipped reason=test_process")
+        return 0
     resumed = 0
     try:
+        from datetime import timedelta
+
         from app.services.crud import list_audit_queue_items
 
         items = list_audit_queue_items(cfg, statuses=("queued", "running"))
+        grace = min_age_seconds if min_age_seconds is not None else int(
+            cfg.get("audit_queue_resume_min_age_seconds") or 30)
+        fresh_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=max(0, grace))).isoformat()
     except Exception as exc:  # pragma: no cover - startup must never fail
         logger.warning("audit_queue_resume_read_failed", error=str(exc))
         return 0
@@ -324,6 +348,9 @@ def resume_pending(
         if not audit_id or not file_path:
             continue
         if is_audit_running(audit_id):
+            continue
+        if str(row.get("updated_at") or "") > fresh_cutoff:
+            # Another process just touched this row: it is not an orphan.
             continue
         if not callable(services_factory):
             _set_queue_row_status(cfg, audit_id, "queued")

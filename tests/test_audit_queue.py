@@ -162,7 +162,8 @@ def test_resume_pending_requeues_after_restart(tmp_path, monkeypatch):
         user_id="user-1",
     )
 
-    resumed = audit_task_runner.resume_pending(cfg, lambda: None)
+    monkeypatch.setattr(audit_task_runner, "_allow_resume_in_tests", True)
+    resumed = audit_task_runner.resume_pending(cfg, lambda: None, min_age_seconds=0)
 
     assert resumed == 1
     assert _wait_until(
