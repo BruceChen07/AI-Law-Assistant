@@ -498,6 +498,12 @@ export default function App() {
     }
     const progress = task?.progress && typeof task.progress === "object" ? task.progress : {}
     applyServerAuditProgress(progress)
+    // The task row is authoritative about which contract this audit belongs to.
+    const taskDocId = String(task?.document_id || progress.document_id || "")
+    if (taskDocId && taskDocId !== documentId) {
+      setDocumentId(taskDocId)
+      loadContractPreview(taskDocId)
+    }
     const status = String(task?.status || progress.status || "")
     if (status === "done") {
       setContractProgress(100)
@@ -1138,6 +1144,15 @@ export default function App() {
     startAuditProgressPolling(auditId, { resume: true })
   }
 
+  const onViewQueueDocument = (docId) => {
+    const id = String(docId || "")
+    if (!id) return
+    setDocumentId(id)
+    setContractResult(null)
+    resetContractResultState?.()
+    loadContractPreview(id)
+  }
+
   const onPinQueuedAudit = async (auditId) => {
     const id = String(auditId || "")
     if (!id) return
@@ -1200,6 +1215,23 @@ export default function App() {
     }
   }
 
+  // Keep preview + summary bound to the audit this page is actually tracking.
+  const showTrackedAuditDocument = async (auditId) => {
+    const id = String(auditId || "")
+    if (!id) return
+    try {
+      const task = await getAuditTask(id)
+      const docId = String(task?.document_id || task?.progress?.document_id || "")
+      const filename = String(task?.meta?.contract_filename || task?.filename || "")
+      if (!docId) return
+      if (filename) setDocumentFilename(filename)
+      setDocumentId(docId)
+      loadContractPreview(docId)
+    } catch {
+      // The audit may already be gone; leave the current view untouched.
+    }
+  }
+
   // true/false = the server does/does not know this audit; null = cannot tell (offline).
   const auditExistsOnServer = async (auditId) => {
     const id = String(auditId || "")
@@ -1247,16 +1279,11 @@ export default function App() {
       form.append("tax_focus", String(contract.taxFocus))
       form.append("audit_id", nextAuditId)
       form.append("file", contractFile)
-      setDocumentFilename(String(contractFile?.name || ""))
       setContractSubmitting(true)
       const job = await auditContract(form)
       const nextDocumentId = String(job?.document_id || "")
       setContractProgressStage("auditing")
       setContractProgress(Number(job?.progress) || 20)
-      if (nextDocumentId) {
-        setDocumentId(nextDocumentId)
-        loadContractPreview(nextDocumentId)
-      }
       // Submission only registers the task. When another audit is already running the
       // new one simply joins the queue; keep tracking the running one and surface the
       // queue position instead of hijacking the progress card.
@@ -1270,8 +1297,17 @@ export default function App() {
           .replace("{ahead}", String(ahead)))
       }
       if (ahead > 0 && activeAuditId) {
+        // Joining the queue: this page keeps showing the audit that is running, so the
+        // preview and the snapshot must stay on THAT contract, never on the newcomer.
         rememberAuditTask(submittedAuditId)
+        await showTrackedAuditDocument(activeAuditId)
       } else {
+        // This page now follows the new audit: bind preview + snapshot to its document.
+        setDocumentFilename(String(contractFile?.name || ""))
+        if (nextDocumentId) {
+          setDocumentId(nextDocumentId)
+          loadContractPreview(nextDocumentId)
+        }
         trackBackgroundAudit(submittedAuditId)
       }
       setContractLoading(false)
@@ -1595,6 +1631,15 @@ export default function App() {
                         <span className="history-status history-status-running">{t.auditQueueRunning}</span>
                         <span>{Number(live?.percent ?? 0)}%</span>
                       </div>
+                      <div className="history-item-actions">
+                        <button
+                          className="ghost"
+                          disabled={!item.document_id || item.document_id === documentId}
+                          onClick={() => onViewQueueDocument(item.document_id)}
+                        >
+                          {t.auditQueueViewContract}
+                        </button>
+                      </div>
                     </div>
                   )
                 })}
@@ -1607,6 +1652,13 @@ export default function App() {
                       </span>
                     </div>
                     <div className="history-item-actions">
+                      <button
+                        className="ghost"
+                        disabled={!item.document_id || item.document_id === documentId}
+                        onClick={() => onViewQueueDocument(item.document_id)}
+                      >
+                        {t.auditQueueViewContract}
+                      </button>
                       <button
                         className="ghost"
                         disabled={pinBusyId === item.audit_id || Number(item.position) <= 1}
@@ -1627,7 +1679,7 @@ export default function App() {
               </div>
             </div>
           )}
-          {!contractLoading && idleServerAudits.length > 0 && (
+          {!contractLoading && !hasAuditQueue && idleServerAudits.length > 0 && (
             <div className="audit-progress">
               <div className="audit-progress-head">
                 <span>{String(t.auditServerRunning || "Server audits running: {n}").replace("{n}", String(idleServerAudits.length))}</span>
