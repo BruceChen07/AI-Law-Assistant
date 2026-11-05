@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
+import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, pinQueuedAudit, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import History from "./History"
@@ -128,6 +128,7 @@ export default function App() {
   const [activeAuditId, setActiveAuditId] = useState("")
   const [serverRunningAudits, setServerRunningAudits] = useState([])
   const [contractSubmitting, setContractSubmitting] = useState(false)
+  const [pinBusyId, setPinBusyId] = useState("")
   const [queueNotice, setQueueNotice] = useState("")
   const [auditQueue, setAuditQueue] = useState({ running_count: 0, queued: [] })
   const [exportingFormat, setExportingFormat] = useState("")
@@ -288,6 +289,7 @@ export default function App() {
       .replace("{ahead}", String(Math.max(0, ahead)))
   }, [contractProgressDetail, t])
   const isQueuedAudit = normalizedProgressStage === "queued"
+  const hasAuditQueue = Number(auditQueue?.running_count || 0) + Number(auditQueue?.queued_count || 0) > 0
   const llmProgressText = useMemo(() => {
     const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
     if (!detail) return ""
@@ -1051,6 +1053,21 @@ export default function App() {
     startAuditProgressPolling(auditId, { resume: true })
   }
 
+  const onPinQueuedAudit = async (auditId) => {
+    const id = String(auditId || "")
+    if (!id) return
+    setPinBusyId(id)
+    try {
+      const result = await pinQueuedAudit(id)
+      if (result?.queue && typeof result.queue === "object") setAuditQueue(result.queue)
+      setQueueNotice(t.auditPinned)
+    } catch (err) {
+      setContractError(String(err?.message || err || t.auditPinFailed))
+    } finally {
+      setPinBusyId("")
+    }
+  }
+
   const onCancelQueuedAudit = async (auditId) => {
     const id = String(auditId || "")
     if (!id) return
@@ -1394,6 +1411,54 @@ export default function App() {
                 </div>
               )}
               {queueNotice && <div className="audit-progress-subnote">{queueNotice}</div>}
+            </div>
+          )}
+          {hasAuditQueue && (
+            <div className="audit-progress">
+              <div className="audit-progress-head">
+                <span>{t.auditQueueTitle}</span>
+                <span>
+                  {String(t.auditQueueSummary || "队列：运行中 {running} · 排队 {queued}")
+                    .replace("{running}", String(Number(auditQueue?.running_count || 0)))
+                    .replace("{queued}", String(Number(auditQueue?.queued_count || 0)))}
+                </span>
+              </div>
+              <div className="history-list">
+                {(auditQueue?.running || []).map(item => (
+                  <div key={item.audit_id} className="history-item">
+                    <div className="history-item-head">
+                      <strong>{item.title || String(item.audit_id).slice(0, 8)}</strong>
+                      <span className="history-status history-status-running">{t.auditQueueRunning}</span>
+                    </div>
+                  </div>
+                ))}
+                {(auditQueue?.queued || []).map(item => (
+                  <div key={item.audit_id} className="history-item">
+                    <div className="history-item-head">
+                      <strong>{item.title || String(item.audit_id).slice(0, 8)}</strong>
+                      <span>
+                        {String(t.auditQueueOrder || "第 {n} 位").replace("{n}", String(item.position))}
+                      </span>
+                    </div>
+                    <div className="history-item-actions">
+                      <button
+                        className="ghost"
+                        disabled={pinBusyId === item.audit_id || Number(item.position) <= 1}
+                        onClick={() => onPinQueuedAudit(item.audit_id)}
+                      >
+                        {t.auditPinToFront}
+                      </button>
+                      <button
+                        className="ghost"
+                        disabled={pinBusyId === item.audit_id}
+                        onClick={() => onCancelQueuedAudit(item.audit_id)}
+                      >
+                        {t.auditCancelQueued}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {!contractLoading && idleServerAudits.length > 0 && (

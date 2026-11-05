@@ -25,6 +25,13 @@ export async function cancelQueuedAudit(auditId) {
   })
 }
 
+export async function pinQueuedAudit(auditId) {
+  return requestJson(`${API_BASE}/contracts/audit/queue/${auditId}/pin`, {
+    method: "POST",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function getAuditHistory({ limit = 30, offset = 0, status = "" } = {}) {
   const query = new URLSearchParams({
     limit: String(limit),
