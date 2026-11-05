@@ -132,6 +132,7 @@ export default function App() {
   const [serverRunningAudits, setServerRunningAudits] = useState([])
   const [contractSubmitting, setContractSubmitting] = useState(false)
   const [pinBusyId, setPinBusyId] = useState("")
+  const [sessionLost, setSessionLost] = useState(false)
   const [queueNotice, setQueueNotice] = useState("")
   const [auditQueue, setAuditQueue] = useState({ running_count: 0, queued: [] })
   const [exportingFormat, setExportingFormat] = useState("")
@@ -564,7 +565,13 @@ export default function App() {
       try {
         const data = await getAuditQueue()
         if (!cancelled && data && typeof data === "object") setAuditQueue(data)
-      } catch {}
+      } catch (err) {
+        // A background poll must not fail silently: a dead session or a stopped
+        // backend otherwise looks like "nothing is queued".
+        if (cancelled) return
+        if (Number(err?.status) === 401) setSessionLost(true)
+        else if (isTransportError(err)) setSessionLost(false)
+      }
     }
     loadQueue()
     const timer = setInterval(loadQueue, 5000)
@@ -584,8 +591,10 @@ export default function App() {
         if (!cancelled) {
           setServerRunningAudits(Array.isArray(data?.items) ? data.items : [])
         }
-      } catch {
-        if (!cancelled) setServerRunningAudits([])
+      } catch (err) {
+        if (cancelled) return
+        setServerRunningAudits([])
+        if (Number(err?.status) === 401) setSessionLost(true)
       }
     }
     load()
@@ -1020,7 +1029,11 @@ export default function App() {
         setPreviewZoom(1)
         setPreviewScrollPercent(0)
       } catch (err) {
-        setPreviewError(String(err?.message || err || "Preview failed"))
+        setPreviewError(
+          isTransportError(err)
+            ? t.backendUnreachable
+            : String(err?.message || err || t.previewError)
+        )
         setPreviewMode("text")
         setPreviewPages([])
         setStreamVisiblePages({})
@@ -1471,6 +1484,7 @@ export default function App() {
             <span>{contractFile ? contractFile.name : t.noFileChosen}</span>
             <em>{t.uploadHint}</em>
           </div>
+          {sessionLost && <div className="error">{t.sessionLostBanner}</div>}
           {contractError && <div className="error">{contractError}</div>}
           <button className="primary" onClick={onContractUpload} disabled={contractSubmitting}>
             {contractSubmitting
