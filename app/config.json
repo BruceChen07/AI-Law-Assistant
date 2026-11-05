@@ -61,10 +61,13 @@
         }
     },
     "mineru": {
-        "mode": "auto",
+        "mode": "force_pipeline",
         "fallback_backends": [
             "pipeline"
         ],
+        "read_timeout_sec": 600,
+        "retries": 5,
+        "max_workers": 4,
         "method": "auto",
         "lang": "ch",
         "device": "cpu",
