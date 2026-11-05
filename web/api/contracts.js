@@ -12,6 +12,17 @@ export async function auditContract(formData) {
   })
 }
 
+export async function getContractSummary(documentId, language = "zh") {
+  // The summary may run one LLM pass (minutes on CPU), so use the long timeout.
+  return requestJson(
+    `${API_BASE}/contracts/${documentId}/summary?language=${encodeURIComponent(language)}`,
+    {
+      headers: { ...getAuthHeaders() },
+      timeoutMs: getLongRequestTimeoutMs(300)
+    }
+  )
+}
+
 export async function getAuditQueue() {
   return requestJson(`${API_BASE}/contracts/audit/queue`, {
     headers: { ...getAuthHeaders() }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, pinQueuedAudit, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
+import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractSummary, pinQueuedAudit, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import History from "./History"
@@ -99,6 +99,9 @@ export default function App() {
   const [contractError, setContractError] = useState("")
   const [contractLoading, setContractLoading] = useState(false)
   const [contractResult, setContractResult] = useState(null)
+  const [contractSummary, setContractSummary] = useState(null)
+  const [contractSummaryLoading, setContractSummaryLoading] = useState(false)
+  const summaryLoadedKeyRef = useRef("")
   const [contractMeta, setContractMeta] = useState(null)
   const [showEvidence, setShowEvidence] = useState(false)
   const [documentId, setDocumentId] = useState("")
@@ -290,6 +293,11 @@ export default function App() {
   }, [contractProgressDetail, t])
   const isQueuedAudit = normalizedProgressStage === "queued"
   const hasAuditQueue = Number(auditQueue?.running_count || 0) + Number(auditQueue?.queued_count || 0) > 0
+  const summaryTitle = String(contractSummary?.title || "").trim()
+  const summaryAbout = String(contractSummary?.about || "").trim()
+  const summaryCore = String(contractSummary?.core || "").trim()
+  const summaryTax = String(contractSummary?.tax || "").trim()
+  const hasContractSummary = Boolean(summaryTitle || summaryAbout || summaryCore || summaryTax)
   const llmProgressText = useMemo(() => {
     const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
     if (!detail) return ""
@@ -486,6 +494,31 @@ export default function App() {
     return () => clearAuditProgressPolling()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    // The contract summary is independent of the audit: fetch it as soon as the
+    // document exists so the user learns what the contract is about while the audit
+    // still runs. Failures stay silent (the panel is optional).
+    const docId = String(documentId || "")
+    if (!docId) return
+    const key = `${docId}|${uiLang}`
+    if (summaryLoadedKeyRef.current === key) return
+    summaryLoadedKeyRef.current = key
+    let cancelled = false
+    setContractSummaryLoading(true)
+    getContractSummary(docId, uiLang)
+      .then((data) => {
+        if (!cancelled) setContractSummary(data && data.summary ? data.summary : null)
+      })
+      .catch(() => {
+        if (!cancelled) setContractSummary(null)
+      })
+      .finally(() => {
+        if (!cancelled) setContractSummaryLoading(false)
+      })
+    return () => { cancelled = true }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, uiLang])
 
   useEffect(() => {
     // Keep a live view of the audit queue so the user can add several contracts and
@@ -1479,6 +1512,41 @@ export default function App() {
             </div>
           )}
         </div>
+      </section>
+      <section className="card contract-summary-panel">
+        <div className="result-head">
+          <div className="panel-title">{t.summary}</div>
+          <span className="audit-progress-subnote">
+            {contractSummaryLoading && !hasContractSummary ? t.summaryLoading : ""}
+          </span>
+        </div>
+        {hasContractSummary ? (
+          <div className="contract-summary-card">
+            {summaryTitle && <div className="contract-summary-headline">{summaryTitle}</div>}
+            {summaryAbout && (
+              <div className="contract-summary-section">
+                <div className="contract-summary-label">{t.summaryAbout}</div>
+                <div className="contract-summary-text">{summaryAbout}</div>
+              </div>
+            )}
+            {summaryCore && (
+              <div className="contract-summary-section">
+                <div className="contract-summary-label">{t.summaryCore}</div>
+                <div className="contract-summary-text">{summaryCore}</div>
+              </div>
+            )}
+            {summaryTax && (
+              <div className="contract-summary-section">
+                <div className="contract-summary-label">{t.summaryTax}</div>
+                <div className="contract-summary-text">{summaryTax}</div>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="audit-progress-note">
+            {contractSummaryLoading ? t.summaryLoading : t.summaryHint}
+          </div>
+        )}
       </section>
       <div className="workbench-grid">
         <section className="card contract-preview">

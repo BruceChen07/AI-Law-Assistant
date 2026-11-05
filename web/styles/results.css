@@ -454,3 +454,47 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
+
+/* 合同速读摘要（独立于审计结果，来自 /contracts/{id}/summary） */
+.contract-summary-panel {
+  margin-top: 16px;
+}
+
+.contract-summary-card {
+  display: grid;
+  gap: 12px;
+  padding: 14px 15px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #e5e0d5);
+  background: var(--panel-soft, rgba(0, 0, 0, 0.02));
+}
+
+.contract-summary-headline {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.contract-summary-section {
+  display: grid;
+  gap: 4px;
+}
+
+.contract-summary-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent, #b8860b);
+}
+
+.contract-summary-text {
+  font-size: 14px;
+  line-height: 1.72;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.contract-summary-loading {
+  font-size: 13px;
+  color: var(--muted);
+}
