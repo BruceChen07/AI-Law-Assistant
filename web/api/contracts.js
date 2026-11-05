@@ -36,6 +36,14 @@ export async function cancelQueuedAudit(auditId) {
   })
 }
 
+export async function cancelAudit(auditId) {
+  // Abandon an audit: queued jobs leave the queue, running ones stop at the next chunk.
+  return requestJson(`${API_BASE}/contracts/audit/${auditId}/cancel`, {
+    method: "POST",
+    headers: { ...getAuthHeaders() }
+  })
+}
+
 export async function pinQueuedAudit(auditId) {
   return requestJson(`${API_BASE}/contracts/audit/queue/${auditId}/pin`, {
     method: "POST",

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractSummary, pinQueuedAudit, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
+import { auditContract, cancelAudit, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractSummary, pinQueuedAudit, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import History from "./History"
@@ -438,6 +438,17 @@ export default function App() {
           clearAuditProgressPolling()
           if (resume) await finalizeResumedAudit(auditId, status, payload)
         }
+        const knownStatus = Boolean(status)
+        if (!knownStatus) {
+          // The server has no state for this id: stop pretending an audit is running.
+          clearAuditProgressPolling()
+          setActiveAuditId("")
+          setContractLoading(false)
+          rememberAuditTask("")
+          setContractProgressStage("cancelled")
+          setContractProgress(0)
+          setContractError(t.auditNotFound)
+        }
       } catch (err) {
         if (Number(err?.status) === 401) {
           // Auth lost: polling can no longer observe the audit. Say so instead of failing silently.
@@ -445,7 +456,18 @@ export default function App() {
           if (resume) setContractError(t.sessionExpired)
           return
         }
-        // Ignore transient polling errors while the main audit request is still running.
+        if (Number(err?.status) === 404) {
+          // The audit no longer exists (cleaned up / never created): drop the ghost task.
+          clearAuditProgressPolling()
+          setActiveAuditId("")
+          setContractLoading(false)
+          rememberAuditTask("")
+          setContractProgressStage("cancelled")
+          setContractProgress(0)
+          setContractError(t.auditNotFound)
+          return
+        }
+        // Ignore other transient polling errors while the main audit request is still running.
       }
     }
     pollOnce()
@@ -462,6 +484,12 @@ export default function App() {
       task = await getAuditTask(stored)
     } catch (err) {
       if (Number(err?.status) === 401) setContractError(t.sessionExpired)
+      if (Number(err?.status) === 404) {
+        // Ghost task from an older session: forget it instead of showing a stuck bar.
+        rememberAuditTask("")
+        setActiveAuditId("")
+        setContractLoading(false)
+      }
       return
     }
     const progress = task?.progress && typeof task.progress === "object" ? task.progress : {}
@@ -482,6 +510,14 @@ export default function App() {
         ? t.auditInterrupted
         : (status === "cancelled" ? t.auditCancelled : t.auditResumeFailed)
       setContractError(String(progress.message || fallbackMessage))
+      return
+    }
+    if (!status) {
+      // No usable state on the server: forget the stored id (avoids "在跑" 0% ghosts).
+      rememberAuditTask("")
+      setActiveAuditId("")
+      setContractLoading(false)
+      setContractError(t.auditNotFound)
       return
     }
     setContractLoading(true)
@@ -1101,6 +1137,36 @@ export default function App() {
     }
   }
 
+  const onAbandonAudit = async (auditId) => {
+    const id = String(auditId || "")
+    if (!id) return
+    try {
+      const result = await cancelAudit(id)
+      const cancelling = Boolean(result?.cancelling)
+      setQueueNotice(cancelling ? t.auditAbandonRequested : t.auditAbandoned)
+      if (!cancelling) {
+        clearAuditProgressPolling()
+        setContractLoading(false)
+        setActiveAuditId("")
+        rememberAuditTask("")
+        setContractProgressStage("cancelled")
+        setContractProgress(0)
+      }
+    } catch (err) {
+      if (Number(err?.status) === 404) {
+        clearAuditProgressPolling()
+        setContractLoading(false)
+        setActiveAuditId("")
+        rememberAuditTask("")
+        setContractProgressStage("cancelled")
+        setContractProgress(0)
+        setContractError(t.auditNotFound)
+        return
+      }
+      setContractError(String(err?.message || err || t.auditAbandonFailed))
+    }
+  }
+
   const onCancelQueuedAudit = async (auditId) => {
     const id = String(auditId || "")
     if (!id) return
@@ -1444,6 +1510,13 @@ export default function App() {
                 </div>
               )}
               {queueNotice && <div className="audit-progress-subnote">{queueNotice}</div>}
+              {activeAuditId && !isQueuedAudit && (
+                <div className="history-item-actions">
+                  <button className="ghost" onClick={() => onAbandonAudit(activeAuditId)}>
+                    {t.auditAbandon}
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {hasAuditQueue && (
