@@ -142,6 +142,12 @@ export async function ensureOk(res) {
   }
   const error = new Error(message)
   error.status = Number(res.status) || 0
+  // Structured detail (code / audit_id / ...) so callers can react, e.g. adopt the
+  // audit that already occupies the queue for this contract.
+  try {
+    const parsed = JSON.parse(text)
+    if (parsed?.detail && typeof parsed.detail === "object") error.detail = parsed.detail
+  } catch {}
   throw error
 }
 

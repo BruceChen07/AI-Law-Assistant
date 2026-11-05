@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
+import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import History from "./History"
@@ -8,6 +8,10 @@ import { appI18n } from "./i18n/appI18n"
 const THEME_STORAGE_KEY = "ui_theme"
 const APP_LANG_STORAGE_KEY = "ui_lang"
 const ACTIVE_AUDIT_STORAGE_KEY = "active_contract_audit_id"
+// Statuses after which the client must stop polling. "interrupted" (process restart)
+// and "cancelled" (user left the queue) are terminal too, otherwise the form stays
+// locked on a task that will never finish.
+const TERMINAL_AUDIT_STATUSES = new Set(["done", "failed", "interrupted", "cancelled"])
 const ADMIN_TABS = new Set(["stats", "documents", "users", "model", "skills", "regulations", "token-monitor", "llm-traces"])
 
 const normalizeTheme = (value) => (String(value || "").toLowerCase() === "light" ? "light" : "dark")
@@ -123,6 +127,9 @@ export default function App() {
   const [contractProgressDetail, setContractProgressDetail] = useState(null)
   const [activeAuditId, setActiveAuditId] = useState("")
   const [serverRunningAudits, setServerRunningAudits] = useState([])
+  const [contractSubmitting, setContractSubmitting] = useState(false)
+  const [queueNotice, setQueueNotice] = useState("")
+  const [auditQueue, setAuditQueue] = useState({ running_count: 0, queued: [] })
   const [exportingFormat, setExportingFormat] = useState("")
   const [exportError, setExportError] = useState("")
   const previewScrollRef = useRef(null)
@@ -266,6 +273,8 @@ export default function App() {
     finalizing: t.progressFinalizing,
     done: t.progressDone,
     failed: t.progressFailed,
+    interrupted: t.progressInterrupted,
+    cancelled: t.progressCancelled,
     working: t.progressWorking
   }[normalizedProgressStage] || contractProgressMessage || t.progressWorking
   const queuePositionText = useMemo(() => {
@@ -392,10 +401,13 @@ export default function App() {
         await applyAuditTaskResult(task)
         return
       }
-      bumpProgress(100, "failed")
+      bumpProgress(100, status === "cancelled" ? "cancelled" : "failed")
       setContractLoading(false)
       setActiveAuditId("")
-      setContractError(String(progressPayload?.message || t.auditResumeFailed))
+      const fallbackMessage = status === "interrupted"
+        ? t.auditInterrupted
+        : (status === "cancelled" ? t.auditCancelled : t.auditResumeFailed)
+      setContractError(String(progressPayload?.message || fallbackMessage))
     } catch (err) {
       setContractLoading(false)
       setActiveAuditId("")
@@ -412,7 +424,7 @@ export default function App() {
         const payload = await getAuditProgress(auditId)
         applyServerAuditProgress(payload)
         const status = String(payload?.status || "")
-        if (status === "done" || status === "failed") {
+        if (TERMINAL_AUDIT_STATUSES.has(status)) {
           clearAuditProgressPolling()
           if (resume) await finalizeResumedAudit(auditId, status, payload)
         }
@@ -453,10 +465,13 @@ export default function App() {
       await applyAuditTaskResult(task)
       return
     }
-    if (status === "failed") {
-      setContractProgressStage("failed")
+    if (status === "failed" || status === "interrupted" || status === "cancelled") {
+      setContractProgressStage(status === "cancelled" ? "cancelled" : "failed")
       setActiveAuditId("")
-      setContractError(String(progress.message || t.auditResumeFailed))
+      const fallbackMessage = status === "interrupted"
+        ? t.auditInterrupted
+        : (status === "cancelled" ? t.auditCancelled : t.auditResumeFailed)
+      setContractError(String(progress.message || fallbackMessage))
       return
     }
     setContractLoading(true)
@@ -468,6 +483,24 @@ export default function App() {
     resumeAuditFromStorage()
     return () => clearAuditProgressPolling()
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    // Keep a live view of the audit queue so the user can add several contracts and
+    // see which one is running and what is waiting behind it.
+    let cancelled = false
+    const loadQueue = async () => {
+      try {
+        const data = await getAuditQueue()
+        if (!cancelled && data && typeof data === "object") setAuditQueue(data)
+      } catch {}
+    }
+    loadQueue()
+    const timer = setInterval(loadQueue, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
   }, [])
 
   useEffect(() => {
@@ -1069,9 +1102,7 @@ export default function App() {
       form.append("audit_id", nextAuditId)
       form.append("file", contractFile)
       setDocumentFilename(String(contractFile?.name || ""))
-      rememberAuditTask(nextAuditId)
-      setActiveAuditId(nextAuditId)
-      startAuditProgressPolling(nextAuditId)
+      setContractSubmitting(true)
       const job = await auditContract(form)
       const nextDocumentId = String(job?.document_id || "")
       setContractProgressStage("auditing")
@@ -1080,12 +1111,31 @@ export default function App() {
         setDocumentId(nextDocumentId)
         loadContractPreview(nextDocumentId)
       }
-      // Submission only registers the task; keep polling until the task finishes.
-      trackBackgroundAudit(String(job?.audit_id || nextAuditId))
+      // Submission only registers the task. When another audit is already running the
+      // new one simply joins the queue; keep tracking the running one and surface the
+      // queue position instead of hijacking the progress card.
+      const submittedAuditId = String(job?.audit_id || nextAuditId)
+      const queueInfo = job?.queue && typeof job.queue === "object" ? job.queue : {}
+      const position = Number(queueInfo.position || 0)
+      const ahead = Math.max(0, Number(queueInfo.ahead || 0))
+      if (position > 0) {
+        setQueueNotice(String(t.auditQueuedNotice || "已加入审计队列：第 {position} 位（前面还有 {ahead} 个）")
+          .replace("{position}", String(position))
+          .replace("{ahead}", String(ahead)))
+      }
+      if (ahead > 0 && activeAuditId) {
+        rememberAuditTask(submittedAuditId)
+      } else {
+        trackBackgroundAudit(submittedAuditId)
+      }
+      setContractLoading(false)
     } catch (err) {
       if (Number(err?.status) === 409) {
-        setContractError(t.auditAlreadyRunning)
-        trackBackgroundAudit(nextAuditId)
+        const activeId = String(err?.detail?.audit_id || nextAuditId)
+        const alreadyQueued = String(err?.detail?.code || "") === "AUDIT_ALREADY_QUEUED"
+        setContractError(alreadyQueued ? t.auditAlreadyQueued : t.auditAlreadyRunning)
+        trackBackgroundAudit(activeId)
+        setContractLoading(false)
         return
       }
       if (isTransportError(err)) {
@@ -1105,6 +1155,8 @@ export default function App() {
         setContractError(String(err?.message || err || "Audit failed"))
       }
       resetContractResultState()
+    } finally {
+      setContractSubmitting(false)
     }
   }
 
@@ -1304,8 +1356,10 @@ export default function App() {
             <em>{t.uploadHint}</em>
           </div>
           {contractError && <div className="error">{contractError}</div>}
-          <button className="primary" onClick={onContractUpload} disabled={contractLoading}>
-            {contractLoading ? t.uploading : t.uploadBtn}
+          <button className="primary" onClick={onContractUpload} disabled={contractSubmitting}>
+            {contractSubmitting
+              ? t.submittingAudit
+              : (activeAuditId ? t.auditAddToQueue : t.uploadBtn)}
           </button>
           {showAuditProgress && (
             <div className="audit-progress">
@@ -1332,8 +1386,14 @@ export default function App() {
               {activeAuditId && (
                 <div className="audit-progress-subnote">
                   {t.auditBackgroundTracking}: {String(activeAuditId).slice(0, 8)}
+                  {Number(auditQueue?.queued_count || 0) > 0
+                    ? ` · ${String(t.auditQueueSummary || "队列：运行中 {running} · 排队 {queued}")
+                        .replace("{running}", String(Number(auditQueue?.running_count || 0)))
+                        .replace("{queued}", String(Number(auditQueue?.queued_count || 0)))}`
+                    : ""}
                 </div>
               )}
+              {queueNotice && <div className="audit-progress-subnote">{queueNotice}</div>}
             </div>
           )}
           {!contractLoading && idleServerAudits.length > 0 && (
