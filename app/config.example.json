@@ -4,6 +4,7 @@
     "files_dir": "../data/files",
     "static_dir": "../web/dist",
     "default_language": "zh",
+    "contract_summary_enabled": true,
     "embedding_profiles": {
         "zh": {
             "embedding_model": "../models/embedding/zh/model.onnx",

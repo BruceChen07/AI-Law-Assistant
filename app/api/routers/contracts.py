@@ -1,3 +1,4 @@
+import hashlib
 import os
 import uuid
 import json
@@ -52,6 +53,7 @@ from app.services.export_filenames import (
 from app.services.audit_utils import _normalize_lang
 from app.core.utils import extract_text_with_config
 from app.services.contract_audit import build_preview_clauses
+from app.services.contract_summary import build_contract_summary
 from app.core.config import get_config
 
 logger = logging.getLogger("law_assistant")
@@ -813,6 +815,90 @@ def build_router(cfg):
             "total": len(items),
             "stale_after_seconds": 300,
             "items": items,
+        }
+
+    @router.get("/contracts/{document_id}/summary")
+    def get_contract_summary(
+        document_id: str,
+        language: str = Query(default="zh"),
+        current_user: dict = Depends(get_current_user),
+        llm=Depends(get_app_llm),
+    ):
+        """Whole-contract quick summary, shown on the result page overview."""
+        doc = get_document_by_id_for_user(cfg, document_id, current_user["id"])
+        if not doc:
+            raise HTTPException(status_code=404, detail="document not found")
+        file_path = str(doc.get("file_path") or "")
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(
+                status_code=404, detail="document file not found")
+
+        source_filename = str(
+            doc.get("original_filename") or doc.get("filename") or f"{document_id}"
+        ).strip()
+        norm_lang = _normalize_lang(str(language or "zh"), default="zh")
+
+        try:
+            text, meta = extract_text_with_config(cfg, file_path)
+            preview_clauses = build_preview_clauses(text)
+            source_sha256 = hashlib.sha256(
+                str(text or "").encode("utf-8")).hexdigest()
+            summary_result = build_contract_summary(
+                cfg,
+                llm,
+                text,
+                norm_lang,
+                page_count=int(meta.get("page_count") or 0),
+                clause_count=len(preview_clauses),
+                source_filename=source_filename,
+                document_id=document_id,
+                source_sha256=source_sha256,
+            )
+        except Exception as exc:
+            logger.exception(
+                "contract_summary_endpoint_failed document_id=%s file=%s",
+                document_id,
+                file_path,
+            )
+            summary_result = {
+                "enabled": bool(cfg.get("contract_summary_enabled", True)),
+                "title": "",
+                "about": "",
+                "core": "",
+                "tax": "",
+                "source_file": source_filename,
+                "status": "error",
+                "source": "error",
+                "error": str(exc),
+            }
+            preview_clauses = []
+
+        summary_payload = summary_result.get("summary")
+        if not isinstance(summary_payload, dict):
+            summary_payload = {
+                key: str(summary_result.get(key) or "")
+                for key in ("title", "about", "core", "tax")
+            }
+        summary_chars = sum(len(str(value or ""))
+                            for value in summary_payload.values())
+
+        return {
+            "document_id": document_id,
+            "summary": summary_payload,
+            "meta": {
+                "contract_summary_enabled": bool(summary_result.get("enabled", False)),
+                "contract_summary_status": str(summary_result.get("status") or ""),
+                "contract_summary_chars": summary_chars,
+                "contract_summary_source": str(summary_result.get("source") or ""),
+                "contract_summary_error": str(summary_result.get("error") or ""),
+                "contract_summary_language": norm_lang,
+                "contract_summary_truncated": bool(summary_result.get("truncated")),
+                "contract_summary_source_chars": int(summary_result.get("source_chars") or 0),
+                "contract_summary_cache_hit": bool(summary_result.get("cache_hit")),
+                "contract_summary_map_reduce": bool(summary_result.get("map_reduce")),
+                "contract_summary_map_chunks": int(summary_result.get("map_chunks") or 0),
+                "preview_clause_total": len(preview_clauses),
+            },
         }
 
     @router.get("/contracts/{document_id}/audits")
