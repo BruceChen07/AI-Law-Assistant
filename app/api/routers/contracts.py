@@ -25,10 +25,12 @@ from app.services.crud import (
     get_contract_audit_progress as get_contract_audit_progress_row,
     list_contract_audit_progress_by_document,
     list_audit_queue_items,
+    list_contract_summaries as _list_summary_rows,
     list_contract_audit_progress_pending,
     list_contract_audits_paginated,
     list_running_contract_audit_progress,
     upsert_contract_audit_progress,
+    upsert_contract_summary as _save_summary_row,
 )
 from app.services.audit_artifacts import (
     artifact_root,
@@ -703,11 +705,13 @@ def build_router(cfg):
         limit: int = Query(30, ge=1, le=200),
         offset: int = Query(0, ge=0),
         status: str = Query("", description="done | failed | running | interrupted"),
+        lang: str = Query("zh", description="preferred summary language"),
         current_user: dict = Depends(get_current_user),
     ):
         """Paged audit history (DB rows + archive artifacts) for the history page."""
         _ = current_user
         status_filter = status.strip().lower()
+        summary_lang = _normalize_lang(str(lang or "zh"), default="zh")
         rows = list_contract_audits_paginated(
             cfg,
             limit=limit,
@@ -765,6 +769,26 @@ def build_router(cfg):
                     "has_result": False,
                 }
             )
+        # Attach the persisted contract snapshots (one batch query, never an LLM call).
+        doc_ids = [item["document_id"] for item in items if item.get("document_id")]
+        summaries = _list_summary_rows(cfg, doc_ids, summary_lang) if doc_ids else {}
+        missing = [doc for doc in set(doc_ids) if doc not in summaries]
+        if missing:
+            summaries.update(_list_summary_rows(cfg, missing, None))
+        for item in items:
+            row = summaries.get(str(item.get("document_id") or ""))
+            if not row:
+                item["summary"] = None
+                item["summary_status"] = ""
+                item["summary_updated_at"] = ""
+                continue
+            item["summary"] = {
+                key: str(row.get(key) or "")
+                for key in ("title", "about", "core", "tax")
+            }
+            item["summary_status"] = str(row.get("status") or "")
+            item["summary_updated_at"] = str(row.get("updated_at") or "")
+
         items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
         return {
             "total": len(items),
@@ -906,6 +930,20 @@ def build_router(cfg):
             }
         summary_chars = sum(len(str(value or ""))
                             for value in summary_payload.values())
+        # Persist it: the audit history reuses this row instead of paying for another
+        # LLM pass when the user opens an older record.
+        try:
+            _save_summary_row(
+                cfg,
+                document_id=document_id,
+                lang=norm_lang,
+                summary=summary_payload,
+                status=str(summary_result.get("status") or ""),
+                source=str(summary_result.get("source") or ""),
+                error=str(summary_result.get("error") or ""),
+            )
+        except Exception:  # pragma: no cover - persistence is best effort
+            logger.warning("contract_summary_persist_failed document_id=%s", document_id)
 
         return {
             "document_id": document_id,

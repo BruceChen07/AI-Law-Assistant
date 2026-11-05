@@ -208,6 +208,94 @@ def bump_audit_queue_priority(cfg, audit_id):
     return updated
 
 
+def upsert_contract_summary(cfg, *, document_id, lang, summary, status="", source="", error=""):
+    payload = summary if isinstance(summary, dict) else {}
+    fields = {key: str(payload.get(key) or "") for key in ("title", "about", "core", "tax")}
+    chars = sum(len(value) for value in fields.values())
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO contract_summary(
+            document_id, lang, title, about, core, tax, status, source, chars, error, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(document_id, lang) DO UPDATE SET
+            title=excluded.title,
+            about=excluded.about,
+            core=excluded.core,
+            tax=excluded.tax,
+            status=excluded.status,
+            source=excluded.source,
+            chars=excluded.chars,
+            error=excluded.error,
+            updated_at=excluded.updated_at
+        """,
+        (
+            str(document_id or ""),
+            str(lang or "zh"),
+            fields["title"],
+            fields["about"],
+            fields["core"],
+            fields["tax"],
+            str(status or ""),
+            str(source or ""),
+            int(chars),
+            str(error or ""),
+            _utc_now_iso(),
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return chars
+
+
+def get_contract_summary(cfg, document_id, lang=None):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    if lang:
+        cur.execute(
+            "SELECT * FROM contract_summary WHERE document_id=? AND lang=?",
+            (str(document_id or ""), str(lang)),
+        )
+    else:
+        cur.execute(
+            "SELECT * FROM contract_summary WHERE document_id=? ORDER BY updated_at DESC LIMIT 1",
+            (str(document_id or ""),),
+        )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_contract_summaries(cfg, document_ids, lang=None):
+    """Batch lookup for the history page (never calls the model)."""
+    ids = [str(item) for item in (document_ids or []) if item]
+    if not ids:
+        return {}
+    placeholders = ",".join("?" for _ in ids)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    if lang:
+        cur.execute(
+            f"SELECT * FROM contract_summary WHERE document_id IN ({placeholders}) AND lang=?",
+            (*ids, str(lang)),
+        )
+    else:
+        cur.execute(
+            f"SELECT * FROM contract_summary WHERE document_id IN ({placeholders})",
+            (*ids,),
+        )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    result = {}
+    for row in rows:
+        key = str(row.get("document_id") or "")
+        current = result.get(key)
+        if not current or str(row.get("updated_at") or "") > str(current.get("updated_at") or ""):
+            result[key] = row
+    return result
+
+
 def list_contract_audits_paginated(cfg, limit=30, offset=0, status=None):
     conn = get_conn(cfg)
     cur = conn.cursor()

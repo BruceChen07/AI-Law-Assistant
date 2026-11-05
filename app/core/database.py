@@ -198,6 +198,27 @@ def init_db(cfg):
     cur.execute(
         "CREATE INDEX IF NOT EXISTS idx_contract_audit_chunk_audit ON contract_audit_chunk(audit_id)")
 
+    # Persisted contract snapshots: one row per (document, language) so the audit
+    # history can show what a contract is about without paying for another LLM pass.
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS contract_summary(
+        document_id TEXT NOT NULL,
+        lang TEXT NOT NULL,
+        title TEXT,
+        about TEXT,
+        core TEXT,
+        tax TEXT,
+        status TEXT,
+        source TEXT,
+        chars INTEGER DEFAULT 0,
+        error TEXT,
+        updated_at TEXT,
+        PRIMARY KEY (document_id, lang)
+    )
+    """)
+    cur.execute(
+        "CREATE INDEX IF NOT EXISTS idx_contract_summary_updated ON contract_summary(updated_at)")
+
     # Durable audit progress, so a running audit stays observable across page reloads,
     # restarts and token expiry (the in-memory progress map is lost on restart).
     cur.execute("""
