@@ -299,6 +299,20 @@ export default function App() {
   const summaryCore = String(contractSummary?.core || "").trim()
   const summaryTax = String(contractSummary?.tax || "").trim()
   const hasContractSummary = Boolean(summaryTitle || summaryAbout || summaryCore || summaryTax)
+  // Which contract the overview/preview belong to, and what is happening to it.
+  // Without this the page looks inconsistent when another contract is the one running.
+  const viewingContractLabel = String(documentFilename || "").trim() || t.auditQueueNoContract
+  const viewingContractState = useMemo(() => {
+    if (!activeAuditId) return ""
+    if (isQueuedAudit) return queuePositionText || t.progressQueued
+    const stage = String(normalizedProgressStage || "")
+    if (stage === "done") return t.progressDone
+    if (stage === "failed") return t.progressFailed
+    if (stage === "cancelled") return t.progressCancelled
+    if (stage) return `${progressStageText} · ${contractProgress}%`
+    return ""
+  }, [activeAuditId, isQueuedAudit, queuePositionText, normalizedProgressStage,
+      progressStageText, contractProgress, t])
   const llmProgressText = useMemo(() => {
     const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
     if (!detail) return ""
@@ -1700,9 +1714,11 @@ export default function App() {
       </section>
       <section className="card contract-summary-panel">
         <div className="result-head">
-          <div className="panel-title">{t.summary}</div>
+          <div className="panel-title">
+            {t.summary} · {viewingContractLabel}
+          </div>
           <span className="audit-progress-subnote">
-            {contractSummaryLoading && !hasContractSummary ? t.summaryLoading : ""}
+            {contractSummaryLoading && !hasContractSummary ? t.summaryLoading : viewingContractState}
           </span>
         </div>
         {hasContractSummary ? (
@@ -1736,7 +1752,9 @@ export default function App() {
       <div className="workbench-grid">
         <section className="card contract-preview">
           <div className="preview-head">
-            <div className="panel-title">{t.contractPreview}</div>
+            <div className="panel-title">
+              {t.contractPreview} · {viewingContractLabel}
+            </div>
             {previewMode === "visual" && previewPages.length > 0 && (
               <div className="preview-toolbar" />
             )}
