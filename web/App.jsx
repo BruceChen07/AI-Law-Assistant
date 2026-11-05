@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, exportContractReport, getAuditProgress, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
+import { auditContract, cancelQueuedAudit, exportContractReport, getAuditProgress, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getCurrentUser, getMe, getRunningAudits, getUIConfig, isTransportError, logout } from "./api"
 import Login from "./Login"
 import Admin from "./Admin"
 import History from "./History"
@@ -258,6 +258,7 @@ export default function App() {
     audit_done: "finalizing"
   }[contractProgressStage] || contractProgressStage
   const progressStageText = {
+    queued: t.progressQueued,
     uploading: t.progressUploading,
     extracting: t.progressExtracting,
     retrieval: t.progressRetrieval,
@@ -267,6 +268,17 @@ export default function App() {
     failed: t.progressFailed,
     working: t.progressWorking
   }[normalizedProgressStage] || contractProgressMessage || t.progressWorking
+  const queuePositionText = useMemo(() => {
+    const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
+    if (!detail) return ""
+    const position = Number(detail.position || 0)
+    const ahead = Number(detail.ahead || 0)
+    if (position <= 0) return ""
+    return String(t.auditQueuePosition || "Queued: position {position}, {ahead} ahead")
+      .replace("{position}", String(position))
+      .replace("{ahead}", String(Math.max(0, ahead)))
+  }, [contractProgressDetail, t])
+  const isQueuedAudit = normalizedProgressStage === "queued"
   const llmProgressText = useMemo(() => {
     const detail = contractProgressDetail && typeof contractProgressDetail === "object" ? contractProgressDetail : null
     if (!detail) return ""
@@ -1006,6 +1018,23 @@ export default function App() {
     startAuditProgressPolling(auditId, { resume: true })
   }
 
+  const onCancelQueuedAudit = async (auditId) => {
+    const id = String(auditId || "")
+    if (!id) return
+    try {
+      await cancelQueuedAudit(id)
+      clearAuditProgressPolling()
+      setContractLoading(false)
+      setActiveAuditId("")
+      setContractProgressStage("failed")
+      setContractProgress(0)
+      setContractError(t.auditCancelled)
+      rememberAuditTask("")
+    } catch (err) {
+      setContractError(String(err?.message || err || t.auditCancelFailed))
+    }
+  }
+
   const onContractUpload = async (e) => {
     e.preventDefault()
     if (!contractFile) return
@@ -1288,7 +1317,18 @@ export default function App() {
                 <div className="audit-progress-fill" style={{ width: `${contractProgress}%` }} />
               </div>
               <div className="audit-progress-note">{progressStageText}</div>
+              {queuePositionText && <div className="audit-progress-subnote">{queuePositionText}</div>}
               {llmProgressText && <div className="audit-progress-subnote">{llmProgressText}</div>}
+              {isQueuedAudit && activeAuditId && (
+                <div className="history-item-actions">
+                  <button
+                    className="ghost"
+                    onClick={() => onCancelQueuedAudit(activeAuditId)}
+                  >
+                    {t.auditCancelQueued}
+                  </button>
+                </div>
+              )}
               {activeAuditId && (
                 <div className="audit-progress-subnote">
                   {t.auditBackgroundTracking}: {String(activeAuditId).slice(0, 8)}
