@@ -69,3 +69,22 @@ export async function exportContractReport(documentId, payload) {
     returnResponseMeta: true
   })
 }
+
+export async function getAuditTask(auditId) {
+  return requestJson(`${API_BASE}/contracts/audit/${encodeURIComponent(auditId)}/task`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function getAuditQueue() {
+  return requestJson(`${API_BASE}/contracts/audit/queue`, {
+    headers: { ...getAuthHeaders() }
+  })
+}
+
+export async function cancelAuditQueueItem(auditId) {
+  return requestJson(`${API_BASE}/contracts/audit/queue/${encodeURIComponent(auditId)}`, {
+    method: "DELETE",
+    headers: { ...getAuthHeaders() }
+  })
+}

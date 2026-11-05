@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
-import { auditContract, downloadContractSource, exportContractReport, getAuditProgress, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getContractSummary, getCurrentUser, getMe, getUIConfig, logout } from "./api"
+import { auditContract, cancelAuditQueueItem, downloadContractSource, exportContractReport, getAuditProgress, getAuditQueue, getAuditTask, getContractPreview, getContractPreviewManifest, getContractPreviewPageImage, getContractSummary, getCurrentUser, getMe, getUIConfig, logout } from "./api"
 import { ApiError } from "./api/base"
 import { CONTRACT_AUDIT_ERROR_CODES, normalizeContractAuditError } from "./api/errorCatalog"
 import { buildAuditSnapshot, clearCurrentAuditPointer, createAuditTaskId, getAuditFileMeta, getAuditUserScope, listAuditSnapshots, loadAuditSnapshotByTaskId, loadCurrentAuditSnapshot, saveCurrentAuditSnapshot } from "./auditPersistence"
@@ -113,6 +113,32 @@ export function resolveRiskLocateTarget({ risk, previewPages, pickHighlight }) {
   }
 }
 
+async function waitForAuditTask(auditId, onProgress) {
+  const startedAt = Date.now()
+  const timeoutMs = 2 * 60 * 60 * 1000
+  while (Date.now() - startedAt < timeoutMs) {
+    await new Promise((resolve) => setTimeout(resolve, 3000))
+    const task = await getAuditTask(auditId)
+    if (task?.progress && onProgress) onProgress(task.progress)
+    if (task?.status === "done") {
+      return {
+        audit_id: auditId,
+        document_id: String(task?.document_id || ""),
+        result: task?.result || null,
+        meta: task?.meta || {},
+        status: "done",
+      }
+    }
+    if (task?.status === "failed") {
+      throw new Error(task?.progress?.message || "audit failed")
+    }
+    if (task?.status === "cancelled") {
+      throw new Error("audit cancelled")
+    }
+  }
+  throw new Error("audit timeout")
+}
+
 export default function App() {
   const initialUserRef = useRef(getCurrentUser())
   const initialRouteRef = useRef(readRouteFromHash())
@@ -188,6 +214,7 @@ export default function App() {
   const [contractProgressStage, setContractProgressStage] = useState(() => restoredAudit?.contractProgressStage || "working")
   const [contractProgressMessage, setContractProgressMessage] = useState("")
   const [contractProgressDetail, setContractProgressDetail] = useState(null)
+  const [auditQueue, setAuditQueue] = useState({ running: [], queued: [] })
   const [showEvidence, setShowEvidence] = useState(false)
   const [exportingFormat, setExportingFormat] = useState(() => restoredAudit?.exportingFormat || "")
   const [sourceDownloading, setSourceDownloading] = useState(() => !!restoredAudit?.sourceDownloading)
@@ -664,6 +691,43 @@ export default function App() {
   useEffect(() => {
     previewPageUrlsRef.current = previewPageUrls
   }, [previewPageUrls])
+
+  useEffect(() => {
+    // 审计队列：单 worker 串行执行，这里只做展示与取消。
+    if (!currentUser) return undefined
+    let cancelled = false
+    const load = async () => {
+      try {
+        const data = await getAuditQueue()
+        if (!cancelled) {
+          setAuditQueue({
+            running: Array.isArray(data?.running) ? data.running : [],
+            queued: Array.isArray(data?.queued) ? data.queued : []
+          })
+        }
+      } catch {
+        // 队列接口不可用时不影响主流程
+      }
+    }
+    load()
+    const timer = setInterval(load, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [currentUser])
+
+  const onCancelQueuedAudit = async (auditId) => {
+    try {
+      await cancelAuditQueueItem(auditId)
+      setAuditQueue((prev) => ({
+        ...prev,
+        queued: prev.queued.filter((item) => String(item.audit_id || "") !== String(auditId || ""))
+      }))
+    } catch (err) {
+      setContractError(String(err?.message || err || "cancel failed"))
+    }
+  }
 
   useEffect(() => {
     if (previewMode !== "visual" || previewContinuous) return
@@ -1473,7 +1537,19 @@ export default function App() {
       form.append("audit_id", nextAuditId)
       form.append("file", contractFile)
       startAuditProgressPolling(nextAuditId)
-      const res = await auditContract(form)
+      let res = await auditContract(form)
+      if (res && res.mode === "async") {
+        const queuedPosition = Number(res.queue_position) || 1
+        if (queuedPosition > 1) {
+          setContractProgressMessage(
+            `${t.auditQueuedBehind || "已加入队列，前面还有"} ${queuedPosition - 1} ${t.auditQueuedUnit || "个任务"}`
+          )
+        }
+        res = await waitForAuditTask(
+          String(res.audit_id || nextAuditId),
+          applyServerAuditProgress
+        )
+      }
       clearAuditProgressPolling()
       try {
         const finalProgress = await getAuditProgress(nextAuditId)
@@ -1822,6 +1898,32 @@ export default function App() {
               </div>
               <div className="audit-progress-note">{contractProgressMessage || progressStageText}</div>
               {llmProgressText && <div className="audit-progress-subnote">{llmProgressText}</div>}
+            </div>
+          )}
+          {(auditQueue.queued.length > 0 || auditQueue.running.length > 0) && (
+            <div className="audit-progress audit-queue-panel">
+              <div className="audit-progress-head">
+                <span>{t.auditQueueTitle}</span>
+                <span>{auditQueue.queued.length}</span>
+              </div>
+              {auditQueue.running.map((item) => (
+                <div key={item.audit_id} className="audit-queue-item">
+                  <span className="audit-queue-name">
+                    {item.title || String(item.audit_id || "").slice(0, 8)}
+                  </span>
+                  <span className="audit-queue-state">{t.auditQueueRunning}</span>
+                </div>
+              ))}
+              {auditQueue.queued.map((item) => (
+                <div key={item.audit_id} className="audit-queue-item">
+                  <span className="audit-queue-name">
+                    {item.position}. {item.title || String(item.audit_id || "").slice(0, 8)}
+                  </span>
+                  <button type="button" onClick={() => onCancelQueuedAudit(item.audit_id)}>
+                    {t.auditQueueCancel}
+                  </button>
+                </div>
+              ))}
             </div>
           )}
         </div>
