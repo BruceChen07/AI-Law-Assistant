@@ -263,3 +263,42 @@ def test_running_audit_ids_reflect_thread_lifecycle(tmp_path: Path):
         audit_task_runner.running_audit_ids(), list)
     assert audit_task_runner.is_audit_running("audit-none") is False
     assert list_running_contract_audit_progress(_cfg(tmp_path)) == []
+
+def test_second_submission_of_same_document_joins_no_new_queue_entry(
+    tmp_path: Path, monkeypatch
+):
+    cfg = _cfg(tmp_path)
+    called = {"submit": 0}
+
+    def _fake_submit(**kwargs):
+        called["submit"] += 1
+        return {"audit_id": kwargs.get("audit_id"), "position": 1, "ahead": 0}
+
+    # a queued/running audit already owns this document (same file name -> same doc)
+    monkeypatch.setattr(
+        audit_task_runner, "active_audit_for_document",
+        lambda document_id: "audit-existing" if document_id else "",
+    )
+    monkeypatch.setattr(audit_task_runner, "submit", _fake_submit)
+    client = _contracts_client(cfg)
+
+    response = client.post(
+        "/contracts/audit",
+        files={
+            "file": (
+                "same-contract.docx",
+                b"PK\x03\x04fake-docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+        data={"audit_id": "audit-second-submit", "language": "zh"},
+    )
+
+    assert response.status_code == 409
+    detail = response.json()["detail"]
+    assert detail["code"] == "AUDIT_ALREADY_QUEUED"
+    assert detail["audit_id"] == "audit-existing"
+    assert called["submit"] == 0
+    # the rejected attempt is not left behind as a pending task
+    rejected = get_contract_audit_progress(cfg, "audit-second-submit")
+    assert rejected is None or rejected["status"] in {"cancelled", "rejected"}

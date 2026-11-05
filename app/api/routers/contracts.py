@@ -381,6 +381,31 @@ def build_router(cfg):
             category="contract"
         )
 
+        # Same document already queued/running: keep one queue entry per contract and
+        # let the caller track the existing audit instead of duplicating the work.
+        existing_active_audit = audit_task_runner.active_audit_for_document(doc_id)
+        if existing_active_audit:
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
+            conflict_message = (
+                "该合同已在排队或审计中，已阻止重复提交；页面会继续跟踪原任务。"
+                if str(language or "zh").lower().startswith("zh")
+                else "This contract is already queued or running; the duplicate submission was blocked and the page keeps tracking the original task."
+            )
+            _set_audit_progress(audit_id, "cancelled", 0, "rejected",
+                                conflict_message, cfg=cfg, document_id=doc_id,
+                                user_id=current_user["id"])
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AUDIT_ALREADY_QUEUED",
+                    "audit_id": existing_active_audit,
+                    "message": conflict_message,
+                },
+            )
+
         _set_audit_progress(audit_id, "running", 20,
                             "document", "document recorded",
                             cfg=cfg, document_id=doc_id, user_id=current_user["id"])
@@ -485,6 +510,22 @@ def build_router(cfg):
                     ),
                 },
             )
+        existing_active_audit = audit_task_runner.active_audit_for_document(document_id)
+        if existing_active_audit and existing_active_audit != audit_id:
+            conflict_message = (
+                "该合同已在排队或审计中，已阻止重复提交；页面会继续跟踪原任务。"
+                if str(language or "zh").lower().startswith("zh")
+                else "This contract is already queued or running; the duplicate submission was blocked and the page keeps tracking the original task."
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AUDIT_ALREADY_QUEUED",
+                    "audit_id": existing_active_audit,
+                    "message": conflict_message,
+                },
+            )
+
         _set_audit_progress(audit_id, "running", 5,
                             "received", "pipeline rerun started",
                             cfg=cfg, document_id=document_id,
