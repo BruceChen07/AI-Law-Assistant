@@ -320,7 +320,10 @@ export default function App() {
     if (executionLabel) chunks.push(executionLabel)
     return chunks.join(" · ")
   }, [contractProgressDetail, t])
-  const showAuditProgress = Boolean(activeAuditId) || contractLoading || contractProgressStage === "failed"
+  // The progress bar belongs to an audit that is actually being processed. A queued
+  // contract has no progress to show - it lives in the queue panel instead.
+  const showAuditProgress = !isQueuedAudit
+    && (Boolean(activeAuditId) || contractLoading || contractProgressStage === "failed")
   const idleServerAudits = serverRunningAudits.filter(
     item => String(item?.audit_id || "") && String(item?.audit_id || "") !== activeAuditId
   )
@@ -1535,16 +1538,6 @@ export default function App() {
               <div className="audit-progress-note">{progressStageText}</div>
               {queuePositionText && <div className="audit-progress-subnote">{queuePositionText}</div>}
               {llmProgressText && <div className="audit-progress-subnote">{llmProgressText}</div>}
-              {isQueuedAudit && activeAuditId && (
-                <div className="history-item-actions">
-                  <button
-                    className="ghost"
-                    onClick={() => onCancelQueuedAudit(activeAuditId)}
-                  >
-                    {t.auditCancelQueued}
-                  </button>
-                </div>
-              )}
               {activeAuditId && (
                 <div className="audit-progress-subnote">
                   {t.auditBackgroundTracking}: {String(activeAuditId).slice(0, 8)}
@@ -1565,7 +1558,7 @@ export default function App() {
               )}
             </div>
           )}
-          {hasAuditQueue && (
+          {(hasAuditQueue || isQueuedAudit) && (
             <div className="audit-progress">
               <div className="audit-progress-head">
                 <span>{t.auditQueueTitle}</span>
@@ -1575,15 +1568,36 @@ export default function App() {
                     .replace("{queued}", String(Number(auditQueue?.queued_count || 0)))}
                 </span>
               </div>
-              <div className="history-list">
-                {(auditQueue?.running || []).map(item => (
-                  <div key={item.audit_id} className="history-item">
-                    <div className="history-item-head">
-                      <strong>{item.title || String(item.audit_id).slice(0, 8)}</strong>
-                      <span className="history-status history-status-running">{t.auditQueueRunning}</span>
-                    </div>
+              {isQueuedAudit && (
+                <>
+                  <div className="audit-progress-note">
+                    {queuePositionText || t.progressQueued}
+                    {activeAuditId ? ` · ${t.auditQueueTracked}: ${String(activeAuditId).slice(0, 8)}` : ""}
                   </div>
-                ))}
+                  {activeAuditId && (
+                    <div className="history-item-actions">
+                      <button className="ghost" onClick={() => onCancelQueuedAudit(activeAuditId)}>
+                        {t.auditCancelQueued}
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
+              <div className="history-list">
+                {(auditQueue?.running || []).map(item => {
+                  const live = serverRunningAudits.find(
+                    row => String(row?.audit_id || "") === String(item.audit_id || "")
+                  )
+                  return (
+                    <div key={item.audit_id} className="history-item">
+                      <div className="history-item-head">
+                        <strong>{item.title || String(item.audit_id).slice(0, 8)}</strong>
+                        <span className="history-status history-status-running">{t.auditQueueRunning}</span>
+                        <span>{Number(live?.percent ?? 0)}%</span>
+                      </div>
+                    </div>
+                  )
+                })}
                 {(auditQueue?.queued || []).map(item => (
                   <div key={item.audit_id} className="history-item">
                     <div className="history-item-head">
