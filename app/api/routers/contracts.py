@@ -23,6 +23,7 @@ from app.services.crud import (
     get_contract_audit_by_id,
     get_contract_audit_progress as get_contract_audit_progress_row,
     list_contract_audit_progress_by_document,
+    list_audit_queue_items,
     list_contract_audit_progress_pending,
     list_contract_audits_paginated,
     list_running_contract_audit_progress,
@@ -422,7 +423,7 @@ def build_router(cfg):
         )
         # P0: return immediately, run the audit in a background task. A client
         # timeout, closed tab or dropped connection can no longer abort it.
-        audit_task_runner.submit(
+        queue_info = audit_task_runner.submit(
             cfg=cfg,
             services=services,
             file_path=save_path,
@@ -431,6 +432,7 @@ def build_router(cfg):
             audit_id=audit_id,
             document_id=doc_id,
             user_id=current_user["id"],
+            title=title or os.path.basename(file.filename or ""),
         )
 
         return JSONResponse(
@@ -438,10 +440,11 @@ def build_router(cfg):
             content={
                 "audit_id": audit_id,
                 "document_id": doc_id,
-                "status": "running",
-                "stage": "auditing",
-                "progress": 20,
+                "status": "queued",
+                "stage": "queued",
+                "progress": 0,
                 "mode": "async",
+                "queue": queue_info,
             },
         )
 
@@ -494,7 +497,7 @@ def build_router(cfg):
             reranker=reranker,
             translator=translator,
         )
-        audit_task_runner.submit(
+        queue_info = audit_task_runner.submit(
             cfg=cfg,
             services=services,
             file_path=file_path,
@@ -503,16 +506,18 @@ def build_router(cfg):
             audit_id=audit_id,
             document_id=document_id,
             user_id=current_user["id"],
+            title=str(doc.get("title") or doc.get("original_filename") or ""),
         )
         return JSONResponse(
             status_code=202,
             content={
                 "audit_id": audit_id,
                 "document_id": document_id,
-                "status": "running",
-                "stage": "auditing",
-                "progress": 5,
+                "status": "queued",
+                "stage": "queued",
+                "progress": 0,
                 "mode": "async",
+                "queue": queue_info,
             },
         )
 
@@ -558,6 +563,44 @@ def build_router(cfg):
             "result": result,
             "meta": result_meta,
         }
+
+    @router.get("/contracts/audit/queue")
+    def get_contract_audit_queue(current_user: dict = Depends(get_current_user)):
+        """Current FIFO queue: the running audit plus everything waiting behind it."""
+        _ = current_user
+        snapshot = audit_task_runner.queue_snapshot()
+        snapshot["durable"] = [
+            {
+                "audit_id": str(row.get("audit_id") or ""),
+                "document_id": str(row.get("document_id") or ""),
+                "title": str(row.get("title") or ""),
+                "status": str(row.get("status") or ""),
+                "created_at": str(row.get("created_at") or ""),
+            }
+            for row in list_audit_queue_items(cfg, statuses=("queued", "running"))
+        ]
+        return snapshot
+
+    @router.delete("/contracts/audit/queue/{audit_id}")
+    def cancel_contract_audit_queue(
+        audit_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        """Cancel a queued audit; a running audit cannot be cancelled."""
+        _ = current_user
+        outcome = audit_task_runner.cancel(audit_id)
+        if outcome == "running":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "AUDIT_ALREADY_RUNNING",
+                    "audit_id": audit_id,
+                    "message": "审计已开始执行，无法取消排队。",
+                },
+            )
+        if outcome == "missing":
+            raise HTTPException(status_code=404, detail="audit queue item not found")
+        return {"audit_id": audit_id, "status": "cancelled"}
 
     @router.get("/contracts/audits/history")
     def list_contract_audit_history(
