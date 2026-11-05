@@ -247,4 +247,26 @@ def create_app(
     app.state.translator = translator
     app.state.logger = logger
     app.state.rag_logger = rag_logger
+
+    # Resume audits left in the durable FIFO queue by a previous process.
+    # Skip when the database is not initialised yet (health probes must not create it).
+    try:
+        import os as _os
+
+        if not _os.path.exists(str(cfg.get("db_path") or "")):
+            return app
+        from app.services import audit_task_runner
+        from app.services.audit_orchestrator import AuditServices
+
+        def _services_factory() -> Any:
+            return AuditServices(
+                llm=app.state.llm,
+                embedder=app.state.embedder,
+                reranker=app.state.reranker,
+                translator=app.state.translator,
+            )
+
+        audit_task_runner.resume_pending(cfg, _services_factory)
+    except Exception as exc:  # pragma: no cover - startup must never fail
+        logger.warning("audit_queue_resume_failed error=%s", exc)
     return app
