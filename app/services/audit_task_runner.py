@@ -463,7 +463,6 @@ def _run(
             lang=lang,
             retrieval_options=retrieval_options,
             progress_cb=_progress_cb,
-            audit_id=audit_id,
         )
         insert_contract_audit(
             cfg,
