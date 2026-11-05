@@ -137,6 +137,8 @@ def test_submit_endpoint_returns_202_and_hands_off_to_background_task(
 
     def _fake_submit(**kwargs):
         submitted.update(kwargs)
+        return {"audit_id": kwargs.get("audit_id"), "position": 1,
+                "ahead": 0, "queued": True}
 
     monkeypatch.setattr(audit_task_runner, "submit", _fake_submit)
     client = _contracts_client(cfg)
@@ -156,12 +158,14 @@ def test_submit_endpoint_returns_202_and_hands_off_to_background_task(
     assert response.status_code == 202
     payload = response.json()
     assert payload["audit_id"] == "audit-async-1"
-    assert payload["status"] == "running"
+    assert payload["status"] == "queued"
     assert payload["mode"] == "async"
+    assert payload["queue"]["position"] == 1
     assert payload["document_id"]
     assert submitted["audit_id"] == "audit-async-1"
     assert submitted["document_id"] == payload["document_id"]
     assert str(submitted["file_path"]).endswith(".docx")
+    # submission registers a queued task; the worker flips it to running
     assert get_contract_audit_progress(cfg, "audit-async-1")["status"] == "running"
 
 
