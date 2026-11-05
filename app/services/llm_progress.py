@@ -1,5 +1,7 @@
 from typing import Any, Callable, Dict, Optional
 
+from app.services.audit_cancel import AuditCancelledError
+
 
 def report_progress(
     progress_cb: Optional[Callable[..., None]],
@@ -12,9 +14,14 @@ def report_progress(
         return
     try:
         progress_cb(stage, int(percent), message, detail)
+    except AuditCancelledError:
+        # A cancellation must reach the caller; every other callback error is ignored.
+        raise
     except TypeError:
         try:
             progress_cb(stage, int(percent), message)
+        except AuditCancelledError:
+            raise
         except Exception:
             return
     except Exception:

@@ -17,6 +17,7 @@ from typing import Any, Callable, Dict, List, Optional
 import structlog
 
 from app.services.audit_artifacts import write_audit_artifacts
+from app.services.audit_cancel import AuditCancelledError
 from app.services.audit_error_messages import build_audit_error_detail
 from app.services.crud import (
     insert_contract_audit,
@@ -31,6 +32,8 @@ _pending: List[Dict[str, Any]] = []
 _lock = threading.Lock()
 _cond = threading.Condition(_lock)
 _worker_started = False
+# Audits whose owner asked to abandon them; the pipeline checks this between chunks.
+_cancel_requested: set = set()
 # Tests import app.main, which builds the real app and would otherwise resume the
 # production queue inside the test process. Tests may opt in explicitly.
 _allow_resume_in_tests = False
@@ -182,6 +185,7 @@ def _worker_loop() -> None:
                 "document_id": str(job.get("document_id") or ""),
                 "title": str(job.get("title") or ""),
                 "started_at": _utc_now_iso(),
+                "cfg": cfg,
             }
         _set_queue_row_status(cfg, audit_id, "running")
         _record_progress(
@@ -342,8 +346,37 @@ def pin(audit_id: str) -> str:
     return "pinned"
 
 
+def request_cancel(audit_id: str) -> str:
+    """Abandon an audit: drop it from the queue, or ask a running one to stop.
+
+    A running audit cannot be killed mid-request, so the flag is checked by the
+    progress callback (once per chunk/stage): the pipeline aborts at the next
+    checkpoint and finished chunks stay in the chunk store for a later resubmit.
+    """
+    target = str(audit_id or "")
+    if not target:
+        return "missing"
+    with _lock:
+        running_entry = dict(_running.get(target) or {})
+    if running_entry:
+        _cancel_requested.add(target)
+        _record_progress(
+            running_entry.get("cfg") or {}, target,
+            status="running", stage="cancelling", percent=0,
+            message="cancelling: stopping after the current chunk",
+            detail={"cancel_requested": True},
+            document_id=str(running_entry.get("document_id") or "") or None,
+        )
+        logger.info("audit_task_cancel_requested audit_id=%s", target)
+        return "cancelling"
+    outcome = cancel(target)
+    if outcome == "missing":
+        return "missing"
+    return "cancelled"
+
+
 def cancel(audit_id: str) -> str:
-    """Cancel a queued audit; a running audit cannot be cancelled."""
+    """Cancel a queued audit; a running audit cannot be cancelled here."""
     target = str(audit_id or "")
     cfg: Dict[str, Any] = {}
     document_id = ""
@@ -465,6 +498,8 @@ def _run(
     error_detail = ""
 
     def _progress_cb(stage: str, percent: int, message: str = "", detail=None) -> None:
+        if audit_id in _cancel_requested:
+            raise AuditCancelledError(audit_id)
         _record_progress(
             cfg,
             audit_id,
@@ -486,6 +521,8 @@ def _run(
             progress_cb=_progress_cb,
             audit_id=audit_id,
         )
+        if audit_id in _cancel_requested:
+            raise AuditCancelledError(audit_id)
         insert_contract_audit(
             cfg,
             audit_id=audit_id,
@@ -514,6 +551,29 @@ def _run(
             "audit_task_done audit_id=%s document_id=%s duration_ms=%s",
             audit_id, document_id, int((time.perf_counter() - started) * 1000),
         )
+    except AuditCancelledError:
+        status = "cancelled"
+        finished_chunks = 0
+        try:
+            finished_chunks = len(list_contract_audit_chunks(cfg, audit_id))
+        except Exception:  # pragma: no cover - reporting only
+            finished_chunks = 0
+        message = (
+            f"cancelled by user after {finished_chunks} finished chunk(s); "
+            "finished chunks are kept and can be reused on resubmit"
+        )
+        _record_progress(
+            cfg,
+            audit_id,
+            status="cancelled",
+            stage="cancelled",
+            percent=100,
+            message=message,
+            detail={"cancelled": True, "finished_chunks": finished_chunks},
+            document_id=document_id,
+        )
+        logger.info("audit_task_cancelled_by_user audit_id=%s chunks=%s",
+                    audit_id, finished_chunks)
     except Exception as exc:
         status = "failed"
         error_message = str(exc)
@@ -572,6 +632,7 @@ def _run(
         )
         with _lock:
             _running.pop(audit_id, None)
+        _cancel_requested.discard(audit_id)
         if callable(on_finish):
             try:
                 on_finish(

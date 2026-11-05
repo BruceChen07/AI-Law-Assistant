@@ -673,6 +673,31 @@ def build_router(cfg):
             "queue": snapshot,
         }
 
+    @router.post("/contracts/audit/{audit_id}/cancel")
+    def request_cancel_contract_audit(
+        audit_id: str,
+        current_user: dict = Depends(get_current_user),
+    ):
+        """Abandon an audit: leave the queue, or ask a running audit to stop.
+
+        A running audit stops at the next chunk boundary; finished chunks are kept
+        so a later submission can reuse them.
+        """
+        _ = current_user
+        outcome = audit_task_runner.request_cancel(audit_id)
+        if outcome == "missing":
+            raise HTTPException(status_code=404, detail="audit not found")
+        return {
+            "audit_id": audit_id,
+            "status": outcome,
+            "cancelling": outcome == "cancelling",
+            "message": (
+                "正在放弃：当前分块结束后停止（已完成分块保留，可重新提交复用）。"
+                if outcome == "cancelling"
+                else "已放弃排队任务。"
+            ),
+        }
+
     @router.get("/contracts/audits/history")
     def list_contract_audit_history(
         limit: int = Query(30, ge=1, le=200),

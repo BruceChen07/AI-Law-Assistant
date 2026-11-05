@@ -274,3 +274,100 @@ def test_pin_endpoint_rejects_running_and_unknown(tmp_path, monkeypatch):
     assert pinned.status_code == 200
     body = pinned.json()
     assert body["pinned"] is True and body["position"] == 1
+
+def test_request_cancel_stops_a_running_audit_at_the_next_checkpoint(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    import app.services.audit_orchestrator as orchestrator
+
+    progress_seen = []
+    reached = threading.Event()
+
+    def _pipeline(cfg_arg, services, **kwargs):
+        audit_id = str(kwargs.get("audit_id") or "")
+        progress_cb = kwargs.get("progress_cb")
+        for index in range(200):
+            if callable(progress_cb):
+                progress_cb("auditing", min(99, index), f"chunk-{index:03d}")
+            progress_seen.append(index)
+            if index == 1:
+                reached.set()
+            time.sleep(0.01)
+        return {"audit": {"summary": "ok", "risks": []}, "meta": {}}
+
+    monkeypatch.setattr(orchestrator, "run_contract_pipeline_bundle", _pipeline)
+
+    _submit(cfg, "audit-abandon")
+    assert reached.wait(5), "audit did not start"
+
+    assert audit_task_runner.request_cancel("audit-abandon") == "cancelling"
+    assert _wait_until(_queue_idle)
+    assert len(progress_seen) < 200, "the pipeline kept running after the cancel request"
+
+    row = get_contract_audit_progress(cfg, "audit-abandon")
+    assert row["status"] == "cancelled"
+    assert "cancelled by user" in str(row["message"])
+
+
+def test_request_cancel_drops_a_queued_audit(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    gate = type("Gate", (), {"started": threading.Event(), "release": threading.Event()})()
+    _install_pipeline(monkeypatch, gate=gate)
+
+    _submit(cfg, "audit-busy")
+    assert gate.started.wait(5)
+    _submit(cfg, "audit-waiting")
+
+    assert audit_task_runner.request_cancel("audit-waiting") == "cancelled"
+    assert get_contract_audit_progress(cfg, "audit-waiting")["status"] == "cancelled"
+    assert [row["audit_id"] for row in list_audit_queue_items(cfg)] == ["audit-busy"]
+    assert audit_task_runner.request_cancel("nope") == "missing"
+
+    gate.release.set()
+
+
+def test_cancel_endpoint_reports_cancelling_and_missing(tmp_path, monkeypatch):
+    cfg = _cfg(tmp_path)
+    client = _contracts_client(cfg)
+
+    monkeypatch.setattr(audit_task_runner, "request_cancel", lambda audit_id: "cancelling")
+    running = client.post("/contracts/audit/audit-run/cancel")
+    assert running.status_code == 200
+    body = running.json()
+    assert body["cancelling"] is True and body["status"] == "cancelling"
+
+    monkeypatch.setattr(audit_task_runner, "request_cancel", lambda audit_id: "cancelled")
+    queued = client.post("/contracts/audit/audit-queued/cancel")
+    assert queued.status_code == 200
+    assert queued.json()["cancelling"] is False
+
+    monkeypatch.setattr(audit_task_runner, "request_cancel", lambda audit_id: "missing")
+    missing = client.post("/contracts/audit/audit-gone/cancel")
+    assert missing.status_code == 404
+
+def test_cancel_propagates_through_the_progress_plumbing(tmp_path, monkeypatch):
+    """report_progress() swallows ordinary callback errors; cancellation must not be one."""
+    cfg = _cfg(tmp_path)
+    import app.services.audit_orchestrator as orchestrator
+    from app.services.llm_progress import report_progress
+
+    seen = []
+    reached = threading.Event()
+
+    def _pipeline(cfg_arg, services, **kwargs):
+        progress_cb = kwargs.get("progress_cb")
+        for index in range(300):
+            report_progress(progress_cb, "auditing", min(99, index), f"chunk-{index:03d}")
+            seen.append(index)
+            if index == 1:
+                reached.set()
+            time.sleep(0.01)
+        return {"audit": {"summary": "ok", "risks": []}, "meta": {}}
+
+    monkeypatch.setattr(orchestrator, "run_contract_pipeline_bundle", _pipeline)
+
+    _submit(cfg, "audit-plumbing")
+    assert reached.wait(5)
+    assert audit_task_runner.request_cancel("audit-plumbing") == "cancelling"
+    assert _wait_until(_queue_idle)
+    assert len(seen) < 300, "cancellation was swallowed by report_progress"
+    assert get_contract_audit_progress(cfg, "audit-plumbing")["status"] == "cancelled"
