@@ -61,7 +61,7 @@ from app.api.routers.contracts._support import (  # noqa: F401  (re-export)
 
 
 from ._cfg import set_active_config
-from . import audit, export, preview, preview2, source, summary  # noqa: F401
+from . import audit, export, preview, preview2, queue, source, summary  # noqa: F401
 
 from .audit import (  # noqa: F401
     audit_contract_file,
@@ -97,6 +97,7 @@ def build_router(cfg):
     set_active_config(cfg)
     router = APIRouter()
     router.include_router(audit.router)
+    router.include_router(queue.router)
     router.include_router(summary.router)
     router.include_router(preview.router)
     router.include_router(source.router)

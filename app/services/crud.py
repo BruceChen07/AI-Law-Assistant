@@ -1246,3 +1246,244 @@ def list_evidence_anchors_by_contract(cfg, contract_id, limit=500):
     rows = [dict(r) for r in cur.fetchall()]
     conn.close()
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Durable audit progress + queue (ported)
+# ---------------------------------------------------------------------------
+
+
+def list_contract_audit_progress_pending(cfg, limit=20):
+    """Progress rows without a finished contract_audit record (running/interrupted)."""
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT p.audit_id, p.document_id, p.status, p.percent, p.message, p.updated_at,
+               d.original_filename AS filename
+        FROM contract_audit_progress p
+        LEFT JOIN documents d ON d.id = p.document_id
+        WHERE p.audit_id NOT IN (SELECT id FROM contract_audit)
+        ORDER BY p.updated_at DESC
+        LIMIT ?
+        """,
+        (int(limit or 20),),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def upsert_contract_audit_progress(
+    cfg,
+    *,
+    audit_id,
+    status="running",
+    stage="",
+    percent=0,
+    message="",
+    detail=None,
+    document_id=None,
+    user_id=None,
+    plan_json=None,
+    plan_hash=None,
+    source_hash=None,
+    chunks_total=None,
+):
+    import json as _json
+
+    now = _utc_now_iso()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO contract_audit_progress(
+            audit_id, document_id, user_id, status, stage, percent, message, detail_json,
+            plan_json, plan_hash, source_hash, chunks_total, created_at, updated_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(audit_id) DO UPDATE SET
+            document_id=COALESCE(excluded.document_id, contract_audit_progress.document_id),
+            user_id=COALESCE(excluded.user_id, contract_audit_progress.user_id),
+            status=excluded.status,
+            stage=COALESCE(NULLIF(excluded.stage, ''), contract_audit_progress.stage),
+            percent=excluded.percent,
+            message=COALESCE(NULLIF(excluded.message, ''), contract_audit_progress.message),
+            detail_json=COALESCE(NULLIF(excluded.detail_json, ''), contract_audit_progress.detail_json),
+            plan_json=COALESCE(NULLIF(excluded.plan_json, ''), contract_audit_progress.plan_json),
+            plan_hash=COALESCE(NULLIF(excluded.plan_hash, ''), contract_audit_progress.plan_hash),
+            source_hash=COALESCE(NULLIF(excluded.source_hash, ''), contract_audit_progress.source_hash),
+            chunks_total=MAX(excluded.chunks_total, contract_audit_progress.chunks_total),
+            updated_at=excluded.updated_at
+        """,
+        (
+            str(audit_id),
+            document_id,
+            user_id,
+            str(status or "running"),
+            str(stage or ""),
+            int(percent or 0),
+            str(message or ""),
+            _json.dumps(detail, ensure_ascii=False) if detail is not None else "",
+            _json.dumps(plan_json, ensure_ascii=False) if plan_json is not None else "",
+            str(plan_hash or ""),
+            str(source_hash or ""),
+            int(chunks_total or 0),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_contract_audit_progress(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, document_id, user_id, status, stage, percent, message, detail_json,
+               plan_json, plan_hash, source_hash, chunks_total, created_at, updated_at
+        FROM contract_audit_progress
+        WHERE audit_id=?
+        """,
+        (str(audit_id),),
+    )
+    row = cur.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def list_running_contract_audit_progress(cfg, limit=20):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, document_id, user_id, status, stage, percent, message,
+               chunks_total, updated_at
+        FROM contract_audit_progress
+        WHERE status='running'
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (int(limit or 20),),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def mark_stale_contract_audit_progress(cfg, *, stale_after_minutes=10):
+    """Mark orphaned running audits (killed process / lost heartbeat) as interrupted."""
+    from datetime import timedelta
+
+    minutes = max(1, int(stale_after_minutes or 10))
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(minutes=minutes)).isoformat()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        UPDATE contract_audit_progress
+        SET status='interrupted',
+            stage='interrupted',
+            message=?,
+            updated_at=?
+        WHERE status='running' AND updated_at < ?
+        """,
+        (
+            "audit interrupted: no heartbeat for more than "
+            f"{minutes} minutes (process restart or lost connection); "
+            "finished chunks are kept and can be reused on retry",
+            now.isoformat(),
+            cutoff,
+        ),
+    )
+    updated = int(cur.rowcount or 0)
+    conn.commit()
+    conn.close()
+    return updated
+
+
+def list_contract_audit_progress_by_document(cfg, document_id, limit=10):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT audit_id, document_id, user_id, status, stage, percent, message,
+               plan_hash, source_hash, chunks_total, created_at, updated_at
+        FROM contract_audit_progress
+        WHERE document_id=?
+        ORDER BY updated_at DESC
+        LIMIT ?
+        """,
+        (str(document_id), int(limit or 10)),
+    )
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    return rows
+
+
+def save_audit_queue_item(cfg, *, audit_id, document_id, file_path, lang,
+                          retrieval_options=None, title="", user_id=""):
+    import json as _json
+
+    now = _utc_now_iso()
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT OR REPLACE INTO audit_queue(
+            audit_id, document_id, file_path, lang, retrieval_options_json,
+            title, user_id, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)
+        """,
+        (
+            str(audit_id),
+            str(document_id or ""),
+            str(file_path or ""),
+            str(lang or ""),
+            _json.dumps(retrieval_options or {}, ensure_ascii=False),
+            str(title or ""),
+            str(user_id or ""),
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_audit_queue_status(cfg, audit_id, status):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        "UPDATE audit_queue SET status=?, updated_at=? WHERE audit_id=?",
+        (str(status or ""), _utc_now_iso(), str(audit_id)),
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_audit_queue_item(cfg, audit_id):
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM audit_queue WHERE audit_id=?", (str(audit_id),))
+    conn.commit()
+    conn.close()
+
+
+def list_audit_queue_items(cfg, statuses=("queued", "running"), limit=200):
+    values = [str(item) for item in (statuses or ()) if str(item)]
+    if not values:
+        return []
+    placeholders = ",".join("?" for _ in values)
+    conn = get_conn(cfg)
+    cur = conn.cursor()
+    cur.execute(
+        f"SELECT * FROM audit_queue WHERE status IN ({placeholders}) "
+        "ORDER BY created_at ASC LIMIT ?",
+        (*values, int(limit)),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    conn.close()
+    return rows

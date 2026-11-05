@@ -18,6 +18,7 @@ from app.core.migrations import _08_vector_upload  # noqa: F401
 from app.core.migrations import _09_capabilities  # noqa: F401
 from app.core.migrations import _10_agents  # noqa: F401
 from app.core.migrations import _11_runtime  # noqa: F401
+from app.core.migrations import _12_audit_queue  # noqa: F401
 
 
 MIGRATIONS = (
@@ -32,6 +33,7 @@ MIGRATIONS = (
     _09_capabilities,
     _10_agents,
     _11_runtime,
+    _12_audit_queue,
 )
 
 
@@ -48,3 +50,4 @@ def apply_migrations(cur) -> None:
     _09_capabilities.apply(cur)
     _10_agents.apply(cur)
     _11_runtime.apply(cur)
+    _12_audit_queue.apply(cur)

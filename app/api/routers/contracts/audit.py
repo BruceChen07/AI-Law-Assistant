@@ -14,6 +14,7 @@ from app.services.crud import get_document_by_id_for_user, insert_contract_audit
 from app.services.pdf_pipeline import get_pdf_pipeline_config, resolve_pdf_audit_source
 from datetime import datetime, timezone
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import JSONResponse
 from typing import Any, Dict, Optional
 
 from app.api.routers.contracts._cfg import contracts_cfg
@@ -194,6 +195,62 @@ async def audit_contract_file(
             reranker=reranker,
             translator=translator,
         )
+
+        if bool(cfg.get("audit_async_enabled", False)):
+            from app.services import audit_task_runner
+
+            enqueue_result = audit_task_runner.enqueue(
+                cfg=cfg,
+                services=services,
+                file_path=audit_input_path,
+                lang=language,
+                retrieval_options=retrieval_options,
+                audit_id=audit_id,
+                document_id=document_id,
+                user_id=operator_id,
+                title=contract_name,
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "audit_id": audit_id,
+                    "document_id": document_id,
+                    "status": "running",
+                    "stage": "auditing",
+                    "progress": 5,
+                    "mode": "async",
+                    "queued": True,
+                    "queue_position": int(enqueue_result.get("ahead") or 0) + 1,
+                },
+            )
+
+        if bool(cfg.get("audit_async_enabled", False)):
+            from app.services import audit_task_runner
+
+            enqueue_result = audit_task_runner.enqueue(
+                cfg=cfg,
+                services=services,
+                file_path=audit_input_path,
+                lang=language,
+                retrieval_options=retrieval_options,
+                audit_id=audit_id,
+                document_id=doc_id,
+                user_id=operator_id,
+                title=contract_name,
+            )
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "audit_id": audit_id,
+                    "document_id": doc_id,
+                    "status": "running",
+                    "stage": "auditing",
+                    "progress": 20,
+                    "mode": "async",
+                    "queued": True,
+                    "queue_position": int(enqueue_result.get("ahead") or 0) + 1,
+                },
+            )
         result = run_contract_pipeline_bundle(
             cfg,
             services,
@@ -466,6 +523,30 @@ def rerun_contract_pipeline(
 @router.get("/contracts/audit/{audit_id}/progress")
 def get_contract_audit_progress(audit_id: str, current_user: dict = Depends(get_current_user)):
     _ = current_user
+    # 异步模式下进度落库，优先读库；同步模式仍用内存进度。
+    try:
+        from app.services.crud import get_contract_audit_progress as _db_progress
+
+        row = _db_progress(cfg, audit_id)
+        if row:
+            detail = row.get("detail_json")
+            try:
+                detail = json.loads(detail) if detail else None
+            except ValueError:
+                detail = None
+            return {
+                "audit_id": row.get("audit_id"),
+                "status": row.get("status"),
+                "progress": int(row.get("percent") or 0),
+                "stage": row.get("stage") or "",
+                "message": row.get("message") or "",
+                "updated_at": row.get("updated_at") or "",
+                "detail": detail,
+                "document_id": row.get("document_id") or "",
+                "durable": True,
+            }
+    except Exception:
+        logger.warning("audit_progress_db_read_failed audit_id=%s", audit_id)
     progress = _get_audit_progress(audit_id)
     if not progress:
         raise HTTPException(

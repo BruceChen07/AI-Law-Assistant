@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -165,6 +166,32 @@ def create_app():
             llm_runtime.get("missing_env_vars", []),
         )
     translator = TranslationService(cfg)
+
+    # 异步审计：清理上次进程遗留的 running 行，并恢复排队任务。
+    try:
+        from app.services.crud import mark_stale_contract_audit_progress
+
+        mark_stale_contract_audit_progress(cfg, stale_after_minutes=10)
+    except Exception:
+        logger.warning("audit_progress_reconcile_failed")
+    if "pytest" not in sys.modules and bool(cfg.get("audit_queue_resume_on_startup", True)):
+        try:
+            from app.services import audit_task_runner
+            from app.services.audit_orchestrator import AuditServices
+
+            resumed = audit_task_runner.resume_pending(
+                cfg,
+                services_factory=lambda: AuditServices(
+                    llm=llm,
+                    embedder=embedder,
+                    reranker=reranker,
+                    translator=translator,
+                ),
+            )
+            if resumed:
+                logger.warning("audit_queue_resumed_on_startup count=%s", resumed)
+        except Exception:
+            logger.exception("audit_queue_resume_failed")
 
     app = FastAPI(title="Law Assistant")
 

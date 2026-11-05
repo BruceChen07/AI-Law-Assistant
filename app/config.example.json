@@ -227,6 +227,8 @@
     "llm_trace_dir": "../data/memory/llm_interactions",
     "llm_trace_max_chars": 12000,
     "contract_summary_enabled": true,
+    "audit_async_enabled": false,
+    "audit_queue_resume_on_startup": true,
     "rag_trace_enabled": true,
     "rag_trace_dir": "../data/memory/debug/rag_retrieval",
     "rag_trace_max_chars": 3000,
