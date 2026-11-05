@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   downloadAuditArtifact,
   getAuditHistory,
+  getContractSummary,
   rebuildAuditArtifacts
 } from "./api"
 import { appI18n } from "./i18n/appI18n"
@@ -48,12 +49,14 @@ export default function History({ lang, onOpenAudit, onBack }) {
   const [error, setError] = useState("")
   const [busyId, setBusyId] = useState("")
   const [statusFilter, setStatusFilter] = useState("")
+  const [expandedId, setExpandedId] = useState("")
+  const [summaryBusyId, setSummaryBusyId] = useState("")
 
   const load = useCallback(async () => {
     setLoading(true)
     setError("")
     try {
-      const data = await getAuditHistory({ limit: 60, status: statusFilter })
+      const data = await getAuditHistory({ limit: 60, status: statusFilter, lang })
       setItems(Array.isArray(data?.items) ? data.items : [])
       setArtifactRoot(String(data?.artifact_root || ""))
     } catch (err) {
@@ -62,7 +65,7 @@ export default function History({ lang, onOpenAudit, onBack }) {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, t.historyLoadFailed])
+  }, [statusFilter, lang, t.historyLoadFailed])
 
   useEffect(() => {
     load()
@@ -94,6 +97,37 @@ export default function History({ lang, onOpenAudit, onBack }) {
       setError(String(err?.message || err || t.historyDownloadFailed))
     } finally {
       setBusyId("")
+    }
+  }
+
+  const onGenerateSummary = async (item) => {
+    const documentId = String(item?.document_id || "")
+    if (!documentId) return
+    setSummaryBusyId(String(item?.audit_id || documentId))
+    setError("")
+    try {
+      const data = await getContractSummary(documentId, lang)
+      const payload = data && data.summary && typeof data.summary === "object" ? data.summary : {}
+      const meta = data && data.meta && typeof data.meta === "object" ? data.meta : {}
+      setItems(prev => prev.map(row => (
+        String(row?.document_id || "") === documentId
+          ? {
+              ...row,
+              summary: {
+                title: String(payload.title || ""),
+                about: String(payload.about || ""),
+                core: String(payload.core || ""),
+                tax: String(payload.tax || "")
+              },
+              summary_status: String(meta.contract_summary_status || ""),
+              summary_updated_at: new Date().toISOString()
+            }
+          : row
+      )))
+    } catch (err) {
+      setError(String(err?.message || err || t.historySummaryFailed))
+    } finally {
+      setSummaryBusyId("")
     }
   }
 
@@ -175,6 +209,12 @@ export default function History({ lang, onOpenAudit, onBack }) {
                     >
                       {item?.has_result ? t.historyOpenResult : t.historyNoResult}
                     </button>
+                    <button
+                      className="ghost"
+                      onClick={() => setExpandedId(prev => (prev === auditId ? "" : auditId))}
+                    >
+                      {expandedId === auditId ? t.historyCollapse : t.historyExpand}
+                    </button>
                     <button className="ghost" disabled={busy} onClick={() => onDownload(item, "report.md")}>
                       {t.historyDownloadMd}
                     </button>
@@ -190,6 +230,54 @@ export default function History({ lang, onOpenAudit, onBack }) {
                       {(item.artifact_files || [])
                         .map(file => `${file.name} (${formatSize(file.size)})`)
                         .join(" · ")}
+                    </div>
+                  )}
+                  {expandedId === auditId && (
+                    <div className="contract-summary-card">
+                      <div className="contract-summary-label">{t.historySummary}</div>
+                      {item?.summary && (item.summary.title || item.summary.about || item.summary.core || item.summary.tax) ? (
+                        <>
+                          {item.summary.title && (
+                            <div className="contract-summary-headline">{item.summary.title}</div>
+                          )}
+                          {item.summary.about && (
+                            <div className="contract-summary-section">
+                              <div className="contract-summary-label">{t.summaryAbout}</div>
+                              <div className="contract-summary-text">{item.summary.about}</div>
+                            </div>
+                          )}
+                          {item.summary.core && (
+                            <div className="contract-summary-section">
+                              <div className="contract-summary-label">{t.summaryCore}</div>
+                              <div className="contract-summary-text">{item.summary.core}</div>
+                            </div>
+                          )}
+                          {item.summary.tax && (
+                            <div className="contract-summary-section">
+                              <div className="contract-summary-label">{t.summaryTax}</div>
+                              <div className="contract-summary-text">{item.summary.tax}</div>
+                            </div>
+                          )}
+                          <div className="audit-progress-subnote">
+                            {t.historySummarySource}: {item.summary_status || "-"} · {formatTime(item.summary_updated_at)}
+                          </div>
+                        </>
+                      ) : summaryBusyId === auditId ? (
+                        <div className="audit-progress-note">{t.historySummaryLoading}</div>
+                      ) : (
+                        <>
+                          <div className="audit-progress-note">{t.historySummaryMissing}</div>
+                          <div className="history-item-actions">
+                            <button
+                              className="ghost"
+                              disabled={!item?.document_id || summaryBusyId === auditId}
+                              onClick={() => onGenerateSummary(item)}
+                            >
+                              {t.historyGenerateSummary}
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>

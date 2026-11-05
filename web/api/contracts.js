@@ -51,11 +51,12 @@ export async function pinQueuedAudit(auditId) {
   })
 }
 
-export async function getAuditHistory({ limit = 30, offset = 0, status = "" } = {}) {
+export async function getAuditHistory({ limit = 30, offset = 0, status = "", lang = "zh" } = {}) {
   const query = new URLSearchParams({
     limit: String(limit),
     offset: String(offset),
-    status: String(status || "")
+    status: String(status || ""),
+    lang: String(lang || "zh")
   }).toString()
   return requestJson(`${API_BASE}/contracts/audits/history?${query}`, {
     headers: { ...getAuthHeaders() }
